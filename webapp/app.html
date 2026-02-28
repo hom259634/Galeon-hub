@@ -1203,83 +1203,59 @@
         }
 
         window.showBetDetail = async (betId) => {
-    const bet = userBets.find(b => b.id === betId);
-    if (!bet) return;
-    
-    const sessionOpen = checkLotterySchedule(bet.lottery) === bet.time_slot;
-    
-    // Usamos textarea para poder editar el texto de la jugada
-    let content = `
-        <h3 class="text-xl font-bold mb-4">Detalles de la jugada</h3>
-        <p><strong>Lotería:</strong> ${bet.lottery} (${bet.time_slot})</p>
-        <p><strong>Tipo:</strong> ${bet.bet_type}</p>
-        <p><strong>Costo actual:</strong> ${bet.cost_cup} CUP / ${bet.cost_usd} USD</p>
-        
-        <div class="mt-4">
-            <label class="text-sm text-gray-400 font-bold">Texto de la jugada:</label>
-            <textarea id="editBetRawText-${bet.id}" class="w-full bg-gray-800 text-white p-3 rounded-xl mt-2 border border-gray-600 focus:outline-none transition-colors" rows="4" disabled>${escapeHTML(bet.raw_text)}</textarea>
-        </div>
-    `;
+            const bet = userBets.find(b => b.id === betId);
+            if (!bet) return;
 
-    // Si la lotería está abierta, mostrar opciones de edición y cancelación
-    if (sessionOpen) {
-        content += `
-            <div class="flex gap-2 mt-5" id="betDetailButtons-${bet.id}">
-                <button onclick="enableEditBet(${bet.id})" class="flex-1 bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-bold transition-all"><i class="fas fa-edit mr-2"></i> Editar</button>
-                <button onclick="cancelBet(${bet.id})" class="flex-1 bg-red-600 hover:bg-red-700 py-3 rounded-xl font-bold transition-all"><i class="fas fa-times-circle mr-2"></i> Cancelar</button>
-            </div>
-            
-            <div class="flex gap-2 mt-5 hidden" id="saveBetButtons-${bet.id}">
-                <button onclick="saveEditBet(${bet.id})" class="flex-1 bg-green-600 hover:bg-green-700 py-3 rounded-xl font-bold transition-all"><i class="fas fa-save mr-2"></i> Guardar</button>
-                <button onclick="document.getElementById('betDetailModal').classList.add('hidden')" class="flex-1 bg-gray-600 hover:bg-gray-700 py-3 rounded-xl font-bold transition-all"> Atrás</button>
-            </div>
-        `;
-    }
+            let sessionOpen = false;
+            if (bet.session_id) {
+                try {
+                    const res = await fetch(`/api/lottery-sessions/${bet.session_id}`);
+                    if (res.ok) {
+                        const session = await res.json();
+                        sessionOpen = session && session.status === 'open';
+                    }
+                } catch (e) {}
+            }
 
-    const modal = document.getElementById('betDetailModal');
-    modal.querySelector('.modal-content').innerHTML = content + `<button onclick="document.getElementById('betDetailModal').classList.add('hidden')" class="w-full bg-transparent border border-gray-500 hover:bg-gray-700 py-3 rounded-xl font-bold mt-3 transition-all">Cerrar</button>`;
-    modal.classList.remove('hidden');
-};
+            let itemsHtml = '';
+            if (bet.items && bet.items.length > 0) {
+                bet.items.forEach(item => {
+                    itemsHtml += `<div class="bet-detail-item">
+                        <span class="font-mono">${escapeHTML(item.numero)}</span>
+                        <span class="float-right">${item.cup > 0 ? item.cup + ' CUP' : ''} ${item.usd > 0 ? item.usd + ' USD' : ''}</span>
+                    </div>`;
+                });
+            } else {
+                itemsHtml = '<p class="text-gray-400">No hay detalles</p>';
+            }
 
-window.enableEditBet = (betId) => {
-    const textarea = document.getElementById(`editBetRawText-${betId}`);
-    textarea.disabled = false;
-    textarea.classList.add('border-blue-500'); // Iluminamos el borde para que sepa que puede escribir
-    textarea.focus();
-    
-    // Alternamos los botones visibles
-    document.getElementById(`betDetailButtons-${betId}`).classList.add('hidden');
-    document.getElementById(`saveBetButtons-${betId}`).classList.remove('hidden');
-};
+            const actionsHtml = sessionOpen ? `
+                <div class="flex gap-2 mt-4">
+                    <button onclick="editBet(${bet.id})" class="flex-1 bg-blue-600 py-2 rounded-lg edit-cancel-btn">✏️ Editar</button>
+                    <button onclick="cancelBet(${bet.id})" class="flex-1 bg-red-600 py-2 rounded-lg edit-cancel-btn">🗑 Cancelar</button>
+                </div>
+            ` : '';
 
-window.saveEditBet = async (betId) => {
-    const textarea = document.getElementById(`editBetRawText-${betId}`);
-    const newRawText = textarea.value;
-    
-    iziToast.info({ message: 'Procesando cambios...' });
-    
-    try {
-        const res = await fetch(`/api/bets/${betId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: currentUser.telegram_id, newRawText })
-        });
-        
-        if (res.ok) {
-            const data = await res.json();
-            currentUser = data.updatedUser;
-            updateBalanceUI();
-            loadBets(); // Refrescamos la lista de jugadas
-            document.getElementById('betDetailModal').classList.add('hidden'); // Cerramos modal
-            iziToast.success({ message: 'Jugada actualizada exitosamente' });
-        } else {
-            const err = await res.json();
-            iziToast.error({ message: err.error || 'Error al actualizar la jugada' });
-        }
-    } catch (e) {
-        iziToast.error({ message: 'Error de conexión con el servidor' });
-    }
-};
+            betDetailModalBody.innerHTML = `
+                <h4 class="text-xl font-bold mb-2">Detalles de la jugada</h4>
+                <p class="text-sm text-gray-300 mb-1">🎰 ${bet.lottery} - ${bet.bet_type}</p>
+                <p class="text-xs text-gray-400 mb-3">${new Date(bet.placed_at).toLocaleString()}</p>
+                
+                <div class="mb-3">
+                    <p class="font-semibold mb-1">📝 Números jugados:</p>
+                    ${itemsHtml}
+                </div>
+                
+                <div class="bg-gray-700/50 p-2 rounded-lg text-right">
+                    <p>Total: <span class="text-cyan-300">${bet.cost_cup} CUP</span> / <span class="text-yellow-300">${bet.cost_usd} USD</span></p>
+                </div>
+                
+                ${actionsHtml}
+                
+                <button onclick="document.getElementById('betDetailModal').classList.add('hidden')" class="mt-4 w-full bg-gray-600 py-2 rounded-lg">Cerrar</button>
+            `;
+            betDetailModal.classList.remove('hidden');
+        };
 
         window.editBet = (betId) => {
             const bet = userBets.find(b => b.id === betId);
