@@ -268,24 +268,23 @@ function parseAmountWithCurrency(text) {
 
 // ========== FUNCIONES DE PARSEO DE APUESTAS ==========
 function parseBetLine(line, betType) {
-    line = line.toLowerCase();
-    
-    // Regla DEFINITIVA: Atrapa cualquier letra, número o espacio antes del separador (con, *, x)
-    // Ya no tiene el símbolo '$' al final, por lo que ignora basura al final de la línea.
-    const match = line.match(/([a-z\d\s,]+)\s*(?:con|\*|x)\s*([0-9.]+)\s*(cup|usd)?/i);
+    line = line.trim().toLowerCase();
+    if (!line) return [];
+
+    const match = line.match(/^([\d\s,]+)\s*(?:con|\*)\s*([0-9.]+)\s*(cup|usd)?$/i);
     if (!match) return [];
 
     let numerosStr = match[1].trim();
-    const montoBase = parseFloat(match[2]);
+    const montoStr = match[2];
     const moneda = (match[3] || 'usd').toUpperCase();
 
+    const numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
+    const montoBase = parseFloat(montoStr);
     if (isNaN(montoBase) || montoBase <= 0) return [];
 
-    // Separamos todo lo que haya antes del "con"
-    const posiblesNumeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
     const resultados = [];
 
-    for (let numero of posiblesNumeros) {
+    for (let numero of numeros) {
         let montoReal = montoBase;
         let numeroGuardado = numero;
 
@@ -299,7 +298,7 @@ function parseBetLine(line, betType) {
                 montoReal = montoBase * 10;
                 numeroGuardado = numero.toUpperCase();
             } else {
-                continue; // Si es una palabra como "apostar", la ignora y busca el siguiente número
+                continue;
             }
         } else if (betType === 'corridos') {
             if (!/^\d{2}$/.test(numero)) continue;
@@ -943,92 +942,6 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
 
     const updatedUser = await getOrCreateUser(parseInt(userId));
     res.json({ success: true, updatedUser });
-});
-
-
-// ========== EDITAR APUESTA ==========
-// ========== EDITAR APUESTA ==========
-app.put('/api/bets/:id', async (req, res) => {
-    const betId = req.params.id;
-    const { userId, newRawText } = req.body;
-
-    if (!userId || !newRawText) {
-        return res.status(400).json({ error: 'Faltan datos.' });
-    }
-
-    try {
-        // 1. Obtener la jugada actual (quitamos los filtros estrictos para ver qué falla)
-        const { data: bet, error: betError } = await supabase
-            .from('bets')
-            .select('*')
-            .eq('id', betId)
-            .single();
-
-        // Reporte de errores exactos hacia el frontend:
-        if (betError) return res.status(400).json({ error: 'Error de BD: ' + betError.message });
-        if (!bet) return res.status(404).json({ error: 'El ID de la jugada no existe en la base de datos.' });
-        
-       
-
-        if (bet.user_id != userId && bet.telegram_id != userId) {
-            return res.status(400).json({ error: 'El ID de usuario no coincide con el dueño de la jugada.' });
-        }
-
-        // 2. Verificar que la sesión de lotería siga abierta
-        const { data: session } = await supabase
-            .from('lottery_sessions')
-            .select('*')
-            .eq('lottery', bet.lottery)
-            .eq('time_slot', bet.time_slot)
-            .eq('status', 'open')
-            .single();
-
-        if (!session) return res.status(400).json({ error: 'La sesión para esta lotería ya está cerrada.' });
-
-        // 3. Parsear el nuevo texto con tu función existente
-        const parsedData = parseBetMessage(newRawText, bet.bet_type);
-        if (!parsedData || parsedData.items.length === 0) {
-            return res.status(400).json({ error: 'Formato de jugada inválido. Revisa tu texto.' });
-        }
-        
-        const newTotalCUP = parsedData.totalCUP || 0;
-        const newTotalUSD = parsedData.totalUSD || 0;
-
-        // 4. Calcular saldo simulando reembolso de la jugada original
-        const { data: user } = await supabase.from('users').select('*').eq('telegram_id', userId).single();
-        const balanceCUPAfterRefund = parseFloat(user.cup) + parseFloat(bet.cost_cup);
-        const balanceUSDAfterRefund = parseFloat(user.usd) + parseFloat(bet.cost_usd);
-
-        if (newTotalCUP > balanceCUPAfterRefund || newTotalUSD > balanceUSDAfterRefund) {
-            return res.status(400).json({ error: 'Saldo insuficiente para los cambios de esta jugada.' });
-        }
-
-        // 5. Cobrar el nuevo monto y actualizar saldo del usuario
-        const finalCup = balanceCUPAfterRefund - newTotalCUP;
-        const finalUsd = balanceUSDAfterRefund - newTotalUSD;
-        await supabase.from('users').update({ cup: finalCup, usd: finalUsd }).eq('telegram_id', userId);
-
-        // 6. Actualizar la jugada en la tabla bets
-        const { data: updatedBet } = await supabase
-            .from('bets')
-            .update({
-                raw_text: newRawText,
-                parsed_data: parsedData,
-                cost_cup: newTotalCUP,
-                cost_usd: newTotalUSD
-            })
-            .eq('id', betId)
-            .select()
-            .single();
-
-        // 7. Retornar el usuario actualizado para que el frontend refresque el saldo
-        const { data: finalUser } = await supabase.from('users').select('*').eq('telegram_id', userId).single();
-
-        res.json({ success: true, updatedBet, updatedUser: finalUser });
-    } catch (error) {
-        console.error('Error editando jugada:', error);
-        res.status(500).json({ error: 'Error interno: ' + error.message });
-    }
 });
 
 // --- Historial de apuestas ---
