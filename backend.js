@@ -271,7 +271,8 @@ function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
     if (!line) return [];
 
-    const match = line.match(/^([\d\s,]+)\s*(?:con|\*)\s*([0-9.]+)\s*(cup|usd)?$/i);
+    // Esta es la nueva regla mágica que lo arregla todo (permite x, asterisco, 'con' y espacios extra)
+    const match = line.match(/([\d\s,]+)\s*(?:con|\*|x)\s*([0-9.]+)\s*(cup|usd)?\s*$/i);
     if (!match) return [];
 
     let numerosStr = match[1].trim();
