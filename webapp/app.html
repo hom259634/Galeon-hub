@@ -764,25 +764,25 @@
             document.getElementById('betInstructions').innerHTML = instructions;
         }
 
-        function parseBetLine(line, betType) {
-    line = line.trim().toLowerCase();
-    if (!line) return [];
-
-    // Esta es la nueva regla mágica que lo arregla todo (permite x, asterisco, 'con' y espacios extra)
-    const match = line.match(/([\d\s,]+)\s*(?:con|\*|x)\s*([0-9.]+)\s*(cup|usd)?\s*$/i);
+      function parseBetLine(line, betType) {
+    line = line.toLowerCase();
+    
+    // Regla DEFINITIVA: Atrapa cualquier letra, número o espacio antes del separador (con, *, x)
+    // Ya no tiene el símbolo '$' al final, por lo que ignora basura al final de la línea.
+    const match = line.match(/([a-z\d\s,]+)\s*(?:con|\*|x)\s*([0-9.]+)\s*(cup|usd)?/i);
     if (!match) return [];
 
     let numerosStr = match[1].trim();
-    const montoStr = match[2];
+    const montoBase = parseFloat(match[2]);
     const moneda = (match[3] || 'usd').toUpperCase();
 
-    const numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
-    const montoBase = parseFloat(montoStr);
     if (isNaN(montoBase) || montoBase <= 0) return [];
 
+    // Separamos todo lo que haya antes del "con"
+    const posiblesNumeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
     const resultados = [];
 
-    for (let numero of numeros) {
+    for (let numero of posiblesNumeros) {
         let montoReal = montoBase;
         let numeroGuardado = numero;
 
@@ -796,7 +796,7 @@
                 montoReal = montoBase * 10;
                 numeroGuardado = numero.toUpperCase();
             } else {
-                continue;
+                continue; // Si es una palabra como "apostar", la ignora y busca el siguiente número
             }
         } else if (betType === 'corridos') {
             if (!/^\d{2}$/.test(numero)) continue;
