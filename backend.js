@@ -946,6 +946,7 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
 
 
 // ========== EDITAR APUESTA ==========
+// ========== EDITAR APUESTA ==========
 app.put('/api/bets/:id', async (req, res) => {
     const betId = req.params.id;
     const { userId, newRawText } = req.body;
@@ -955,16 +956,24 @@ app.put('/api/bets/:id', async (req, res) => {
     }
 
     try {
-        // 1. Obtener la jugada actual de la base de datos
+        // 1. Obtener la jugada actual (quitamos los filtros estrictos para ver qué falla)
         const { data: bet, error: betError } = await supabase
             .from('bets')
             .select('*')
             .eq('id', betId)
-            .eq('user_id', userId)
-            .eq('status', 'active')
             .single();
 
-        if (betError || !bet) return res.status(404).json({ error: 'Jugada no encontrada o cancelada.' });
+        // Reporte de errores exactos hacia el frontend:
+        if (betError) return res.status(400).json({ error: 'Error de BD: ' + betError.message });
+        if (!bet) return res.status(404).json({ error: 'El ID de la jugada no existe en la base de datos.' });
+        
+        if (bet.status !== 'active') {
+            return res.status(400).json({ error: 'Estado incorrecto: la jugada dice "' + bet.status + '" en lugar de active.' });
+        }
+
+        if (bet.user_id != userId && bet.telegram_id != userId) {
+            return res.status(400).json({ error: 'El ID de usuario no coincide con el dueño de la jugada.' });
+        }
 
         // 2. Verificar que la sesión de lotería siga abierta
         const { data: session } = await supabase
@@ -1019,7 +1028,7 @@ app.put('/api/bets/:id', async (req, res) => {
         res.json({ success: true, updatedBet, updatedUser: finalUser });
     } catch (error) {
         console.error('Error editando jugada:', error);
-        res.status(500).json({ error: 'Error interno al editar la jugada.' });
+        res.status(500).json({ error: 'Error interno: ' + error.message });
     }
 });
 
