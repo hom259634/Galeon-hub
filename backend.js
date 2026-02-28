@@ -967,9 +967,7 @@ app.put('/api/bets/:id', async (req, res) => {
         if (betError) return res.status(400).json({ error: 'Error de BD: ' + betError.message });
         if (!bet) return res.status(404).json({ error: 'El ID de la jugada no existe en la base de datos.' });
         
-        if (bet.status !== 'active') {
-            return res.status(400).json({ error: 'Estado incorrecto: la jugada dice "' + bet.status + '" en lugar de active.' });
-        }
+       
 
         if (bet.user_id != userId && bet.telegram_id != userId) {
             return res.status(400).json({ error: 'El ID de usuario no coincide con el dueño de la jugada.' });
