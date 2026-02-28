@@ -1206,9 +1206,9 @@
     const bet = userBets.find(b => b.id === betId);
     if (!bet) return;
     
-    const sessionOpen = checkLotterySchedule(bet.lottery) === bet.time_slot;
+    // Eliminamos el sessionOpen que causaba el error.
+    // Ahora los botones siempre se renderizan, pero el backend los protege.
     
-    // Usamos textarea para poder editar el texto de la jugada
     let content = `
         <h3 class="text-xl font-bold mb-4">Detalles de la jugada</h3>
         <p><strong>Lotería:</strong> ${bet.lottery} (${bet.time_slot})</p>
@@ -1219,22 +1219,17 @@
             <label class="text-sm text-gray-400 font-bold">Texto de la jugada:</label>
             <textarea id="editBetRawText-${bet.id}" class="w-full bg-gray-800 text-white p-3 rounded-xl mt-2 border border-gray-600 focus:outline-none transition-colors" rows="4" disabled>${escapeHTML(bet.raw_text)}</textarea>
         </div>
+        
+        <div class="flex gap-2 mt-5" id="betDetailButtons-${bet.id}">
+            <button onclick="enableEditBet(${bet.id})" class="flex-1 bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-bold transition-all"><i class="fas fa-edit mr-2"></i> Editar</button>
+            <button onclick="cancelBet(${bet.id})" class="flex-1 bg-red-600 hover:bg-red-700 py-3 rounded-xl font-bold transition-all"><i class="fas fa-times-circle mr-2"></i> Cancelar</button>
+        </div>
+        
+        <div class="flex gap-2 mt-5 hidden" id="saveBetButtons-${bet.id}">
+            <button onclick="saveEditBet(${bet.id})" class="flex-1 bg-green-600 hover:bg-green-700 py-3 rounded-xl font-bold transition-all"><i class="fas fa-save mr-2"></i> Guardar</button>
+            <button onclick="document.getElementById('betDetailModal').classList.add('hidden')" class="flex-1 bg-gray-600 hover:bg-gray-700 py-3 rounded-xl font-bold transition-all"> Atrás</button>
+        </div>
     `;
-
-    // Si la lotería está abierta, mostrar opciones de edición y cancelación
-    if (sessionOpen) {
-        content += `
-            <div class="flex gap-2 mt-5" id="betDetailButtons-${bet.id}">
-                <button onclick="enableEditBet(${bet.id})" class="flex-1 bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-bold transition-all"><i class="fas fa-edit mr-2"></i> Editar</button>
-                <button onclick="cancelBet(${bet.id})" class="flex-1 bg-red-600 hover:bg-red-700 py-3 rounded-xl font-bold transition-all"><i class="fas fa-times-circle mr-2"></i> Cancelar</button>
-            </div>
-            
-            <div class="flex gap-2 mt-5 hidden" id="saveBetButtons-${bet.id}">
-                <button onclick="saveEditBet(${bet.id})" class="flex-1 bg-green-600 hover:bg-green-700 py-3 rounded-xl font-bold transition-all"><i class="fas fa-save mr-2"></i> Guardar</button>
-                <button onclick="document.getElementById('betDetailModal').classList.add('hidden')" class="flex-1 bg-gray-600 hover:bg-gray-700 py-3 rounded-xl font-bold transition-all"> Atrás</button>
-            </div>
-        `;
-    }
 
     const modal = document.getElementById('betDetailModal');
     modal.querySelector('.modal-content').innerHTML = content + `<button onclick="document.getElementById('betDetailModal').classList.add('hidden')" class="w-full bg-transparent border border-gray-500 hover:bg-gray-700 py-3 rounded-xl font-bold mt-3 transition-all">Cerrar</button>`;
