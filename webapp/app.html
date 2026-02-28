@@ -765,57 +765,58 @@
         }
 
         function parseBetLine(line, betType) {
-            line = line.trim().toLowerCase();
-            if (!line) return [];
+    line = line.trim().toLowerCase();
+    if (!line) return [];
 
-            const match = line.match(/^([\d\s,]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup)?$/i);
-            if (!match) return [];
+    // Esta es la nueva regla mágica que lo arregla todo (permite x, asterisco, 'con' y espacios extra)
+    const match = line.match(/([\d\s,]+)\s*(?:con|\*|x)\s*([0-9.]+)\s*(cup|usd)?\s*$/i);
+    if (!match) return [];
 
-            let numerosStr = match[1].trim();
-            const montoStr = match[2];
-            const moneda = (match[3] || 'usd').toLowerCase();
+    let numerosStr = match[1].trim();
+    const montoStr = match[2];
+    const moneda = (match[3] || 'usd').toUpperCase();
 
-            const numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
-            const montoBase = parseFloat(montoStr);
-            if (isNaN(montoBase) || montoBase <= 0) return [];
+    const numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
+    const montoBase = parseFloat(montoStr);
+    if (isNaN(montoBase) || montoBase <= 0) return [];
 
-            const resultados = [];
+    const resultados = [];
 
-            for (let numero of numeros) {
-                let montoReal = montoBase;
-                let numeroGuardado = numero;
+    for (let numero of numeros) {
+        let montoReal = montoBase;
+        let numeroGuardado = numero;
 
-                if (betType === 'fijo') {
-                    if (/^\d{2}$/.test(numero)) {
-                        // normal
-                    } else if (/^[Dd](\d)$/.test(numero)) {
-                        montoReal = montoBase * 10;
-                        numeroGuardado = numero.toUpperCase();
-                    } else if (/^[Tt](\d)$/.test(numero)) {
-                        montoReal = montoBase * 10;
-                        numeroGuardado = numero.toUpperCase();
-                    } else {
-                        continue;
-                    }
-                } else if (betType === 'corridos') {
-                    if (!/^\d{2}$/.test(numero)) continue;
-                } else if (betType === 'centena') {
-                    if (!/^\d{3}$/.test(numero)) continue;
-                } else if (betType === 'parle') {
-                    if (!/^\d{2}x\d{2}$/.test(numero)) continue;
-                } else {
-                    continue;
-                }
-
-                resultados.push({
-                    numero: numeroGuardado,
-                    usd: moneda === 'usd' ? montoReal : 0,
-                    cup: moneda === 'cup' ? montoReal : 0
-                });
+        if (betType === 'fijo') {
+            if (/^\d{2}$/.test(numero)) {
+                // normal
+            } else if (/^[Dd](\d)$/.test(numero)) {
+                montoReal = montoBase * 10;
+                numeroGuardado = numero.toUpperCase();
+            } else if (/^[Tt](\d)$/.test(numero)) {
+                montoReal = montoBase * 10;
+                numeroGuardado = numero.toUpperCase();
+            } else {
+                continue;
             }
-
-            return resultados;
+        } else if (betType === 'corridos') {
+            if (!/^\d{2}$/.test(numero)) continue;
+        } else if (betType === 'centena') {
+            if (!/^\d{3}$/.test(numero)) continue;
+        } else if (betType === 'parle') {
+            if (!/^\d{2}x\d{2}$/.test(numero)) continue;
+        } else {
+            continue;
         }
+
+        resultados.push({
+            numero: numeroGuardado,
+            currency: moneda,
+            amount: montoReal
+        });
+    }
+
+    return resultados;
+}
 
         function parseBetMessage(text, betType) {
             const lines = text.split('\n').map(l => l.trim()).filter(l => l);
