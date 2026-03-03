@@ -689,32 +689,32 @@
         document.querySelectorAll('.lottery-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
                 selectedLottery = btn.dataset.lottery;
-                activeSlot = checkLotterySchedule(selectedLottery);
+
+                // Mostrar instrucciones/schedule basado en cliente para usabilidad
+                checkLotterySchedule(selectedLottery);
 
                 betTypeContainer.classList.add('hidden');
                 betFormContainer.classList.add('hidden');
                 sessionStatus.classList.add('hidden');
 
-                if (!activeSlot) {
-                    sessionStatus.innerHTML = `<span class="text-red-400">❌ No hay turno disponible ahora. Revisa los horarios 👆</span>`;
-                    sessionStatus.classList.remove('hidden');
-                    return;
-                }
-
                 const today = new Date().toISOString().split('T')[0];
                 try {
-                    const res = await fetch(`/api/lottery-sessions/active?lottery=${encodeURIComponent(selectedLottery)}&date=${today}&time_slot=${encodeURIComponent(activeSlot)}`);
+                    // Consultar al servidor por la sesión ABIERTA para esta lotería/fecha.
+                    // El servidor determina apertura según su lógica (igual que el bot).
+                    const res = await fetch(`/api/lottery-sessions/active?lottery=${encodeURIComponent(selectedLottery)}&date=${today}`);
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const session = await res.json();
 
                     if (session && session.id && session.status === 'open') {
                         activeSession = session;
-                        sessionStatus.innerHTML = `<span class="text-green-400">✅ Turno <b>${activeSlot}</b> abierto · Cierre: ${new Date(session.end_time).toLocaleTimeString()}</span>`;
+                        const slotName = session.time_slot || 'Turno';
+                        sessionStatus.innerHTML = `<span class="text-green-400">✅ Turno <b>${slotName}</b> abierto · Cierre: ${new Date(session.end_time).toLocaleTimeString()}</span>`;
                         sessionStatus.classList.remove('hidden');
                         betTypeContainer.classList.remove('hidden');
                     } else {
                         activeSession = null;
-                        sessionStatus.innerHTML = `<span class="text-yellow-400">⚠️ El turno <b>${activeSlot}</b> no está abierto. Contacta al administrador.</span>`;
+                        // Mostrar mensaje consistente con horario cliente
+                        sessionStatus.innerHTML = `<span class="text-yellow-400">⚠️ No hay sesión abierta ahora. Contacta al administrador.</span>`;
                         sessionStatus.classList.remove('hidden');
                         betTypeContainer.classList.add('hidden');
                     }
@@ -889,7 +889,8 @@
                         lottery: selectedLottery,
                         betType: selectedBetType,
                         rawText,
-                        sessionId: activeSession.id
+                        sessionId: activeSession.id,
+                        betId: window.editingBetId || null
                     })
                 });
                 const data = await res.json();
@@ -1274,7 +1275,10 @@
                         setTimeout(() => {
                             betInput.value = bet.raw_text;
                             betInput.dispatchEvent(new Event('input'));
-                            iziToast.info({ message: 'Jugada cargada para editar. Puedes modificarla y registrar de nuevo.' });
+                            // marcar que estamos editando para que el submit incluya betId
+                            window.editingBetId = bet.id;
+                            submitBetBtn.innerHTML = '<i class="fas fa-save mr-2"></i>Guardar cambios';
+                            iziToast.info({ message: 'Jugada cargada para editar. Modifica y guarda los cambios.' });
                         }, 500);
                     }
                 }, 1000);
