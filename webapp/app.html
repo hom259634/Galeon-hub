@@ -1221,9 +1221,18 @@
             let itemsHtml = '';
             if (bet.items && bet.items.length > 0) {
                 bet.items.forEach(item => {
+                    let displayAmount = '';
+                    if (item.cup !== undefined || item.usd !== undefined) {
+                        const cup = item.cup ? (parseFloat(item.cup) || 0) : 0;
+                        const usd = item.usd ? (parseFloat(item.usd) || 0) : 0;
+                        displayAmount = `${cup > 0 ? cup + ' CUP' : ''}${cup > 0 && usd > 0 ? ' / ' : ''}${usd > 0 ? usd + ' USD' : ''}`.trim();
+                    } else if (item.amount !== undefined) {
+                        displayAmount = `${item.amount} ${item.currency || ''}`.trim();
+                    }
+
                     itemsHtml += `<div class="bet-detail-item">
                         <span class="font-mono">${escapeHTML(item.numero)}</span>
-                        <span class="float-right">${item.cup > 0 ? item.cup + ' CUP' : ''} ${item.usd > 0 ? item.usd + ' USD' : ''}</span>
+                        <span class="float-right">${escapeHTML(displayAmount)}</span>
                     </div>`;
                 });
             } else {
