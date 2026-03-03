@@ -501,18 +501,33 @@ app.get('/api/winning-numbers', async (req, res) => {
 // --- Sesión activa ---
 app.get('/api/lottery-sessions/active', async (req, res) => {
     const { lottery, date, time_slot } = req.query;
-    if (!lottery || !date || !time_slot) {
+    if (!lottery || !date) {
         return res.status(400).json({ error: 'Faltan parámetros' });
     }
-    const { data } = await supabase
+
+    // Si se proporciona time_slot, buscar sesión abierta específica
+    if (time_slot) {
+        const { data } = await supabase
+            .from('lottery_sessions')
+            .select('*')
+            .eq('lottery', lottery)
+            .eq('date', date)
+            .eq('time_slot', time_slot)
+            .eq('status', 'open')
+            .maybeSingle();
+        return res.json(data);
+    }
+
+    // Si no se proporciona time_slot, devolver cualquier sesión abierta para la lotería en la fecha
+    const { data: anyOpen } = await supabase
         .from('lottery_sessions')
         .select('*')
         .eq('lottery', lottery)
         .eq('date', date)
-        .eq('time_slot', time_slot)
         .eq('status', 'open')
+        .limit(1)
         .maybeSingle();
-    res.json(data);
+    return res.json(anyOpen);
 });
 
 // --- Obtener sesión por ID ---
@@ -778,7 +793,7 @@ app.post('/api/transfer', async (req, res) => {
 
 // --- Registro de apuestas ---
 app.post('/api/bets', async (req, res) => {
-    const { userId, lottery, betType, rawText, sessionId } = req.body;
+    const { userId, lottery, betType, rawText, sessionId, betId } = req.body;
     if (!userId || !lottery || !betType || !rawText) {
         return res.status(400).json({ error: 'Faltan datos' });
     }
@@ -819,69 +834,99 @@ app.post('/api/bets', async (req, res) => {
     const maxUsd = priceData?.max_usd;
 
     for (const item of parsed.items) {
-        if (item.currency === 'CUP') {
-            if (item.amount < minCup) {
-                return res.status(400).json({ error: `Mínimo en CUP: ${minCup}` });
-            }
-            if (maxCup !== null && item.amount > maxCup) {
-                return res.status(400).json({ error: `Máximo en CUP: ${maxCup}` });
-            }
-        } else if (item.currency === 'USD') {
-            if (item.amount < minUsd) {
-                return res.status(400).json({ error: `Mínimo en USD: ${minUsd}` });
-            }
-            if (maxUsd !== null && item.amount > maxUsd) {
-                return res.status(400).json({ error: `Máximo en USD: ${maxUsd}` });
-            }
+        // soportar dos formatos: {currency, amount} (backend) y {usd,cup} (frontend)
+        const itCup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+        const itUsd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+
+        if (itCup > 0) {
+            if (itCup < minCup) return res.status(400).json({ error: `Mínimo en CUP: ${minCup}` });
+            if (maxCup !== null && itCup > maxCup) return res.status(400).json({ error: `Máximo en CUP: ${maxCup}` });
+        }
+        if (itUsd > 0) {
+            if (itUsd < minUsd) return res.status(400).json({ error: `Mínimo en USD: ${minUsd}` });
+            if (maxUsd !== null && itUsd > maxUsd) return res.status(400).json({ error: `Máximo en USD: ${maxUsd}` });
         }
     }
 
-    let newUsd = parseFloat(user.usd) || 0;
-    let newBonus = parseFloat(user.bonus_cup) || 0;
-    let newCup = parseFloat(user.cup) || 0;
+    // Helper para parsear floats seguros
+    const safe = v => isNaN(parseFloat(v)) ? 0 : parseFloat(v);
+
+    // Si se proporciona betId -> actualizar apuesta existente (reembolso + aplicar nueva)
+    if (betId) {
+        const { data: existingBet } = await supabase.from('bets').select('*').eq('id', betId).maybeSingle();
+        if (!existingBet) return res.status(404).json({ error: 'Jugada no encontrada' });
+        if (parseInt(existingBet.user_id) !== parseInt(userId)) return res.status(403).json({ error: 'No autorizado para editar esta jugada' });
+
+        if (existingBet.session_id) {
+            const { data: session } = await supabase.from('lottery_sessions').select('status').eq('id', existingBet.session_id).maybeSingle();
+            if (!session || session.status !== 'open') return res.status(400).json({ error: 'No se puede editar: sesión cerrada' });
+        }
+
+        // Reembolsar montos anteriores
+        const oldUsd = safe(existingBet.cost_usd);
+        const oldCup = safe(existingBet.cost_cup);
+        const { data: uBefore } = await supabase.from('users').select('usd,cup,bonus_cup').eq('telegram_id', userId).single();
+        let refundUsd = safe(uBefore.usd) + oldUsd;
+        let refundCup = safe(uBefore.cup) + oldCup;
+
+        await supabase.from('users').update({ usd: refundUsd, cup: refundCup, updated_at: new Date() }).eq('telegram_id', userId);
+
+        // Recargar usuario y volver a intentar descontar para nueva apuesta
+        const userAfterRefund = await getOrCreateUser(parseInt(userId));
+        let newUsd = safe(userAfterRefund.usd);
+        let newBonus = safe(userAfterRefund.bonus_cup);
+        let newCup = safe(userAfterRefund.cup);
+
+        if (totalUSD > 0) {
+            const rateUsd = await getExchangeRateUSD();
+            const totalDisponible = newUsd + newBonus / rateUsd;
+            if (totalDisponible < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente para la edición' });
+            const bonoEnUSD = newBonus / rateUsd;
+            const usarBonoUSD = Math.min(bonoEnUSD, totalUSD);
+            newBonus -= usarBonoUSD * rateUsd;
+            newUsd -= (totalUSD - usarBonoUSD);
+        }
+
+        if (totalCUP > 0) {
+            if (newCup < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente para la edición' });
+            newCup -= totalCUP;
+        }
+
+        await supabase.from('users').update({ usd: newUsd, bonus_cup: newBonus, cup: newCup, updated_at: new Date() }).eq('telegram_id', userId);
+
+        const { data: updatedBet, error: updateError } = await supabase.from('bets').update({ raw_text: rawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, updated_at: new Date() }).eq('id', betId).select().single();
+        if (updateError) {
+            console.error('Error actualizando apuesta:', updateError);
+            return res.status(500).json({ error: 'Error al actualizar la apuesta' });
+        }
+
+        const updatedUser = await getOrCreateUser(parseInt(userId));
+        return res.json({ success: true, bet: updatedBet, updatedUser });
+    }
+
+    // Flujo normal: crear nueva apuesta y guardar cost_usd/cost_cup
+    let newUsd = safe(user.usd);
+    let newBonus = safe(user.bonus_cup);
+    let newCup = safe(user.cup);
 
     if (totalUSD > 0) {
-        const totalDisponible = newUsd + newBonus / (await getExchangeRateUSD());
-        if (totalDisponible < totalUSD) {
-            return res.status(400).json({ error: 'Saldo USD insuficiente' });
-        }
-        const bonoEnUSD = newBonus / (await getExchangeRateUSD());
+        const rateUsd = await getExchangeRateUSD();
+        const totalDisponible = newUsd + newBonus / rateUsd;
+        if (totalDisponible < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente' });
+        const bonoEnUSD = newBonus / rateUsd;
         const usarBonoUSD = Math.min(bonoEnUSD, totalUSD);
-        newBonus -= usarBonoUSD * (await getExchangeRateUSD());
+        newBonus -= usarBonoUSD * rateUsd;
         newUsd -= (totalUSD - usarBonoUSD);
     }
 
     if (totalCUP > 0) {
-        if (newCup < totalCUP) {
-            return res.status(400).json({ error: 'Saldo CUP insuficiente' });
-        }
+        if (newCup < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente' });
         newCup -= totalCUP;
     }
 
-    await supabase
-        .from('users')
-        .update({
-            usd: newUsd,
-            bonus_cup: newBonus,
-            cup: newCup,
-            updated_at: new Date()
-        })
-        .eq('telegram_id', userId);
+    await supabase.from('users').update({ usd: newUsd, bonus_cup: newBonus, cup: newCup, updated_at: new Date() }).eq('telegram_id', userId);
 
-    const { data: bet, error: betError } = await supabase
-        .from('bets')
-        .insert({
-            user_id: parseInt(userId),
-            lottery,
-            session_id: sessionId || null,
-            bet_type: betType,
-            raw_text: rawText,
-            items: parsed.items,
-            placed_at: new Date()
-        })
-        .select()
-        .single();
-
+    const { data: bet, error: betError } = await supabase.from('bets').insert({ user_id: parseInt(userId), lottery, session_id: sessionId || null, bet_type: betType, raw_text: rawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, placed_at: new Date() }).select().single();
     if (betError) {
         console.error('Error insertando apuesta:', betError);
         return res.status(500).json({ error: 'Error al registrar la apuesta' });
