@@ -15,7 +15,7 @@ const cors = require('cors');
 const moment = require('moment-timezone');
 
 // ========== IMPORTAR BOT DE TELEGRAM ==========
-const bot = require('./bot');
+let bot; // will be loaded asynchronously via dynamic import to avoid ESM TLA errors
 
 // ========== CONFIGURACIÓN DESDE .ENV ==========
 const PORT = process.env.PORT || 3000;
@@ -1893,11 +1893,19 @@ app.listen(PORT, () => {
     console.log(`🤖 Iniciando bot de Telegram...`);
 });
 
-bot.launch()
-    .then(() => console.log('🤖 Bot de Telegram iniciado correctamente'))
-    .catch(err => console.error('❌ Error al iniciar el bot:', err));
+// Import and launch bot asynchronously to support ESM modules with top-level await
+(async () => {
+    try {
+        const mod = await import('./bot.js');
+        bot = mod.default || mod;
+        await bot.launch();
+        console.log('🤖 Bot de Telegram iniciado correctamente');
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+        process.once('SIGINT', () => bot.stop('SIGINT'));
+        process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    } catch (err) {
+        console.error('❌ Error al iniciar el bot:', err);
+    }
+})();
 
 module.exports = app;
