@@ -1001,9 +1001,9 @@
             const cup = parseFloat(currentUser.cup) || 0;
             const usd = parseFloat(currentUser.usd) || 0;
             const bonusCup = parseFloat(currentUser.bonus_cup) || 0;
-            
-            document.getElementById('quickBalance').innerText = `${cup.toFixed(2)} CUP`;
-            document.getElementById('quickBalanceUsd').innerText = `≈ ${(cup / exchangeRates.rate).toFixed(2)} USD`;
+            const totalCupWithBonus = cup + bonusCup;
+            document.getElementById('quickBalance').innerText = `${totalCupWithBonus.toFixed(2)} CUP`;
+            document.getElementById('quickBalanceUsd').innerText = `${usd.toFixed(2)} USD`;
             
             document.getElementById('walletCup').innerText = cup.toFixed(2);
             document.getElementById('walletUsd').innerText = usd.toFixed(2);
