@@ -431,18 +431,27 @@ async function createDepositRequest(userId, methodId, fileBuffer, amountText, cu
 
     return request;
 }
+        // Determinar monto acreditado y moneda para el mensaje
+        let creditedAmount = 0;
+        let creditedCurrency = 'CUP';
+        if (parsed.currency === 'CUP') {
+            creditedAmount = parsed.amount;
+            creditedCurrency = 'CUP';
+        } else if (parsed.currency === 'USD') {
+            creditedAmount = parsed.amount;
+            creditedCurrency = 'USD';
+        } else {
+            creditedAmount = amountCUP;
+            creditedCurrency = 'CUP';
+        }
 
-function getMainKeyboard(ctx) {
-    const buttons = [
-        ['🎲 Jugar', '💰 Mi dinero'],
-        ['📋 Mis jugadas', '👥 Referidos'],
-        ['❓ Cómo jugar', '🌐 Abrir WebApp']
-    ];
-    if (isAdmin(ctx.from.id)) {
-        buttons.push(['🔧 Admin']);
-    }
-    return Markup.keyboard(buttons).resize();
-}
+        await ctx.telegram.sendMessage(request.user_id,
+            `✅ <b>Depósito aprobado</b>\n\n` +
+            `💰 Monto depositado: ${request.amount}\n` +
+            `💵 Se acreditaron <b>${parseFloat(creditedAmount).toFixed(2)} ${creditedCurrency}</b> a tu saldo.\n\n` +
+            `¡Gracias por confiar en nosotros!`,
+            { parse_mode: 'HTML' }
+        );
 
 function playLotteryKbd() {
     const buttons = [
@@ -451,6 +460,21 @@ function playLotteryKbd() {
         [Markup.button.callback('🗽 Nueva York', 'lot_newyork')],
         [Markup.button.callback('◀ Volver', 'main')]
     ];
+    return Markup.inlineKeyboard(buttons);
+}
+
+function getMainKeyboard(ctx) {
+    const isAdm = ctx && ctx.from && isAdmin(ctx.from.id);
+    const buttons = [
+        [Markup.button.callback('🎲 Jugar', 'play')],
+        [Markup.button.callback('📋 Mis jugadas', 'mis_jugadas'), Markup.button.callback('📥 Recargar', 'recharge')],
+        [Markup.button.callback('📤 Retirar', 'withdraw'), Markup.button.callback('💰 Mi dinero', 'my_money')],
+        [Markup.button.callback('👥 Referidos', 'referidos'), Markup.button.callback('🌐 WebApp', 'webapp')],
+        [Markup.button.callback('❓ Ayuda', 'ayuda')]
+    ];
+    if (isAdm) {
+        buttons.splice(4, 0, [Markup.button.callback('🛠️ Admin', 'admin')]);
+    }
     return Markup.inlineKeyboard(buttons);
 }
 
@@ -625,16 +649,78 @@ bot.command('mis_jugadas', async (ctx) => {
         );
     } else {
         let text = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
+        const inlineRows = [];
         bets.forEach((b, i) => {
             const date = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY HH:mm');
             text += `<b>${i + 1}.</b> 🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(b.bet_type)}\n` +
                 `   📝 <code>${escapeHTML(b.raw_text)}</code>\n` +
                 `   💰 ${b.cost_cup} CUP / ${b.cost_usd} USD\n` +
                 `   🕒 ${date}\n\n`;
+
+            // Añadir fila de botones para cada jugada
+            inlineRows.push([
+                Markup.button.callback('✏️ Editar', `edit_bet_${b.id}`),
+                Markup.button.callback('❌ Cancelar', `cancel_bet_${b.id}`)
+            ]);
         });
         text += '¿Quieres ver más? Puedes consultar el historial completo en la WebApp.';
-        await safeEdit(ctx, text, getMainKeyboard(ctx));
+        const keyboard = Markup.inlineKeyboard(inlineRows.concat([[Markup.button.callback('◀ Volver', 'main')]])).reply_markup;
+        await safeEdit(ctx, text, keyboard);
     }
+});
+
+// Acción: iniciar edición de apuesta
+bot.action(/edit_bet_(\d+)/, async (ctx) => {
+    const uid = ctx.from.id;
+    const betId = parseInt(ctx.match[1]);
+    const { data: bet } = await supabase.from('bets').select('*').eq('id', betId).maybeSingle();
+    if (!bet) { await ctx.answerCbQuery('Jugada no encontrada', { show_alert: true }); return; }
+    if (parseInt(bet.user_id) !== parseInt(uid)) { await ctx.answerCbQuery('No autorizado', { show_alert: true }); return; }
+    if (bet.session_id) {
+        const { data: session } = await supabase.from('lottery_sessions').select('status').eq('id', bet.session_id).maybeSingle();
+        if (!session || session.status !== 'open') { await ctx.answerCbQuery('No se puede editar: sesión cerrada', { show_alert: true }); return; }
+    }
+    ctx.session.awaitingBetEdit = true;
+    ctx.session.editingBetId = betId;
+    ctx.session.betType = bet.bet_type;
+    ctx.session.lottery = bet.lottery;
+    ctx.session.sessionId = bet.session_id;
+    await ctx.reply('✏️ Envíame el nuevo texto de la jugada EXACTAMENTE con el formato original. Se actualizará la jugada seleccionada.');
+    await ctx.answerCbQuery();
+});
+
+// Acción: cancelar apuesta desde el bot
+bot.action(/cancel_bet_(\d+)/, async (ctx) => {
+    const uid = ctx.from.id;
+    const betId = parseInt(ctx.match[1]);
+    const { data: bet } = await supabase.from('bets').select('*').eq('id', betId).maybeSingle();
+    if (!bet) { await ctx.answerCbQuery('Jugada no encontrada', { show_alert: true }); return; }
+    if (parseInt(bet.user_id) !== parseInt(uid)) { await ctx.answerCbQuery('No autorizado', { show_alert: true }); return; }
+    if (bet.session_id) {
+        const { data: session } = await supabase.from('lottery_sessions').select('status').eq('id', bet.session_id).maybeSingle();
+        if (!session || session.status !== 'open') { await ctx.answerCbQuery('No se puede cancelar: sesión cerrada', { show_alert: true }); return; }
+    }
+
+    const user = await getOrCreateUser(parseInt(uid));
+    let newCup = parseFloat(user.cup) || 0;
+    let newUsd = parseFloat(user.usd) || 0;
+    let newBonus = parseFloat(user.bonus_cup) || 0;
+
+    const items = bet.items || [];
+    for (const item of items) {
+        if (item.currency === 'CUP') newCup += item.amount;
+        else if (item.currency === 'USD') newUsd += item.amount;
+        else {
+            // si hay otras monedas, convertir a CUP
+            const cupVal = await convertToCUP(item.amount, item.currency);
+            newCup += cupVal;
+        }
+    }
+
+    await supabase.from('users').update({ usd: newUsd, cup: newCup, bonus_cup: newBonus, updated_at: new Date() }).eq('telegram_id', uid);
+    await supabase.from('bets').delete().eq('id', betId);
+    await ctx.answerCbQuery('Jugada cancelada y montos devueltos');
+    await ctx.reply('✅ Jugada cancelada y montos reintegrados a tu saldo.');
 });
 
 bot.command('referidos', async (ctx) => {
@@ -2751,6 +2837,116 @@ bot.on(message('text'), async (ctx) => {
         return;
     }
 
+    // --- Flujo: edición de apuesta (awaitingBetEdit) ---
+    if (session.awaitingBetEdit) {
+        const betId = session.editingBetId;
+        const betType = session.betType;
+        const lottery = session.lottery;
+        const sessionId = session.sessionId;
+
+        if (!betId) {
+            await ctx.reply('❌ No hay jugada seleccionada para editar.', getMainKeyboard(ctx));
+            delete session.awaitingBetEdit;
+            return;
+        }
+
+        const { data: existingBet } = await supabase.from('bets').select('*').eq('id', betId).maybeSingle();
+        if (!existingBet) {
+            await ctx.reply('❌ Jugada no encontrada.', getMainKeyboard(ctx));
+            delete session.awaitingBetEdit;
+            delete session.editingBetId;
+            return;
+        }
+        if (parseInt(existingBet.user_id) !== parseInt(ctx.from.id)) {
+            await ctx.reply('❌ No autorizado para editar esta jugada.', getMainKeyboard(ctx));
+            delete session.awaitingBetEdit;
+            delete session.editingBetId;
+            return;
+        }
+
+        if (existingBet.session_id) {
+            const { data: s } = await supabase.from('lottery_sessions').select('status').eq('id', existingBet.session_id).maybeSingle();
+            if (!s || s.status !== 'open') {
+                await ctx.reply('❌ No se puede editar: sesión cerrada.', getMainKeyboard(ctx));
+                delete session.awaitingBetEdit;
+                delete session.editingBetId;
+                return;
+            }
+        }
+
+        // El texto a procesar viene en variable text
+        const parsed = parseBetMessage(text, betType);
+        if (!parsed.ok) {
+            await ctx.reply('❌ No se pudo interpretar la jugada. Verifica el formato.', getMainKeyboard(ctx));
+            return;
+        }
+
+        const totalUSD = parsed.totalUSD;
+        const totalCUP = parsed.totalCUP;
+
+        const { data: priceData } = await supabase.from('play_prices').select('min_cup, min_usd, max_cup, max_usd').eq('bet_type', betType).single();
+        const minCup = priceData?.min_cup || 0;
+        const minUsd = priceData?.min_usd || 0;
+        const maxCup = priceData?.max_cup;
+        const maxUsd = priceData?.max_usd;
+
+        for (const item of parsed.items) {
+            if (item.cup > 0 && item.cup < minCup) { await ctx.reply(`❌ Mínimo CUP: ${minCup}`, getMainKeyboard(ctx)); return; }
+            if (item.usd > 0 && item.usd < minUsd) { await ctx.reply(`❌ Mínimo USD: ${minUsd}`, getMainKeyboard(ctx)); return; }
+            if (maxCup !== null && item.cup > maxCup) { await ctx.reply(`❌ Máximo CUP: ${maxCup}`, getMainKeyboard(ctx)); return; }
+            if (maxUsd !== null && item.usd > maxUsd) { await ctx.reply(`❌ Máximo USD: ${maxUsd}`, getMainKeyboard(ctx)); return; }
+        }
+
+        // Reembolsar montos anteriores
+        const oldUsd = parseFloat(existingBet.cost_usd) || 0;
+        const oldCup = parseFloat(existingBet.cost_cup) || 0;
+        const { data: uBefore } = await supabase.from('users').select('usd,cup,bonus_cup').eq('telegram_id', ctx.from.id).single();
+        let refundUsd = (parseFloat(uBefore.usd) || 0) + oldUsd;
+        let refundCup = (parseFloat(uBefore.cup) || 0) + oldCup;
+
+        await supabase.from('users').update({ usd: refundUsd, cup: refundCup, updated_at: new Date() }).eq('telegram_id', ctx.from.id);
+
+        // Volver a cargar usuario y descontar para nueva apuesta
+        const userAfterRefund = await getOrCreateUser(parseInt(ctx.from.id));
+        let newUsd = parseFloat(userAfterRefund.usd) || 0;
+        let newBonus = parseFloat(userAfterRefund.bonus_cup) || 0;
+        let newCup = parseFloat(userAfterRefund.cup) || 0;
+
+        if (totalUSD > 0) {
+            const rateUsd = await getExchangeRateUSD();
+            const totalDisponible = newUsd + newBonus / rateUsd;
+            if (totalDisponible < totalUSD) { await ctx.reply('❌ Saldo USD insuficiente para la edición', getMainKeyboard(ctx)); return; }
+            const bonoEnUSD = newBonus / rateUsd;
+            const usarBonoUSD = Math.min(bonoEnUSD, totalUSD);
+            newBonus -= usarBonoUSD * rateUsd;
+            newUsd -= (totalUSD - usarBonoUSD);
+        }
+
+        if (totalCUP > 0) {
+            const availableCupTotal = newCup + newBonus;
+            if (availableCupTotal < totalCUP) { await ctx.reply('❌ Saldo CUP insuficiente para la edición', getMainKeyboard(ctx)); return; }
+            if (newCup >= totalCUP) newCup -= totalCUP;
+            else {
+                const deficit = totalCUP - newCup;
+                newBonus = Math.max(0, newBonus - deficit);
+                newCup = 0;
+            }
+        }
+
+        const { data: updatedBet, error: updateError } = await supabase.from('bets').update({ raw_text: text, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, updated_at: new Date() }).eq('id', betId).select().single();
+        if (updateError) { console.error('Error actualizando apuesta:', updateError); await ctx.reply('❌ Error al actualizar la jugada', getMainKeyboard(ctx)); return; }
+
+        await supabase.from('users').update({ usd: newUsd, bonus_cup: newBonus, cup: newCup, updated_at: new Date() }).eq('telegram_id', ctx.from.id);
+
+        await ctx.reply('✅ Jugada actualizada correctamente.', getMainKeyboard(ctx));
+        delete session.awaitingBetEdit;
+        delete session.editingBetId;
+        delete session.betType;
+        delete session.lottery;
+        delete session.sessionId;
+        return;
+    }
+
     // --- Flujo: apuesta (awaitingBet) ---
     if (session.awaitingBet) {
         const betType = session.betType;
@@ -2974,30 +3170,67 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
         }
 
         const rates = await getExchangeRates();
-        const amountCUP = await convertToCUP(parsed.amount, parsed.currency);
-
-        const { data: user } = await supabase
-            .from('users')
-            .select('cup')
-            .eq('telegram_id', request.user_id)
-            .single();
-
-        const newCup = (parseFloat(user.cup) || 0) + amountCUP;
-
-        await supabase
-            .from('users')
-            .update({ cup: newCup, updated_at: new Date() })
-            .eq('telegram_id', request.user_id);
+        // Acreditar en la columna correspondiente según la moneda de la solicitud
+        if (parsed.currency === 'CUP') {
+            const amountCUP = parsed.amount;
+            const { data: user } = await supabase
+                .from('users')
+                .select('cup')
+                .eq('telegram_id', request.user_id)
+                .single();
+            const newCup = (parseFloat(user.cup) || 0) + amountCUP;
+            await supabase
+                .from('users')
+                .update({ cup: newCup, updated_at: new Date() })
+                .eq('telegram_id', request.user_id);
+        } else if (parsed.currency === 'USD') {
+            // Depositos en USD/USDT acreditan la columna USD (no convertir a CUP)
+            const amountUSD = parsed.amount;
+            const { data: user } = await supabase
+                .from('users')
+                .select('usd')
+                .eq('telegram_id', request.user_id)
+                .single();
+            const newUsd = (parseFloat(user.usd) || 0) + amountUSD;
+            await supabase
+                .from('users')
+                .update({ usd: newUsd, updated_at: new Date() })
+                .eq('telegram_id', request.user_id);
+        } else {
+            // Otras monedas se convierten a CUP y se acreditan en CUP
+            const amountCUP = await convertToCUP(parsed.amount, parsed.currency);
+            const { data: user } = await supabase
+                .from('users')
+                .select('cup')
+                .eq('telegram_id', request.user_id)
+                .single();
+            const newCup = (parseFloat(user.cup) || 0) + amountCUP;
+            await supabase
+                .from('users')
+                .update({ cup: newCup, updated_at: new Date() })
+                .eq('telegram_id', request.user_id);
+        }
 
         await supabase
             .from('deposit_requests')
             .update({ status: 'approved', updated_at: new Date() })
             .eq('id', requestId);
 
+        // Preparar texto del monto acreditado según moneda
+        let creditedText = '';
+        if (parsed.currency === 'CUP') {
+            creditedText = `${parsed.amount.toFixed(2)} CUP`;
+        } else if (parsed.currency === 'USD') {
+            creditedText = `${parsed.amount.toFixed(2)} USD`;
+        } else {
+            const amountCUP = await convertToCUP(parsed.amount, parsed.currency);
+            creditedText = `${amountCUP.toFixed(2)} CUP (equivalente)`;
+        }
+
         await ctx.telegram.sendMessage(request.user_id,
             `✅ <b>Depósito aprobado</b>\n\n` +
             `💰 Monto depositado: ${request.amount}\n` +
-            `💵 Se acreditaron <b>${amountCUP.toFixed(2)} CUP</b> a tu saldo.\n\n` +
+            `💵 Se acreditaron <b>${creditedText}</b> a tu saldo.\n\n` +
             `¡Gracias por confiar en nosotros!`,
             { parse_mode: 'HTML' }
         );

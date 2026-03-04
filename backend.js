@@ -500,10 +500,12 @@ app.get('/api/winning-numbers', async (req, res) => {
 
 // --- Sesión activa ---
 app.get('/api/lottery-sessions/active', async (req, res) => {
-    const { lottery, date, time_slot } = req.query;
-    if (!lottery || !date) {
-        return res.status(400).json({ error: 'Faltan parámetros' });
+    const { lottery, date: dateParam, time_slot } = req.query;
+    if (!lottery) {
+        return res.status(400).json({ error: 'Falta parámetro lottery' });
     }
+    // Usar la fecha del servidor (zona horaria configurada) si el cliente no proporciona una
+    const date = dateParam || moment.tz(TIMEZONE).format('YYYY-MM-DD');
 
     // Si se proporciona time_slot, buscar sesión abierta específica
     if (time_slot) {
@@ -888,8 +890,16 @@ app.post('/api/bets', async (req, res) => {
         }
 
         if (totalCUP > 0) {
-            if (newCup < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente para la edición' });
-            newCup -= totalCUP;
+            // Permitir usar bono en CUP además del saldo CUP
+            const availableCupTotal = newCup + newBonus;
+            if (availableCupTotal < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente para la edición' });
+            if (newCup >= totalCUP) {
+                newCup -= totalCUP;
+            } else {
+                const deficit = totalCUP - newCup;
+                newBonus = Math.max(0, newBonus - deficit);
+                newCup = 0;
+            }
         }
 
         await supabase.from('users').update({ usd: newUsd, bonus_cup: newBonus, cup: newCup, updated_at: new Date() }).eq('telegram_id', userId);
@@ -920,8 +930,16 @@ app.post('/api/bets', async (req, res) => {
     }
 
     if (totalCUP > 0) {
-        if (newCup < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente' });
-        newCup -= totalCUP;
+        // Permitir usar bono en CUP además del saldo CUP
+        const availableCupTotal = newCup + newBonus;
+        if (availableCupTotal < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente' });
+        if (newCup >= totalCUP) {
+            newCup -= totalCUP;
+        } else {
+            const deficit = totalCUP - newCup;
+            newBonus = Math.max(0, newBonus - deficit);
+            newCup = 0;
+        }
     }
 
     await supabase.from('users').update({ usd: newUsd, bonus_cup: newBonus, cup: newCup, updated_at: new Date() }).eq('telegram_id', userId);
@@ -1636,6 +1654,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
     if (request.currency === 'CUP') {
         newCup += parseFloat(request.amount);
     } else if (request.currency === 'USD') {
+        // Solo USD acredita la columna USD
         newUsd += parseFloat(request.amount);
     } else {
         // Para otras monedas, convertir a CUP usando la tasa actual
