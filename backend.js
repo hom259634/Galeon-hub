@@ -1894,18 +1894,23 @@ app.listen(PORT, () => {
 });
 
 // Import and launch bot asynchronously to support ESM modules with top-level await
-(async () => {
-    try {
-        const mod = await import('./bot.js');
-        bot = mod.default || mod;
-        await bot.launch();
-        console.log('🤖 Bot de Telegram iniciado correctamente');
+// Load bot via require (CommonJS) and launch it. Use promise handlers
+// instead of top-level await/import to avoid ambiguous module format errors
+try {
+    const required = require('./bot.js');
+    bot = required.default || required;
+    if (bot && typeof bot.launch === 'function') {
+        bot.launch()
+            .then(() => console.log('🤖 Bot de Telegram iniciado correctamente'))
+            .catch(err => console.error('❌ Error al iniciar el bot:', err));
 
         process.once('SIGINT', () => bot.stop('SIGINT'));
         process.once('SIGTERM', () => bot.stop('SIGTERM'));
-    } catch (err) {
-        console.error('❌ Error al iniciar el bot:', err);
+    } else {
+        console.warn('⚠️ Bot cargado pero no tiene método launch()');
     }
-})();
+} catch (err) {
+    console.error('❌ Error cargando bot.js con require():', err);
+}
 
 module.exports = app;
