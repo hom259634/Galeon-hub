@@ -1,6 +1,7 @@
 {
   "name": "rifas-cuba-bot",
   "version": "2.0.0",
+  "type": "commonjs",
   "description": "Bot de Telegram + WebApp + API REST para gestión de rifas y loterías en Cuba",
   "main": "backend.js",
   "scripts": {
