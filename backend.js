@@ -72,10 +72,10 @@ function verifyTelegramWebAppData(initData, botToken) {
 async function getExchangeRates() {
     const { data } = await supabase
         .from('exchange_rate')
-        .select('rate, rate_usdt, rate_trx')
+        .select('*')
         .eq('id', 1)
         .single();
-    return data || { rate: 110, rate_usdt: 110, rate_trx: 1 };
+    return data || { rate: 110, rate_usdt: 110, rate_trx: 1, rate_mlc: 110 };
 }
 
 async function getExchangeRateUSD() {
@@ -91,6 +91,11 @@ async function getExchangeRateUSDT() {
 async function getExchangeRateTRX() {
     const rates = await getExchangeRates();
     return rates.rate_trx;
+}
+
+async function getExchangeRateMLC() {
+    const rates = await getExchangeRates();
+    return rates.rate_mlc ?? rates.rate;
 }
 
 async function setExchangeRateUSD(rate) {
@@ -114,6 +119,20 @@ async function setExchangeRateTRX(rate) {
         .eq('id', 1);
 }
 
+async function setExchangeRateMLC(rate) {
+    const { error } = await supabase
+        .from('exchange_rate')
+        .update({ rate_mlc: rate, updated_at: new Date() })
+        .eq('id', 1);
+
+    if (error && (error.message || '').toLowerCase().includes('rate_mlc')) {
+        await supabase
+            .from('exchange_rate')
+            .update({ rate, updated_at: new Date() })
+            .eq('id', 1);
+    }
+}
+
 // Convertir cualquier moneda a CUP
 async function convertToCUP(amount, currency) {
     const rates = await getExchangeRates();
@@ -122,7 +141,7 @@ async function convertToCUP(amount, currency) {
         case 'USD': return amount * rates.rate;
         case 'USDT': return amount * rates.rate_usdt;
         case 'TRX': return amount * rates.rate_trx;
-        case 'MLC': return amount * rates.rate; // MLC se trata como USD
+        case 'MLC': return amount * (rates.rate_mlc ?? rates.rate);
         default: return 0;
     }
 }
@@ -135,7 +154,7 @@ async function convertFromCUP(amountCUP, targetCurrency) {
         case 'USD': return amountCUP / rates.rate;
         case 'USDT': return amountCUP / rates.rate_usdt;
         case 'TRX': return amountCUP / rates.rate_trx;
-        case 'MLC': return amountCUP / rates.rate;
+        case 'MLC': return amountCUP / (rates.rate_mlc ?? rates.rate);
         default: return 0;
     }
 }
@@ -143,6 +162,7 @@ async function convertFromCUP(amountCUP, targetCurrency) {
 // ========== FUNCIÓN GETORCREATEUSER CON MANEJO DE ERROR DE COLUMNA ==========
 async function getOrCreateUser(telegramId, firstName = 'Jugador', username = null) {
     try {
+        let isNewUser = false;
         let { data: user, error: selectError } = await supabase
             .from('users')
             .select('*')
@@ -190,6 +210,7 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
                     };
                 }
                 user = newUser;
+                isNewUser = true;
                 // El mensaje de bienvenida se envía solo en el bot, no aquí
             } catch (insertException) {
                 console.error('Excepción al crear usuario:', insertException);
@@ -226,6 +247,11 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
         } catch (e) {
             console.error('Error migrando bono por saldo existente:', e);
         }
+
+        if (user && typeof user === 'object') {
+            user.__isNewUser = isNewUser;
+        }
+
         return user;
     } catch (e) {
         console.error('Error grave en getOrCreateUser:', e);
@@ -438,6 +464,10 @@ app.post('/api/auth', async (req, res) => {
 
     const tgUser = JSON.parse(userStr);
     const user = await getOrCreateUser(tgUser.id, tgUser.first_name, tgUser.username);
+    const isNewUser = !!user?.__isNewUser;
+    if (user && typeof user === 'object' && '__isNewUser' in user) {
+        delete user.__isNewUser;
+    }
     const rates = await getExchangeRates();
 
     const botInfo = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`)
@@ -446,8 +476,10 @@ app.post('/api/auth', async (req, res) => {
 
     res.json({
         user,
+        isNewUser,
         isAdmin: isAdmin(tgUser.id),
         exchangeRate: rates.rate,
+        exchangeRateMLC: rates.rate_mlc ?? rates.rate,
         exchangeRateUSDT: rates.rate_usdt,
         exchangeRateTRX: rates.rate_trx,
         botUsername: botInfo.username,
@@ -1182,6 +1214,13 @@ app.put('/api/admin/exchange-rate/usd', requireAdmin, async (req, res) => {
     const { rate } = req.body;
     if (!rate || rate <= 0) return res.status(400).json({ error: 'Tasa inválida' });
     await setExchangeRateUSD(rate);
+    res.json({ success: true });
+});
+
+app.put('/api/admin/exchange-rate/mlc', requireAdmin, async (req, res) => {
+    const { rate } = req.body;
+    if (!rate || rate <= 0) return res.status(400).json({ error: 'Tasa inválida' });
+    await setExchangeRateMLC(rate);
     res.json({ success: true });
 });
 

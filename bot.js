@@ -106,10 +106,10 @@ async function safeEdit(ctx, text, keyboard = null) {
 async function getExchangeRates() {
     const { data } = await supabase
         .from('exchange_rate')
-        .select('rate, rate_usdt, rate_trx')
+        .select('*')
         .eq('id', 1)
         .single();
-    return data || { rate: 110, rate_usdt: 110, rate_trx: 1 };
+    return data || { rate: 110, rate_usdt: 110, rate_trx: 1, rate_mlc: 110 };
 }
 
 async function getExchangeRateUSD() {
@@ -125,6 +125,11 @@ async function getExchangeRateUSDT() {
 async function getExchangeRateTRX() {
     const rates = await getExchangeRates();
     return rates.rate_trx;
+}
+
+async function getExchangeRateMLC() {
+    const rates = await getExchangeRates();
+    return rates.rate_mlc ?? rates.rate;
 }
 
 async function setExchangeRateUSD(rate) {
@@ -148,6 +153,20 @@ async function setExchangeRateTRX(rate) {
         .eq('id', 1);
 }
 
+async function setExchangeRateMLC(rate) {
+    const { error } = await supabase
+        .from('exchange_rate')
+        .update({ rate_mlc: rate, updated_at: new Date() })
+        .eq('id', 1);
+
+    if (error && (error.message || '').toLowerCase().includes('rate_mlc')) {
+        await supabase
+            .from('exchange_rate')
+            .update({ rate, updated_at: new Date() })
+            .eq('id', 1);
+    }
+}
+
 async function convertToCUP(amount, currency) {
     const rates = await getExchangeRates();
     switch (currency) {
@@ -155,7 +174,7 @@ async function convertToCUP(amount, currency) {
         case 'USD': return amount * rates.rate;
         case 'USDT': return amount * rates.rate_usdt;
         case 'TRX': return amount * rates.rate_trx;
-        case 'MLC': return amount * rates.rate;
+        case 'MLC': return amount * (rates.rate_mlc ?? rates.rate);
         default: return 0;
     }
 }
@@ -167,7 +186,7 @@ async function convertFromCUP(amountCUP, targetCurrency) {
         case 'USD': return amountCUP / rates.rate;
         case 'USDT': return amountCUP / rates.rate_usdt;
         case 'TRX': return amountCUP / rates.rate_trx;
-        case 'MLC': return amountCUP / rates.rate;
+        case 'MLC': return amountCUP / (rates.rate_mlc ?? rates.rate);
         default: return 0;
     }
 }
@@ -229,6 +248,10 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
                 .maybeSingle();
             if (retryUser) return retryUser;
             return { cup: 0, usd: 0, bonus_cup: BONUS_CUP_DEFAULT, first_name: firstName, username, telegram_id: telegramId };
+        }
+
+        if (ctx?.session) {
+            ctx.session.isNewUser = true;
         }
 
         return newUser;
@@ -494,6 +517,7 @@ function adminPanelKbd() {
         [Markup.button.callback('➕ Añadir método RETIRO', 'adm_add_wit')],
         [Markup.button.callback('✏️ Editar método RETIRO', 'adm_edit_wit')],
         [Markup.button.callback('🗑 Eliminar método RETIRO', 'adm_delete_wit')],
+        [Markup.button.callback('💰 Configurar tasa MLC/CUP', 'adm_set_rate_mlc')],
         [Markup.button.callback('💰 Configurar tasa USD/CUP', 'adm_set_rate_usd')],
         [Markup.button.callback('💰 Configurar tasa USDT/CUP', 'adm_set_rate_usdt')],
         [Markup.button.callback('💰 Configurar tasa TRX/CUP', 'adm_set_rate_trx')],
@@ -580,7 +604,15 @@ bot.command('start', async (ctx) => {
         getMainKeyboard(ctx)
     );
 
-    // No mostrar bono separado: el bono inicial ya fue acreditado al saldo CUP.
+    if (ctx.session?.isNewUser) {
+        await ctx.reply(
+            `🎁 <b>¡Bono de bienvenida acreditado!</b>\n\n` +
+            `Se te agregaron <b>${BONUS_CUP_DEFAULT.toFixed(2)} CUP</b> por crear tu cuenta.\n` +
+            `¡Mucha suerte! 🍀`,
+            { parse_mode: 'HTML' }
+        );
+        ctx.session.isNewUser = false;
+    }
 });
 
 bot.command('jugar', async (ctx) => {
@@ -1460,6 +1492,14 @@ bot.action('adm_set_rate_usd', async (ctx) => {
     await ctx.answerCbQuery();
 });
 
+bot.action('adm_set_rate_mlc', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const rate = await getExchangeRateMLC();
+    ctx.session.adminAction = 'set_rate_mlc';
+    await ctx.reply(`💰 <b>Tasa MLC/CUP actual:</b> 1 MLC = ${rate} CUP\n\nEnvía la nueva tasa (solo número, ej: 120):`, { parse_mode: 'HTML' });
+    await ctx.answerCbQuery();
+});
+
 bot.action('adm_set_rate_usdt', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     const rate = await getExchangeRateUSDT();
@@ -1549,6 +1589,7 @@ bot.action('adm_view', async (ctx) => {
     const { data: prices } = await supabase.from('play_prices').select('*');
 
     let text = `💰 <b>Tasas de cambio:</b>\n`;
+    text += `MLC/CUP: 1 MLC = ${rates.rate_mlc ?? rates.rate} CUP\n`;
     text += `USD/CUP: 1 USD = ${rates.rate} CUP\n`;
     text += `USDT/CUP: 1 USDT = ${rates.rate_usdt} CUP\n`;
     text += `TRX/CUP: 1 TRX = ${rates.rate_trx} CUP\n\n`;
@@ -2054,6 +2095,20 @@ bot.on(message('text'), async (ctx) => {
         }
         await setExchangeRateUSD(rate);
         await ctx.reply(`✅ Tasa USD/CUP actualizada: 1 USD = ${rate} CUP`, { parse_mode: 'HTML' });
+        delete session.adminAction;
+        await safeEdit(ctx, '🔧 <b>Panel de administración</b>', adminPanelKbd());
+        return;
+    }
+
+    // --- Admin: configurar tasa MLC ---
+    if (isAdmin(uid) && session.adminAction === 'set_rate_mlc') {
+        const rate = parseFloat(text.replace(',', '.'));
+        if (isNaN(rate) || rate <= 0) {
+            await ctx.reply('❌ Número inválido. Por favor, envía un número positivo (ej: 120).');
+            return;
+        }
+        await setExchangeRateMLC(rate);
+        await ctx.reply(`✅ Tasa MLC/CUP actualizada: 1 MLC = ${rate} CUP`, { parse_mode: 'HTML' });
         delete session.adminAction;
         await safeEdit(ctx, '🔧 <b>Panel de administración</b>', adminPanelKbd());
         return;
