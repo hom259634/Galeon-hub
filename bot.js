@@ -183,7 +183,7 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
 
         if (error) {
             console.error('Error al consultar usuario:', error);
-            return { cup: 0, usd: 0, bonus_cup: 0, first_name: firstName, username, telegram_id: telegramId };
+            return { cup: 0, usd: 0, first_name: firstName, username, telegram_id: telegramId };
         }
 
         if (user) {
@@ -199,9 +199,9 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
                 telegram_id: telegramId,
                 first_name: firstName,
                 username: username,
-                bonus_cup: BONUS_CUP_DEFAULT,
                 cup: 0,
-                usd: 0
+                usd: 0,
+                bonus_cup: BONUS_CUP_DEFAULT
             })
             .select()
             .single();
@@ -215,11 +215,6 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
                 .maybeSingle();
             if (retryUser) return retryUser;
             return { cup: 0, usd: 0, bonus_cup: BONUS_CUP_DEFAULT, first_name: firstName, username, telegram_id: telegramId };
-        }
-
-        // Si hay contexto, marcamos que es nuevo para enviar el bono después de la bienvenida
-        if (ctx && ctx.session) {
-            ctx.session.newUserBonus = true;
         }
 
         return newUser;
@@ -538,10 +533,10 @@ bot.use(async (ctx, next) => {
             const username = ctx.from.username || null;
             // Pasamos ctx para que pueda marcar nuevo usuario en sesión
             const user = await getUser(uid, firstName, username, ctx);
-            ctx.dbUser = user || { cup: 0, usd: 0, bonus_cup: 0 };
+            ctx.dbUser = user || { cup: 0, usd: 0 };
         } catch (e) {
             console.error('Error cargando usuario en middleware:', e);
-            ctx.dbUser = { cup: 0, usd: 0, bonus_cup: 0 };
+            ctx.dbUser = { cup: 0, usd: 0 };
         }
     }
     return next();
@@ -571,20 +566,7 @@ bot.command('start', async (ctx) => {
         getMainKeyboard(ctx)
     );
 
-    // Si es un usuario nuevo, enviamos el bono después de la bienvenida
-    if (ctx.session && ctx.session.newUserBonus) {
-        try {
-            await ctx.reply(
-                `🎁 <b>¡Bono de bienvenida!</b>\n\n` +
-                `Has recibido <b>${BONUS_CUP_DEFAULT} CUP</b> como bono no retirable.\n` +
-                `Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte!`,
-                { parse_mode: 'HTML' }
-            );
-        } catch (e) {
-            console.error('Error enviando mensaje de bono:', e);
-        }
-        delete ctx.session.newUserBonus; // Limpiar bandera
-    }
+    // No mostrar bono separado: el bono inicial ya fue acreditado al saldo CUP.
 });
 
 bot.command('jugar', async (ctx) => {
@@ -593,17 +575,12 @@ bot.command('jugar', async (ctx) => {
 
 bot.command('mi_dinero', async (ctx) => {
     const user = ctx.dbUser;
-    const rate = await getExchangeRateUSD();
     const cup = parseFloat(user.cup) || 0;
     const usd = parseFloat(user.usd) || 0;
-    const bonusCup = parseFloat(user.bonus_cup) || 0;
-    const cupToUsd = (cup / rate).toFixed(2);
-    const usdToCup = (usd * rate).toFixed(2);
 
     const text = `💰 <b>Tu saldo actual es:</b>\n\n` +
-        `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (aprox. ${cupToUsd} USD)\n` +
-        `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n` +
-        `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n\n` +
+        `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)}\n` +
+        `💵 <b>USD:</b> ${usd.toFixed(2)}\n\n` +
         `¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
 });
@@ -2553,32 +2530,22 @@ bot.on(message('text'), async (ctx) => {
             const cupNeeded = await convertToCUP(amount, currency);
             if ((parseFloat(user.cup) || 0) >= cupNeeded) saldoSuficiente = true;
         }
+        try {
+            const { data: request, error } = await supabase
+                .from('withdraw_requests')
+                .insert({
+                    user_id: uid,
+                    method_id: method.id,
+                    amount: amount,
+                    currency: currency,
+                    account_info: accountInfo,
+                    status: 'pending'
+                })
+                .select()
+                .single();
 
-        if (!saldoSuficiente) {
-            await ctx.reply('❌ Saldo insuficiente. La solicitud ha expirado.', getMainKeyboard(ctx));
-            delete session.awaitingWithdrawAccount;
-            delete session.withdrawMethod;
-            delete session.withdrawAmount;
-            delete session.withdrawCurrency;
-            return;
-        }
+            if (error) throw error;
 
-        const { data: request, error } = await supabase
-            .from('withdraw_requests')
-            .insert({
-                user_id: uid,
-                method_id: method.id,
-                amount: amount,
-                currency: currency,
-                account_info: accountInfo,
-                status: 'pending'
-            })
-            .select()
-            .single();
-
-        if (error) {
-            await ctx.reply(`❌ Error al crear la solicitud: ${error.message}`, getMainKeyboard(ctx));
-        } else {
             for (const adminId of ADMIN_IDS) {
                 try {
                     await bot.telegram.sendMessage(adminId,
@@ -2598,12 +2565,16 @@ bot.on(message('text'), async (ctx) => {
                     );
                 } catch (e) {}
             }
+
             await ctx.reply(
                 `✅ <b>Solicitud de retiro enviada</b>\n` +
                 `💰 Monto: ${amount} ${currency}\n` +
                 `⏳ Procesaremos tu solicitud a la mayor brevedad. Te avisaremos cuando esté lista.`,
                 { parse_mode: 'HTML' }
             );
+        } catch (e) {
+            console.error(e);
+            await ctx.reply(`❌ Error al crear la solicitud: ${e.message}`, getMainKeyboard(ctx));
         }
 
         delete session.awaitingWithdrawAccount;
@@ -2978,29 +2949,150 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
 
         const { data: user } = await supabase
             .from('users')
-            .select('cup')
+            .select('cup, usd, bonus_cup')
             .eq('telegram_id', request.user_id)
             .single();
 
-        const newCup = (parseFloat(user.cup) || 0) + amountCUP;
-
-        await supabase
-            .from('users')
-            .update({ cup: newCup, updated_at: new Date() })
-            .eq('telegram_id', request.user_id);
-
-        await supabase
+        // Si el depósito es USD, acreditarlo en la parte USD; cualquier otra moneda -> convertir a CUP
+        // Check if user had any previously approved deposits (excluding this one)
+        const { data: prevApproved } = await supabase
             .from('deposit_requests')
-            .update({ status: 'approved', updated_at: new Date() })
-            .eq('id', requestId);
+            .select('id')
+            .eq('user_id', request.user_id)
+            .eq('status', 'approved')
+            .neq('id', requestId)
+            .limit(1);
 
-        await ctx.telegram.sendMessage(request.user_id,
-            `✅ <b>Depósito aprobado</b>\n\n` +
-            `💰 Monto depositado: ${request.amount}\n` +
-            `💵 Se acreditaron <b>${amountCUP.toFixed(2)} CUP</b> a tu saldo.\n\n` +
-            `¡Gracias por confiar en nosotros!`,
-            { parse_mode: 'HTML' }
-        );
+        const isFirstDeposit = !(prevApproved && prevApproved.length > 0);
+
+        if (parsed.currency === 'USD') {
+            const newUsd = (parseFloat(user.usd) || 0) + parsed.amount;
+            await supabase
+                .from('users')
+                .update({ usd: newUsd, updated_at: new Date() })
+                .eq('telegram_id', request.user_id);
+
+            // If this is the user's first approved deposit, migrate any visible bonus into cup
+            if (isFirstDeposit) {
+                const bonus = parseFloat(user.bonus_cup) || 0;
+                if (bonus > 0) {
+                    const addCup = bonus;
+                    const { data: updatedUser } = await supabase
+                        .from('users')
+                        .select('cup')
+                        .eq('telegram_id', request.user_id)
+                        .single();
+                    const newCupAfterBonus = (parseFloat(updatedUser.cup) || 0) + addCup;
+                    await supabase
+                        .from('users')
+                        .update({ cup: newCupAfterBonus, bonus_cup: 0, updated_at: new Date() })
+                        .eq('telegram_id', request.user_id);
+
+                    await supabase
+                        .from('deposit_requests')
+                        .update({ status: 'approved', updated_at: new Date() })
+                        .eq('id', requestId);
+
+                    await ctx.telegram.sendMessage(request.user_id,
+                        `✅ <b>Depósito aprobado</b>\n\n` +
+                        `💰 Monto depositado: ${request.amount}\n` +
+                        `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n` +
+                        `🎁 Tu bono de bienvenida de <b>${addCup.toFixed(2)} CUP</b> se ha movido a tu saldo principal.\n\n` +
+                        `¡Gracias por confiar en nosotros!`,
+                        { parse_mode: 'HTML' }
+                    );
+                } else {
+                    await supabase
+                        .from('deposit_requests')
+                        .update({ status: 'approved', updated_at: new Date() })
+                        .eq('id', requestId);
+
+                    await ctx.telegram.sendMessage(request.user_id,
+                        `✅ <b>Depósito aprobado</b>\n\n` +
+                        `💰 Monto depositado: ${request.amount}\n` +
+                        `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n\n` +
+                        `¡Gracias por confiar en nosotros!`,
+                        { parse_mode: 'HTML' }
+                    );
+                }
+            } else {
+                await supabase
+                    .from('deposit_requests')
+                    .update({ status: 'approved', updated_at: new Date() })
+                    .eq('id', requestId);
+
+                await ctx.telegram.sendMessage(request.user_id,
+                    `✅ <b>Depósito aprobado</b>\n\n` +
+                    `💰 Monto depositado: ${request.amount}\n` +
+                    `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n\n` +
+                    `¡Gracias por confiar en nosotros!`,
+                    { parse_mode: 'HTML' }
+                );
+            }
+        } else {
+            const newCup = (parseFloat(user.cup) || 0) + amountCUP;
+            await supabase
+                .from('users')
+                .update({ cup: newCup, updated_at: new Date() })
+                .eq('telegram_id', request.user_id);
+
+            await supabase
+                .from('deposit_requests')
+                .update({ status: 'approved', updated_at: new Date() })
+                .eq('id', requestId);
+
+            // If this is the user's first approved deposit, migrate any visible bonus into cup
+            if (isFirstDeposit) {
+                const bonus = parseFloat(user.bonus_cup) || 0;
+                if (bonus > 0) {
+                    const newCupAfterBonus = newCup + bonus;
+                    await supabase
+                        .from('users')
+                        .update({ cup: newCupAfterBonus, bonus_cup: 0, updated_at: new Date() })
+                        .eq('telegram_id', request.user_id);
+
+                    await supabase
+                        .from('deposit_requests')
+                        .update({ status: 'approved', updated_at: new Date() })
+                        .eq('id', requestId);
+
+                    await ctx.telegram.sendMessage(request.user_id,
+                        `✅ <b>Depósito aprobado</b>\n\n` +
+                        `💰 Monto depositado: ${request.amount}\n` +
+                        `💵 Se acreditaron <b>${amountCUP.toFixed(2)} CUP</b> a tu saldo.\n` +
+                        `🎁 Tu bono de bienvenida de <b>${bonus.toFixed(2)} CUP</b> se ha movido a tu saldo principal.\n\n` +
+                        `¡Gracias por confiar en nosotros!`,
+                        { parse_mode: 'HTML' }
+                    );
+                } else {
+                    await supabase
+                        .from('deposit_requests')
+                        .update({ status: 'approved', updated_at: new Date() })
+                        .eq('id', requestId);
+
+                    await ctx.telegram.sendMessage(request.user_id,
+                        `✅ <b>Depósito aprobado</b>\n\n` +
+                        `💰 Monto depositado: ${request.amount}\n` +
+                        `💵 Se acreditaron <b>${amountCUP.toFixed(2)} CUP</b> a tu saldo.\n\n` +
+                        `¡Gracias por confiar en nosotros!`,
+                        { parse_mode: 'HTML' }
+                    );
+                }
+            } else {
+                await supabase
+                    .from('deposit_requests')
+                    .update({ status: 'approved', updated_at: new Date() })
+                    .eq('id', requestId);
+
+                await ctx.telegram.sendMessage(request.user_id,
+                    `✅ <b>Depósito aprobado</b>\n\n` +
+                    `💰 Monto depositado: ${request.amount}\n` +
+                    `💵 Se acreditaron <b>${amountCUP.toFixed(2)} CUP</b> a tu saldo.\n\n` +
+                    `¡Gracias por confiar en nosotros!`,
+                    { parse_mode: 'HTML' }
+                );
+            }
+        }
 
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('✅ Depósito aprobado y saldo actualizado correctamente.');
