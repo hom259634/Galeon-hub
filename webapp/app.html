@@ -1242,7 +1242,7 @@
             const actionsHtml = sessionOpen ? `
                 <div class="flex gap-2 mt-4">
                     <button onclick="editBet(${bet.id})" class="flex-1 bg-blue-600 py-2 rounded-lg edit-cancel-btn">✏️ Editar</button>
-                    <button onclick="cancelBet(${bet.id})" class="flex-1 bg-red-600 py-2 rounded-lg edit-cancel-btn">🗑 Cancelar</button>
+                    <button onclick="cancelBet(${bet.id})" class="flex-1 bg-red-600 py-2 rounded-lg edit-cancel-btn">🗑 Eliminar</button>
                 </div>
             ` : '';
 
@@ -1297,7 +1297,7 @@
         };
 
         window.cancelBet = async (betId) => {
-            if (!confirm('¿Estás seguro de cancelar esta jugada? Se te reembolsará el monto.')) return;
+            if (!confirm('¿Estás seguro de eliminar esta jugada? Se te reembolsará el monto.')) return;
             
             const bet = userBets.find(b => b.id === betId);
             if (!bet) return;
@@ -1318,7 +1318,7 @@
                     betDetailModal.classList.add('hidden');
                 } else {
                     const err = await res.json();
-                    iziToast.error({ message: err.error || 'Error al cancelar' });
+                    iziToast.error({ message: err.error || 'Error al eliminar' });
                 }
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión' });
