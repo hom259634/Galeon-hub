@@ -431,27 +431,7 @@ async function createDepositRequest(userId, methodId, fileBuffer, amountText, cu
 
     return request;
 }
-        // Determinar monto acreditado y moneda para el mensaje
-        let creditedAmount = 0;
-        let creditedCurrency = 'CUP';
-        if (parsed.currency === 'CUP') {
-            creditedAmount = parsed.amount;
-            creditedCurrency = 'CUP';
-        } else if (parsed.currency === 'USD') {
-            creditedAmount = parsed.amount;
-            creditedCurrency = 'USD';
-        } else {
-            creditedAmount = amountCUP;
-            creditedCurrency = 'CUP';
-        }
 
-        await ctx.telegram.sendMessage(request.user_id,
-            `✅ <b>Depósito aprobado</b>\n\n` +
-            `💰 Monto depositado: ${request.amount}\n` +
-            `💵 Se acreditaron <b>${parseFloat(creditedAmount).toFixed(2)} ${creditedCurrency}</b> a tu saldo.\n\n` +
-            `¡Gracias por confiar en nosotros!`,
-            { parse_mode: 'HTML' }
-        );
 
 function playLotteryKbd() {
     const buttons = [
