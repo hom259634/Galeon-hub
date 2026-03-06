@@ -157,12 +157,14 @@
             line-height: 1.2;
         }
         .balance-main {
-            font-size: 1.1rem;
-            font-weight: 600;
+            font-size: 1.25rem;
+            font-weight: 700;
         }
         .balance-secondary {
-            font-size: 0.7rem;
-            color: #9ca3af;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #eef2ff;
+            margin-left: 10px;
         }
         .withdraw-time-status {
             font-size: 0.85rem;
@@ -955,8 +957,14 @@
                 botUsername = data.botUsername || '4pu3$t4$_QvaBot';
                 bonusCupDefault = data.bonusCupDefault || 70;
                 
+                // Show actual bonus if user has it, otherwise hide welcome bonus label
+                const initialBonus = parseFloat(currentUser.bonus_cup) || 0;
                 if (welcomeBonus) {
-                    welcomeBonus.innerText = `${bonusCupDefault} CUP`;
+                    if (initialBonus > 0) {
+                        welcomeBonus.innerText = `${initialBonus.toFixed(2)} CUP`;
+                    } else {
+                        welcomeBonus.innerText = '';
+                    }
                 }
 
                 document.getElementById('userName').innerText = currentUser.first_name || 'Jugador';
@@ -1004,11 +1012,16 @@
             const totalCupWithBonus = cup + bonusCup;
             document.getElementById('quickBalance').innerText = `${totalCupWithBonus.toFixed(2)} CUP`;
             document.getElementById('quickBalanceUsd').innerText = `${usd.toFixed(2)} USD`;
-            
+
             document.getElementById('walletCup').innerText = cup.toFixed(2);
             document.getElementById('walletUsd').innerText = usd.toFixed(2);
             document.getElementById('walletUsdEquivalent').innerText = `≈ ${(usd * exchangeRates.rate).toFixed(2)} CUP`;
+            // Show bonus amount if present; otherwise show 0.00 but clear welcome hint
             document.getElementById('walletBonus').innerText = `${bonusCup.toFixed(2)} CUP`;
+            if (welcomeBonus) {
+                if (bonusCup > 0) welcomeBonus.innerText = `${bonusCup.toFixed(2)} CUP`;
+                else welcomeBonus.innerText = '';
+            }
         }
 
         async function loadDepositMethods() {
