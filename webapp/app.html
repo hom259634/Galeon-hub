@@ -562,7 +562,7 @@
         // Estado global
         let currentUser = null;
         let isAdmin = false;
-        let exchangeRates = { rate: 110, rate_usdt: 110, rate_trx: 1 };
+        let exchangeRates = { rate: 110, rate_mlc: 110, rate_usdt: 110, rate_trx: 1 };
         let bonusCupDefault = 70;
         let botUsername = '';
         let depositMethods = [];
@@ -951,6 +951,7 @@
                 isAdmin = data.isAdmin || false;
                 exchangeRates = {
                     rate: data.exchangeRate || 110,
+                    rate_mlc: data.exchangeRateMLC || data.exchangeRate || 110,
                     rate_usdt: data.exchangeRateUSDT || 110,
                     rate_trx: data.exchangeRateTRX || 1
                 };
@@ -965,6 +966,13 @@
                     } else {
                         welcomeBonus.innerText = '';
                     }
+                }
+
+                if (data.isNewUser && (parseFloat(currentUser.bonus_cup) || 0) > 0) {
+                    iziToast.success({
+                        title: '🎁 Bono acreditado',
+                        message: `Se te agregaron ${(parseFloat(currentUser.bonus_cup) || 0).toFixed(2)} CUP por crear tu cuenta.`
+                    });
                 }
 
                 document.getElementById('userName').innerText = currentUser.first_name || 'Jugador';
@@ -2068,6 +2076,10 @@
         function renderSetRateView() {
             adminViewContainer.innerHTML = `
                 <h4 class="text-xl font-semibold mb-4">💰 Configurar Tasas de Cambio</h4>
+                <p class="mb-2">Tasa MLC/CUP actual: <span class="text-cyan-300 font-bold">1 MLC = ${exchangeRates.rate_mlc ?? exchangeRates.rate} CUP</span></p>
+                <input type="number" id="newRateMLC" value="${exchangeRates.rate_mlc ?? exchangeRates.rate}" step="0.01" min="1" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-green-500 mb-3">
+                <button id="updateRateMLCBtn" class="w-full bg-green-600 py-2 rounded-xl mb-4">Actualizar MLC/CUP</button>
+
                 <p class="mb-2">Tasa USD/CUP actual: <span class="text-cyan-300 font-bold">1 USD = ${exchangeRates.rate} CUP</span></p>
                 <input type="number" id="newRateUSD" value="${exchangeRates.rate}" step="0.01" min="1" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-green-500 mb-3">
                 <button id="updateRateUSDBtn" class="w-full bg-green-600 py-2 rounded-xl mb-4">Actualizar USD/CUP</button>
@@ -2080,6 +2092,20 @@
                 <input type="number" id="newRateTRX" value="${exchangeRates.rate_trx}" step="0.01" min="0.01" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-green-500 mb-3">
                 <button id="updateRateTRXBtn" class="w-full bg-green-600 py-2 rounded-xl">Actualizar TRX/CUP</button>
             `;
+
+            document.getElementById('updateRateMLCBtn')?.addEventListener('click', async () => {
+                const rate = parseFloat(document.getElementById('newRateMLC').value);
+                if (isNaN(rate) || rate <= 0) { iziToast.warning({ message: 'Tasa inválida' }); return; }
+                try {
+                    const res = await fetch('/api/admin/exchange-rate/mlc', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rate, userId: currentUser.telegram_id })
+                    });
+                    if (res.ok) { exchangeRates.rate_mlc = rate; iziToast.success({ message: 'Tasa MLC/CUP actualizada' }); renderViewDataView(); }
+                    else { const err = await res.json(); iziToast.error({ message: err.error }); }
+                } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            });
             
             document.getElementById('updateRateUSDBtn')?.addEventListener('click', async () => {
                 const rate = parseFloat(document.getElementById('newRateUSD').value);
@@ -2216,6 +2242,7 @@
                 const prices = await priceRes.json();
 
                 let text = `💰 <b>Tasas:</b>\n`;
+                text += `MLC/CUP: 1 MLC = ${exchangeRates.rate_mlc ?? exchangeRates.rate} CUP\n`;
                 text += `USD/CUP: 1 USD = ${exchangeRates.rate} CUP\n`;
                 text += `USDT/CUP: 1 USDT = ${exchangeRates.rate_usdt} CUP\n`;
                 text += `TRX/CUP: 1 TRX = ${exchangeRates.rate_trx} CUP\n\n`;
