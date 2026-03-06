@@ -87,14 +87,35 @@ bot.command('mi_dinero', async (ctx) => {
 });
 
 bot.command('mis_jugadas', async (ctx) => {
-    // Reuse existing command flow: show actions menu for Mis jugadas
-    const textMenu = '📋 <b>Mis jugadas</b>\n\nSelecciona una acción:';
-    const keyboard = Markup.inlineKeyboard([
-        [Markup.button.callback('✏️ Editar jugada', 'mis_edit')],
-        [Markup.button.callback('🗑 Eliminar jugada', 'mis_delete')],
-        [Markup.button.callback('◀ Volver', 'main')]
-    ]);
-    await safeEdit(ctx, textMenu, keyboard);
+    const uid = ctx.from.id;
+    const { data: bets } = await supabase
+        .from('bets')
+        .select('*')
+        .eq('user_id', uid)
+        .order('placed_at', { ascending: false })
+        .limit(5);
+
+    if (!bets || bets.length === 0) {
+        await safeEdit(ctx,
+            '📭 Aún no has realizado ninguna jugada. ¡Anímate a participar! 🎲\n\n' +
+            'Para jugar, selecciona "🎲 Jugar" en el menú y sigue las instrucciones.',
+            getMainKeyboard(ctx)
+        );
+        return;
+    }
+
+    ctx.session.lastDisplayedBets = bets.map(b => b.id);
+
+    let textBets = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
+    bets.forEach((b, i) => {
+        const date = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY HH:mm');
+        textBets += `<b>${i + 1}.</b> 🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(b.bet_type)}\n` +
+            `   📝 <code>${escapeHTML(b.raw_text)}</code>\n` +
+            `   💰 ${b.cost_cup} CUP / ${b.cost_usd} USD\n` +
+            `   🕒 ${date}\n\n`;
+    });
+
+    await safeEdit(ctx, textBets);
 });
 
 bot.command('referidos', async (ctx) => {
@@ -526,6 +547,7 @@ function getMainKeyboard(ctx) {
         ['🎲 Jugar'],
         ['📋 Mis jugadas', '📥 Recargar'],
         ['📤 Retirar', '💰 Mi dinero'],
+        ['✏️ Editar jugada', '🗑 Eliminar jugada'],
         ['👥 Referidos', '🌐 Abrir WebApp'],
         ['❓ Cómo jugar']
     ];
@@ -2008,7 +2030,7 @@ bot.on(message('text'), async (ctx) => {
     }
 
     // 2. Verificar si es un botón del menú principal
-    const mainButtons = ['🎲 Jugar', '💰 Mi dinero', '📋 Mis jugadas', '👥 Referidos', '❓ Cómo jugar', '🌐 Abrir WebApp', '🔧 Admin'];
+    const mainButtons = ['🎲 Jugar', '💰 Mi dinero', '📋 Mis jugadas', '✏️ Editar jugada', '🗑 Eliminar jugada', '👥 Referidos', '❓ Cómo jugar', '🌐 Abrir WebApp', '🔧 Admin'];
     if (mainButtons.includes(text)) {
         if (text === '🎲 Jugar') {
             await safeEdit(ctx, '🎲 Por favor, selecciona una lotería para comenzar a jugar:', playLotteryKbd());
@@ -2030,14 +2052,59 @@ bot.on(message('text'), async (ctx) => {
             await safeEdit(ctx, text, myMoneyKbd());
             return;
         } else if (text === '📋 Mis jugadas') {
-            // Mostrar menú de Mis jugadas (editar / eliminar)
-            const textMenu = '📋 <b>Mis jugadas</b>\n\nSelecciona una acción:';
-            const keyboard = Markup.inlineKeyboard([
-                [Markup.button.callback('✏️ Editar jugada', 'mis_edit')],
-                [Markup.button.callback('🗑 Eliminar jugada', 'mis_delete')],
-                [Markup.button.callback('◀ Volver', 'main')]
+            const uid = ctx.from.id;
+            const { data: bets } = await supabase
+                .from('bets')
+                .select('*')
+                .eq('user_id', uid)
+                .order('placed_at', { ascending: false })
+                .limit(5);
+
+            if (!bets || bets.length === 0) {
+                await safeEdit(ctx,
+                    '📭 Aún no has realizado ninguna jugada. ¡Anímate a participar! 🎲\n\n' +
+                    'Para jugar, selecciona "🎲 Jugar" en el menú y sigue las instrucciones.',
+                    getMainKeyboard(ctx)
+                );
+                return;
+            }
+
+            // Guardar mapeo índice -> betId en sesión para ediciones por número
+            ctx.session.lastDisplayedBets = bets.map(b => b.id);
+
+            let textBets = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
+            const inlineRows = [];
+            bets.forEach((b, i) => {
+                const date = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY HH:mm');
+                textBets += `<b>${i + 1}.</b> 🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(b.bet_type)}\n` +
+                    `   📝 <code>${escapeHTML(b.raw_text)}</code>\n` +
+                    `   💰 ${b.cost_cup} CUP / ${b.cost_usd} USD\n` +
+                    `   🕒 ${date}\n\n`;
+
+                // Botones por índice (1..5)
+                inlineRows.push([
+                    Markup.button.callback('✏️ Editar', `edit_idx_${i + 1}`),
+                    Markup.button.callback('❌ Cancelar', `cancel_idx_${i + 1}`)
+                ]);
+            });
+
+            // Añadir menú extra para editar/eliminar por número manualmente
+            inlineRows.push([
+                Markup.button.callback('✏️ Editar jugada (por número)', 'mis_edit'),
+                Markup.button.callback('🗑 Eliminar jugada (por número)', 'mis_delete')
             ]);
-            await safeEdit(ctx, textMenu, keyboard);
+
+            await safeEdit(ctx, textBets + '¿Quieres ver más? Puedes consultar el historial completo en la WebApp.');
+            return;
+        } else if (text === '✏️ Editar jugada') {
+            ctx.session.awaitingChooseBetToEdit = true;
+            delete ctx.session.awaitingChooseBetToDelete;
+            await ctx.reply('✏️ Envía el ID (número) de la jugada que deseas editar. Puedes obtener el ID desde la WebApp o desde tus jugadas recientes.');
+            return;
+        } else if (text === '🗑 Eliminar jugada') {
+            ctx.session.awaitingChooseBetToDelete = true;
+            delete ctx.session.awaitingChooseBetToEdit;
+            await ctx.reply('🗑 Envía el ID (número) de la jugada que deseas eliminar. Solo se permite si la sesión aún está abierta.');
             return;
         } else if (text === '👥 Referidos') {
             const uid = ctx.from.id;
