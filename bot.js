@@ -48,7 +48,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const bot = new Telegraf(BOT_TOKEN);
 
 // ========== CONFIGURAR COMANDOS DEL MENÚ LATERAL ==========
-bot.telegram.setMyCommands([
+const MENU_COMMANDS = [
   { command: 'start', description: '🏠 Inicio' },
   { command: 'jugar', description: '🎲 Jugar' },
   { command: 'mi_dinero', description: '💰 Mi dinero' },
@@ -56,7 +56,26 @@ bot.telegram.setMyCommands([
   { command: 'referidos', description: '👥 Referidos' },
   { command: 'ayuda', description: '❓ Ayuda' },
   { command: 'webapp', description: '🌐 Abrir WebApp' }
-]).catch(err => console.error('Error al setear comandos:', err));
+];
+
+async function setMenuCommandsWithRetry(attempt = 1) {
+    try {
+        await bot.telegram.setMyCommands(MENU_COMMANDS);
+        console.log('✅ Comandos del bot configurados');
+    } catch (err) {
+        const isTimeout = err?.code === 'ETIMEDOUT' || err?.errno === 'ETIMEDOUT';
+        const retryDelay = Math.min(5000 * Math.pow(2, attempt - 1), 60000);
+        console.error(`Error al setear comandos (intento ${attempt}):`, err?.message || err);
+
+        if (isTimeout || attempt < 5) {
+            setTimeout(() => {
+                setMenuCommandsWithRetry(attempt + 1);
+            }, retryDelay);
+        }
+    }
+}
+
+setMenuCommandsWithRetry();
 
 // ========== SESIÓN LOCAL ==========
 const localSession = new LocalSession({ database: 'session_db.json' });
