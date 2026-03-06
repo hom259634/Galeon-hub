@@ -1009,18 +1009,33 @@
             const cup = parseFloat(currentUser.cup) || 0;
             const usd = parseFloat(currentUser.usd) || 0;
             const bonusCup = parseFloat(currentUser.bonus_cup) || 0;
-            const totalCupWithBonus = cup + bonusCup;
+            // Mostrar bono solo si no hay saldo principal (cup o usd). Si hay saldo, el backend ya debe haber migrado el bono.
+            const showBonus = (bonusCup > 0) && (cup === 0 && usd === 0);
+            const totalCupWithBonus = cup + (showBonus ? bonusCup : 0);
+
             document.getElementById('quickBalance').innerText = `${totalCupWithBonus.toFixed(2)} CUP`;
             document.getElementById('quickBalanceUsd').innerText = `${usd.toFixed(2)} USD`;
 
             document.getElementById('walletCup').innerText = cup.toFixed(2);
             document.getElementById('walletUsd').innerText = usd.toFixed(2);
             document.getElementById('walletUsdEquivalent').innerText = `≈ ${(usd * exchangeRates.rate).toFixed(2)} CUP`;
-            // Show bonus amount if present; otherwise show 0.00 but clear welcome hint
-            document.getElementById('walletBonus').innerText = `${bonusCup.toFixed(2)} CUP`;
-            if (welcomeBonus) {
-                if (bonusCup > 0) welcomeBonus.innerText = `${bonusCup.toFixed(2)} CUP`;
-                else welcomeBonus.innerText = '';
+
+            const bonusEl = document.getElementById('walletBonus');
+            const welcomeEl = document.getElementById('welcomeBonus');
+            if (showBonus) {
+                if (bonusEl) {
+                    bonusEl.innerText = `${bonusCup.toFixed(2)} CUP`;
+                    bonusEl.parentElement.style.display = '';
+                }
+                if (welcomeEl) {
+                    welcomeEl.style.display = '';
+                    welcomeEl.innerText = `${bonusCupDefault} CUP`;
+                }
+            } else {
+                if (bonusEl) {
+                    bonusEl.parentElement.style.display = 'none';
+                }
+                if (welcomeEl) welcomeEl.style.display = 'none';
             }
         }
 
