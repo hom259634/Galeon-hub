@@ -57,6 +57,79 @@ bot.telegram.setMyCommands([
   { command: 'ayuda', description: '❓ Ayuda' },
   { command: 'webapp', description: '🌐 Abrir WebApp' }
 ]).catch(err => console.error('Error al setear comandos:', err));
+  
+// --- Mapear comandos (slash) a las mismas acciones que los botones del menú ---
+bot.command('start', async (ctx) => {
+    await safeEdit(ctx, '🏠 Bienvenido. Usa el menú para navegar.', getMainKeyboard(ctx));
+});
+
+bot.command('jugar', async (ctx) => {
+    await safeEdit(ctx, '🎲 Por favor, selecciona una lotería para comenzar a jugar:', playLotteryKbd());
+});
+
+bot.command('mi_dinero', async (ctx) => {
+    const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx);
+    ctx.dbUser = user;
+    const rate = await getExchangeRateUSD();
+    const cup = parseFloat(user.cup) || 0;
+    const usd = parseFloat(user.usd) || 0;
+    const bonusCup = parseFloat(user.bonus_cup) || 0;
+    const cupToUsd = (cup / rate).toFixed(2);
+    const usdToCup = (usd * rate).toFixed(2);
+
+    const text = `💰 <b>Tu saldo actual es:</b>\n\n` +
+        `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (aprox. ${cupToUsd} USD)\n` +
+        `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n` +
+        `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n\n` +
+        `¿Qué deseas hacer?`;
+
+    await safeEdit(ctx, text, myMoneyKbd());
+});
+
+bot.command('mis_jugadas', async (ctx) => {
+    // Reuse existing command flow: show actions menu for Mis jugadas
+    const textMenu = '📋 <b>Mis jugadas</b>\n\nSelecciona una acción:';
+    const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('✏️ Editar jugada', 'mis_edit')],
+        [Markup.button.callback('🗑 Eliminar jugada', 'mis_delete')],
+        [Markup.button.callback('◀ Volver', 'main')]
+    ]);
+    await safeEdit(ctx, textMenu, keyboard);
+});
+
+bot.command('referidos', async (ctx) => {
+    // reuse text handler logic for Referidos
+    const uid = ctx.from.id;
+    const { count } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('ref_by', uid);
+    const botInfo = await ctx.telegram.getMe();
+    const link = `https://t.me/${botInfo.username}?start=${uid}`;
+    await safeEdit(ctx,
+        `💸 <b>¡GANA DINERO EXTRA INVITANDO AMIGOS! 💰</b>\n\n` +
+        `🎯 <b>¿Cómo funciona?</b>\n` +
+        `1️⃣ Comparte tu enlace personal con amigos\n` +
+        `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
+        `3️⃣ Recibirás un porcentaje de CADA apuesta que realicen\n` +
+        `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
+        `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
+        `📲 <b>Tu enlace mágico:</b> 👇\n` +
+        `<code>${escapeHTML(link)}</code>\n\n` +
+        `📊 <b>Tus estadísticas:</b>\n` +
+        `👥 Referidos registrados: ${count || 0}\n\n` +
+        `¡Comparte y empieza a ganar hoy mismo!`,
+        getMainKeyboard(ctx)
+    );
+});
+
+bot.command('ayuda', async (ctx) => {
+    await safeEdit(ctx, '❓ <b>Cómo jugar</b>\n\nEnvía o usa el menú para elegir lotería, tipo y monto. También puedes abrir la WebApp.', getMainKeyboard(ctx));
+});
+
+bot.command('webapp', async (ctx) => {
+    await safeEdit(ctx, '🌐 Abriendo WebApp...', getMainKeyboard(ctx));
+});
 
 // ========== SESIÓN LOCAL ==========
 const localSession = new LocalSession({ database: 'session_db.json' });
@@ -448,17 +521,18 @@ function playLotteryKbd() {
 
 function getMainKeyboard(ctx) {
     const isAdm = ctx && ctx.from && isAdmin(ctx.from.id);
-    const buttons = [
-        [Markup.button.callback('🎲 Jugar', 'play')],
-        [Markup.button.callback('📋 Mis jugadas', 'mis_jugadas'), Markup.button.callback('📥 Recargar', 'recharge')],
-        [Markup.button.callback('📤 Retirar', 'withdraw'), Markup.button.callback('💰 Mi dinero', 'my_money')],
-        [Markup.button.callback('👥 Referidos', 'referidos'), Markup.button.callback('🌐 WebApp', 'webapp')],
-        [Markup.button.callback('❓ Ayuda', 'ayuda')]
+    // Usar teclado tradicional (reply keyboard) para que el menú lateral abra en el área del teclado
+    const rows = [
+        ['🎲 Jugar'],
+        ['📋 Mis jugadas', '📥 Recargar'],
+        ['📤 Retirar', '💰 Mi dinero'],
+        ['👥 Referidos', '🌐 Abrir WebApp'],
+        ['❓ Cómo jugar']
     ];
     if (isAdm) {
-        buttons.splice(4, 0, [Markup.button.callback('🛠️ Admin', 'admin')]);
+        rows.push(['🔧 Admin']);
     }
-    return Markup.inlineKeyboard(buttons);
+    return Markup.keyboard(rows).resize();
 }
 
 function playTypeKbd() {
