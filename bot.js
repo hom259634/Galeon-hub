@@ -624,10 +624,13 @@ bot.command('start', async (ctx) => {
     );
 
     if (ctx.session?.isNewUser) {
+        const bonusAmount = parseFloat(ctx.dbUser?.bonus_cup);
+        const normalizedBonus = Number.isFinite(bonusAmount) ? bonusAmount : BONUS_CUP_DEFAULT;
+        const bonusDisplay = Number.isInteger(normalizedBonus) ? normalizedBonus.toFixed(0) : normalizedBonus.toFixed(2);
         await ctx.reply(
-            `🎁 <b>¡Bono de bienvenida acreditado!</b>\n\n` +
-            `Se te agregaron <b>${BONUS_CUP_DEFAULT.toFixed(2)} CUP</b> por crear tu cuenta.\n` +
-            `¡Mucha suerte! 🍀`,
+            `🎁 <b>¡Bono de bienvenida!</b>\n\n` +
+            `Has recibido <b>${bonusDisplay} CUP</b> como bono no retirable.\n` +
+            `Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`,
             { parse_mode: 'HTML' }
         );
         ctx.session.isNewUser = false;
