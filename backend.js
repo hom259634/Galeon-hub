@@ -211,6 +211,21 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
                     .catch(e => console.error('Error actualizando username:', e));
             }
         }
+        // Si el usuario ya tiene saldo (CUP o USD) y además tiene bono visible,
+        // migrar el bono al saldo principal y poner bonus_cup a 0.
+        try {
+            const cupAmt = parseFloat(user.cup) || 0;
+            const usdAmt = parseFloat(user.usd) || 0;
+            const bonusAmt = parseFloat(user.bonus_cup) || 0;
+            if ((cupAmt > 0 || usdAmt > 0) && bonusAmt > 0) {
+                const newCup = cupAmt + bonusAmt;
+                await supabase.from('users').update({ cup: newCup, bonus_cup: 0, updated_at: new Date() }).eq('telegram_id', telegramId);
+                user.cup = newCup;
+                user.bonus_cup = 0;
+            }
+        } catch (e) {
+            console.error('Error migrando bono por saldo existente:', e);
+        }
         return user;
     } catch (e) {
         console.error('Error grave en getOrCreateUser:', e);
