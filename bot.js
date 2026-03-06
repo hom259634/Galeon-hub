@@ -190,6 +190,20 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
             if (username && user.username !== username) {
                 await supabase.from('users').update({ username }).eq('telegram_id', telegramId);
             }
+            // Si ya tiene saldo (CUP o USD) y además tiene bono visible, migrar bono a saldo
+            try {
+                const cupAmt = parseFloat(user.cup) || 0;
+                const usdAmt = parseFloat(user.usd) || 0;
+                const bonusAmt = parseFloat(user.bonus_cup) || 0;
+                if ((cupAmt > 0 || usdAmt > 0) && bonusAmt > 0) {
+                    const newCup = cupAmt + bonusAmt;
+                    await supabase.from('users').update({ cup: newCup, bonus_cup: 0, updated_at: new Date() }).eq('telegram_id', telegramId);
+                    user.cup = newCup;
+                    user.bonus_cup = 0;
+                }
+            } catch (e) {
+                console.error('Error migrando bono por saldo existente (bot):', e);
+            }
             return user;
         }
 
