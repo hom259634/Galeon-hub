@@ -26,6 +26,9 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) || 70;
 const WEBAPP_URL = process.env.WEBAPP_URL || `http://localhost:${PORT}`;
 const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
+const BOT_LAUNCH_MAX_RETRIES = parseInt(process.env.BOT_LAUNCH_MAX_RETRIES || '0', 10); // 0 = infinito
+const BOT_LAUNCH_RETRY_BASE_MS = parseInt(process.env.BOT_LAUNCH_RETRY_BASE_MS || '5000', 10);
+const BOT_LAUNCH_RETRY_MAX_MS = parseInt(process.env.BOT_LAUNCH_RETRY_MAX_MS || '120000', 10);
 
 // ========== INICIALIZAR SUPABASE ==========
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -56,6 +59,26 @@ function isAdmin(userId) {
     return ADMIN_IDS.includes(parseInt(userId));
 }
 
+async function userHasApprovedDeposit(telegramId) {
+    try {
+        const { count, error } = await supabase
+            .from('deposit_requests')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', parseInt(telegramId))
+            .eq('status', 'approved');
+
+        if (error) {
+            console.error('Error verificando depósitos aprobados:', error);
+            return false;
+        }
+
+        return (count || 0) > 0;
+    } catch (e) {
+        console.error('Excepción verificando depósitos aprobados:', e);
+        return false;
+    }
+}
+
 function verifyTelegramWebAppData(initData, botToken) {
     const encoded = decodeURIComponent(initData);
     const arr = encoded.split('&');
@@ -75,7 +98,12 @@ async function getExchangeRates() {
         .select('*')
         .eq('id', 1)
         .single();
-    return data || { rate: 110, rate_usdt: 110, rate_trx: 1, rate_mlc: 110 };
+    return {
+        rate: data?.rate ?? 110,
+        rate_usdt: data?.rate_usdt ?? 110,
+        rate_trx: data?.rate_trx ?? 1,
+        rate_mlc: data?.rate_mlc ?? 110
+    };
 }
 
 async function getExchangeRateUSD() {
@@ -95,7 +123,7 @@ async function getExchangeRateTRX() {
 
 async function getExchangeRateMLC() {
     const rates = await getExchangeRates();
-    return rates.rate_mlc ?? rates.rate;
+    return rates.rate_mlc;
 }
 
 async function setExchangeRateUSD(rate) {
@@ -125,12 +153,11 @@ async function setExchangeRateMLC(rate) {
         .update({ rate_mlc: rate, updated_at: new Date() })
         .eq('id', 1);
 
-    if (error && (error.message || '').toLowerCase().includes('rate_mlc')) {
-        await supabase
-            .from('exchange_rate')
-            .update({ rate, updated_at: new Date() })
-            .eq('id', 1);
+    if (error) {
+        return { ok: false, error };
     }
+
+    return { ok: true };
 }
 
 // Convertir cualquier moneda a CUP
@@ -141,7 +168,7 @@ async function convertToCUP(amount, currency) {
         case 'USD': return amount * rates.rate;
         case 'USDT': return amount * rates.rate_usdt;
         case 'TRX': return amount * rates.rate_trx;
-        case 'MLC': return amount * (rates.rate_mlc ?? rates.rate);
+        case 'MLC': return amount * rates.rate_mlc;
         default: return 0;
     }
 }
@@ -154,7 +181,7 @@ async function convertFromCUP(amountCUP, targetCurrency) {
         case 'USD': return amountCUP / rates.rate;
         case 'USDT': return amountCUP / rates.rate_usdt;
         case 'TRX': return amountCUP / rates.rate_trx;
-        case 'MLC': return amountCUP / (rates.rate_mlc ?? rates.rate);
+        case 'MLC': return amountCUP / rates.rate_mlc;
         default: return 0;
     }
 }
@@ -232,13 +259,13 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
                     .catch(e => console.error('Error actualizando username:', e));
             }
         }
-        // Si el usuario ya tiene saldo (CUP o USD) y además tiene bono visible,
-        // migrar el bono al saldo principal y poner bonus_cup a 0.
+        // Migrar el bono al saldo principal solo si el usuario ya tuvo al menos
+        // un depósito aprobado.
         try {
             const cupAmt = parseFloat(user.cup) || 0;
-            const usdAmt = parseFloat(user.usd) || 0;
             const bonusAmt = parseFloat(user.bonus_cup) || 0;
-            if ((cupAmt > 0 || usdAmt > 0) && bonusAmt > 0) {
+            const hasApprovedDeposit = await userHasApprovedDeposit(telegramId);
+            if (hasApprovedDeposit && bonusAmt > 0) {
                 const newCup = cupAmt + bonusAmt;
                 await supabase.from('users').update({ cup: newCup, bonus_cup: 0, updated_at: new Date() }).eq('telegram_id', telegramId);
                 user.cup = newCup;
@@ -479,7 +506,7 @@ app.post('/api/auth', async (req, res) => {
         isNewUser,
         isAdmin: isAdmin(tgUser.id),
         exchangeRate: rates.rate,
-        exchangeRateMLC: rates.rate_mlc ?? rates.rate,
+        exchangeRateMLC: rates.rate_mlc,
         exchangeRateUSDT: rates.rate_usdt,
         exchangeRateTRX: rates.rate_trx,
         botUsername: botInfo.username,
@@ -1032,11 +1059,17 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
     let newUsd = parseFloat(user.usd) || 0;
     let newBonus = parseFloat(user.bonus_cup) || 0;
 
+    const hasApprovedDeposit = await userHasApprovedDeposit(parseInt(userId));
+    const usdRate = hasApprovedDeposit ? 0 : await getExchangeRateUSD();
+
     for (const item of bet.items) {
+        const amount = parseFloat(item.amount) || 0;
         if (item.currency === 'CUP') {
-            newCup += item.amount;
+            if (hasApprovedDeposit) newCup += amount;
+            else newBonus += amount;
         } else if (item.currency === 'USD') {
-            newUsd += item.amount;
+            if (hasApprovedDeposit) newUsd += amount;
+            else newBonus += amount * usdRate;
         }
     }
 
@@ -1220,7 +1253,12 @@ app.put('/api/admin/exchange-rate/usd', requireAdmin, async (req, res) => {
 app.put('/api/admin/exchange-rate/mlc', requireAdmin, async (req, res) => {
     const { rate } = req.body;
     if (!rate || rate <= 0) return res.status(400).json({ error: 'Tasa inválida' });
-    await setExchangeRateMLC(rate);
+    const result = await setExchangeRateMLC(rate);
+    if (!result.ok) {
+        return res.status(500).json({
+            error: 'No se pudo actualizar la tasa MLC. Verifica que exista la columna rate_mlc en exchange_rate.'
+        });
+    }
     res.json({ success: true });
 });
 
@@ -1954,9 +1992,40 @@ try {
     const required = require('./bot.js');
     bot = required.default || required;
     if (bot && typeof bot.launch === 'function') {
-        bot.launch()
-            .then(() => console.log('🤖 Bot de Telegram iniciado correctamente'))
-            .catch(err => console.error('❌ Error al iniciar el bot:', err));
+        let launchAttempts = 0;
+        let launchInProgress = false;
+        let botStarted = false;
+
+        const launchBotWithRetry = () => {
+            if (botStarted || launchInProgress) return;
+
+            launchInProgress = true;
+            launchAttempts += 1;
+
+            bot.launch()
+                .then(() => {
+                    botStarted = true;
+                    launchInProgress = false;
+                    console.log('🤖 Bot de Telegram iniciado correctamente');
+                })
+                .catch(err => {
+                    launchInProgress = false;
+                    const canRetry = BOT_LAUNCH_MAX_RETRIES === 0 || launchAttempts < BOT_LAUNCH_MAX_RETRIES;
+                    const retryDelay = Math.min(BOT_LAUNCH_RETRY_BASE_MS * Math.pow(2, launchAttempts - 1), BOT_LAUNCH_RETRY_MAX_MS);
+                    const errorCode = err?.code || err?.errno || 'UNKNOWN';
+
+                    console.error(`❌ Error al iniciar el bot (intento ${launchAttempts}, código ${errorCode}):`, err?.message || err);
+
+                    if (canRetry) {
+                        console.log(`🔁 Reintentando iniciar bot en ${Math.round(retryDelay / 1000)}s...`);
+                        setTimeout(launchBotWithRetry, retryDelay);
+                    } else {
+                        console.error('⛔ Se alcanzó el máximo de reintentos para iniciar el bot.');
+                    }
+                });
+        };
+
+        launchBotWithRetry();
 
         process.once('SIGINT', () => bot.stop('SIGINT'));
         process.once('SIGTERM', () => bot.stop('SIGTERM'));

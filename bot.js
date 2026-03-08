@@ -86,7 +86,27 @@ function isAdmin(userId) {
     return ADMIN_IDS.includes(userId);
 }
 
-// ========== FUNCIONES AUXILIARES ==========
+async function userHasApprovedDeposit(telegramId) {
+    try {
+        const { count, error } = await supabase
+            .from('deposit_requests')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', parseInt(telegramId))
+            .eq('status', 'approved');
+
+        if (error) {
+            console.error('Error verificando depósitos aprobados (bot):', error);
+            return false;
+        }
+
+        return (count || 0) > 0;
+    } catch (e) {
+        console.error('Excepción verificando depósitos aprobados (bot):', e);
+        return false;
+    }
+}
+
+// ========== FUNCIONES AUXILIARES =====dame el comando para la migracion en sql console=====
 
 function escapeHTML(text) {
     if (!text) return '';
@@ -128,7 +148,12 @@ async function getExchangeRates() {
         .select('*')
         .eq('id', 1)
         .single();
-    return data || { rate: 110, rate_usdt: 110, rate_trx: 1, rate_mlc: 110 };
+    return {
+        rate: data?.rate ?? 110,
+        rate_usdt: data?.rate_usdt ?? 110,
+        rate_trx: data?.rate_trx ?? 1,
+        rate_mlc: data?.rate_mlc ?? 110
+    };
 }
 
 async function getExchangeRateUSD() {
@@ -148,7 +173,7 @@ async function getExchangeRateTRX() {
 
 async function getExchangeRateMLC() {
     const rates = await getExchangeRates();
-    return rates.rate_mlc ?? rates.rate;
+    return rates.rate_mlc;
 }
 
 async function setExchangeRateUSD(rate) {
@@ -178,12 +203,11 @@ async function setExchangeRateMLC(rate) {
         .update({ rate_mlc: rate, updated_at: new Date() })
         .eq('id', 1);
 
-    if (error && (error.message || '').toLowerCase().includes('rate_mlc')) {
-        await supabase
-            .from('exchange_rate')
-            .update({ rate, updated_at: new Date() })
-            .eq('id', 1);
+    if (error) {
+        return { ok: false, error };
     }
+
+    return { ok: true };
 }
 
 async function convertToCUP(amount, currency) {
@@ -193,7 +217,7 @@ async function convertToCUP(amount, currency) {
         case 'USD': return amount * rates.rate;
         case 'USDT': return amount * rates.rate_usdt;
         case 'TRX': return amount * rates.rate_trx;
-        case 'MLC': return amount * (rates.rate_mlc ?? rates.rate);
+        case 'MLC': return amount * rates.rate_mlc;
         default: return 0;
     }
 }
@@ -205,7 +229,7 @@ async function convertFromCUP(amountCUP, targetCurrency) {
         case 'USD': return amountCUP / rates.rate;
         case 'USDT': return amountCUP / rates.rate_usdt;
         case 'TRX': return amountCUP / rates.rate_trx;
-        case 'MLC': return amountCUP / (rates.rate_mlc ?? rates.rate);
+        case 'MLC': return amountCUP / rates.rate_mlc;
         default: return 0;
     }
 }
@@ -228,12 +252,12 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
             if (username && user.username !== username) {
                 await supabase.from('users').update({ username }).eq('telegram_id', telegramId);
             }
-            // Si ya tiene saldo (CUP o USD) y además tiene bono visible, migrar bono a saldo
+            // Migrar bono a saldo principal solo si el usuario ya tuvo depósito aprobado
             try {
                 const cupAmt = parseFloat(user.cup) || 0;
-                const usdAmt = parseFloat(user.usd) || 0;
                 const bonusAmt = parseFloat(user.bonus_cup) || 0;
-                if ((cupAmt > 0 || usdAmt > 0) && bonusAmt > 0) {
+                const hasApprovedDeposit = await userHasApprovedDeposit(telegramId);
+                if (hasApprovedDeposit && bonusAmt > 0) {
                     const newCup = cupAmt + bonusAmt;
                     await supabase.from('users').update({ cup: newCup, bonus_cup: 0, updated_at: new Date() }).eq('telegram_id', telegramId);
                     user.cup = newCup;
@@ -1611,7 +1635,7 @@ bot.action('adm_view', async (ctx) => {
     const { data: prices } = await supabase.from('play_prices').select('*');
 
     let text = `💰 <b>Tasas de cambio:</b>\n`;
-    text += `MLC/CUP: 1 MLC = ${rates.rate_mlc ?? rates.rate} CUP\n`;
+    text += `MLC/CUP: 1 MLC = ${rates.rate_mlc} CUP\n`;
     text += `USD/CUP: 1 USD = ${rates.rate} CUP\n`;
     text += `USDT/CUP: 1 USDT = ${rates.rate_usdt} CUP\n`;
     text += `TRX/CUP: 1 TRX = ${rates.rate_trx} CUP\n\n`;
@@ -2129,7 +2153,11 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('❌ Número inválido. Por favor, envía un número positivo (ej: 120).');
             return;
         }
-        await setExchangeRateMLC(rate);
+        const result = await setExchangeRateMLC(rate);
+        if (!result.ok) {
+            await ctx.reply('❌ No se pudo actualizar la tasa MLC. Verifica que exista la columna rate_mlc en la tabla exchange_rate.');
+            return;
+        }
         await ctx.reply(`✅ Tasa MLC/CUP actualizada: 1 MLC = ${rate} CUP`, { parse_mode: 'HTML' });
         delete session.adminAction;
         await safeEdit(ctx, '🔧 <b>Panel de administración</b>', adminPanelKbd());
@@ -2394,13 +2422,14 @@ bot.on(message('text'), async (ctx) => {
 
         const minDepositUSD = await getMinDepositUSD();
         const rate = await getExchangeRateUSD();
+        const rateMLC = await getExchangeRateMLC();
         let amountUSD = 0;
         switch (parsed.currency) {
             case 'USD': amountUSD = parsed.amount; break;
             case 'CUP': amountUSD = parsed.amount / rate; break;
             case 'USDT': amountUSD = parsed.amount; break;
             case 'TRX': amountUSD = parsed.amount * await getExchangeRateTRX() / rate; break;
-            case 'MLC': amountUSD = parsed.amount; break;
+            case 'MLC': amountUSD = parsed.amount * rateMLC / rate; break;
         }
         if (amountUSD < minDepositUSD) {
             await ctx.reply(`❌ El monto mínimo de depósito es ${minDepositUSD} USD (equivalente a ${(minDepositUSD * rate).toFixed(2)} CUP). Tu monto equivale a ${amountUSD.toFixed(2)} USD.`, getMainKeyboard(ctx));
@@ -2454,13 +2483,14 @@ bot.on(message('text'), async (ctx) => {
 
         const minWithdrawUSD = await getMinWithdrawUSD();
         const rateUSD = await getExchangeRateUSD();
+        const rateMLC = await getExchangeRateMLC();
         let amountUSD = 0;
         switch (currency) {
             case 'USD': amountUSD = amount; break;
             case 'CUP': amountUSD = amount / rateUSD; break;
             case 'USDT': amountUSD = amount; break;
             case 'TRX': amountUSD = amount * await getExchangeRateTRX() / rateUSD; break;
-            case 'MLC': amountUSD = amount; break;
+            case 'MLC': amountUSD = amount * rateMLC / rateUSD; break;
         }
         if (amountUSD < minWithdrawUSD) {
             await ctx.reply(`❌ El monto mínimo de retiro es ${minWithdrawUSD} USD (equivalente a ${(minWithdrawUSD * rateUSD).toFixed(2)} CUP). Tu monto equivale a ${amountUSD.toFixed(2)} USD.`, getMainKeyboard(ctx));
