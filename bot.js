@@ -3114,10 +3114,8 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
 
         const isFirstDeposit = !(prevApproved && prevApproved.length > 0);
 
-        const usdFollowupSms = 'Con tu saldo USD tambien puedes transferir, ademas retirar en CUP,USDT,TRX o MLC segun los metodos disponibles.';
-        const thanksSms = '¡Gracias por confiar en nosotros!';
-
         if (parsed.currency === 'USD') {
+            const usdFollowupSms = 'Con tu saldo USD también puedes transferir y además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.';
             const newUsd = (parseFloat(user.usd) || 0) + parsed.amount;
             await supabase
                 .from('users')
@@ -3149,12 +3147,11 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                         `✅ <b>Depósito aprobado</b>\n\n` +
                         `💰 Monto depositado: ${request.amount}\n` +
                         `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n` +
-                        `🎁 Tu bono de bienvenida de <b>${addCup.toFixed(2)} CUP</b> se ha movido a tu saldo principal.`,
+                        `🎁 Tu bono de bienvenida de <b>${addCup.toFixed(2)} CUP</b> se ha movido a tu saldo principal.\n` +
+                        `ℹ️ ${usdFollowupSms}\n\n` +
+                        `¡Gracias por confiar en nosotros!`,
                         { parse_mode: 'HTML' }
                     );
-
-                    await ctx.telegram.sendMessage(request.user_id, usdFollowupSms);
-                    await ctx.telegram.sendMessage(request.user_id, thanksSms);
                 } else {
                     await supabase
                         .from('deposit_requests')
@@ -3164,12 +3161,11 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                     await ctx.telegram.sendMessage(request.user_id,
                         `✅ <b>Depósito aprobado</b>\n\n` +
                         `💰 Monto depositado: ${request.amount}\n` +
-                        `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.`,
+                        `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n` +
+                        `ℹ️ ${usdFollowupSms}\n\n` +
+                        `¡Gracias por confiar en nosotros!`,
                         { parse_mode: 'HTML' }
                     );
-
-                    await ctx.telegram.sendMessage(request.user_id, usdFollowupSms);
-                    await ctx.telegram.sendMessage(request.user_id, thanksSms);
                 }
             } else {
                 await supabase
@@ -3180,12 +3176,11 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                 await ctx.telegram.sendMessage(request.user_id,
                     `✅ <b>Depósito aprobado</b>\n\n` +
                     `💰 Monto depositado: ${request.amount}\n` +
-                    `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.`,
+                    `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n` +
+                    `ℹ️ ${usdFollowupSms}\n\n` +
+                    `¡Gracias por confiar en nosotros!`,
                     { parse_mode: 'HTML' }
                 );
-
-                await ctx.telegram.sendMessage(request.user_id, usdFollowupSms);
-                await ctx.telegram.sendMessage(request.user_id, thanksSms);
             }
         } else {
             const newCup = (parseFloat(user.cup) || 0) + amountCUP;
