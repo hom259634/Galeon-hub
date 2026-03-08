@@ -186,6 +186,42 @@ async function convertFromCUP(amountCUP, targetCurrency) {
     }
 }
 
+async function buildCrossCurrencyDebitPlan(user, amount, currency) {
+    const cupBalance = parseFloat(user?.cup) || 0;
+    const usdBalance = parseFloat(user?.usd) || 0;
+    const rateUSD = await getExchangeRateUSD();
+    const amountCUP = await convertToCUP(amount, currency);
+    const totalAvailableCUP = cupBalance + (usdBalance * rateUSD);
+
+    if (amountCUP <= 0 || totalAvailableCUP < amountCUP) {
+        return {
+            ok: false,
+            amountCUP,
+            totalAvailableCUP,
+            cupBalance,
+            usdBalance,
+            rateUSD,
+            cupDebit: 0,
+            usdDebit: 0
+        };
+    }
+
+    const cupDebit = Math.min(cupBalance, amountCUP);
+    const remainingCup = amountCUP - cupDebit;
+    const usdDebit = remainingCup > 0 ? (remainingCup / rateUSD) : 0;
+
+    return {
+        ok: true,
+        amountCUP,
+        totalAvailableCUP,
+        cupBalance,
+        usdBalance,
+        rateUSD,
+        cupDebit,
+        usdDebit
+    };
+}
+
 // ========== FUNCIÓN GETORCREATEUSER CON MANEJO DE ERROR DE COLUMNA ==========
 async function getOrCreateUser(telegramId, firstName = 'Jugador', username = null) {
     try {
@@ -727,23 +763,12 @@ app.post('/api/withdraw-requests', async (req, res) => {
         return res.status(400).json({ error: `La moneda del método es ${method.currency}, no coincide.` });
     }
 
-    // Verificar saldo disponible
-    let saldoSuficiente = false;
-    let saldoMensaje = '';
-    if (currency === 'CUP') {
-        if (parseFloat(user.cup) >= amount) saldoSuficiente = true;
-        else saldoMensaje = `Saldo CUP insuficiente. Disponible: ${parseFloat(user.cup).toFixed(2)} CUP`;
-    } else if (currency === 'USD') {
-        if (parseFloat(user.usd) >= amount) saldoSuficiente = true;
-        else saldoMensaje = `Saldo USD insuficiente. Disponible: ${parseFloat(user.usd).toFixed(2)} USD`;
-    } else {
-        const cupNeeded = await convertToCUP(amount, currency);
-        if (parseFloat(user.cup) >= cupNeeded) saldoSuficiente = true;
-        else saldoMensaje = `Saldo CUP insuficiente. Necesitas ${cupNeeded.toFixed(2)} CUP.`;
-    }
-
-    if (!saldoSuficiente) {
-        return res.status(400).json({ error: saldoMensaje });
+    // Verificar saldo real disponible (CUP + USD convertido)
+    const debitPlan = await buildCrossCurrencyDebitPlan(user, parseFloat(amount), currency);
+    if (!debitPlan.ok) {
+        return res.status(400).json({
+            error: `Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
+        });
     }
 
     if (method.min_amount !== null && amount < method.min_amount) {
@@ -795,8 +820,8 @@ app.post('/api/transfer', async (req, res) => {
     if (!from || !to || !amount || !currency || amount <= 0) {
         return res.status(400).json({ error: 'Datos inválidos' });
     }
-    if (!['CUP', 'USD'].includes(currency)) {
-        return res.status(400).json({ error: 'Solo se permite transferir CUP o USD' });
+    if (!['CUP', 'USD', 'USDT', 'TRX', 'MLC'].includes(currency)) {
+        return res.status(400).json({ error: 'Moneda no soportada. Usa CUP, USD, USDT, TRX o MLC' });
     }
     if (from === to) {
         return res.status(400).json({ error: 'No puedes transferirte a ti mismo' });
@@ -832,39 +857,43 @@ app.post('/api/transfer', async (req, res) => {
         return res.status(404).json({ error: 'Usuario destino no encontrado' });
     }
 
-    // Verificar saldo origen
-    if (currency === 'CUP') {
-        if (parseFloat(userFrom.cup) < amount) {
-            return res.status(400).json({ error: 'Saldo CUP insuficiente' });
-        }
-    } else {
-        if (parseFloat(userFrom.usd) < amount) {
-            return res.status(400).json({ error: 'Saldo USD insuficiente' });
-        }
+    // Verificar y calcular débito real
+    const debitPlan = await buildCrossCurrencyDebitPlan(userFrom, parseFloat(amount), currency);
+    if (!debitPlan.ok) {
+        return res.status(400).json({
+            error: `Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
+        });
     }
 
-    // Realizar transferencia
+    // Debitar origen
+    await supabase
+        .from('users')
+        .update({
+            cup: (parseFloat(userFrom.cup) || 0) - debitPlan.cupDebit,
+            usd: (parseFloat(userFrom.usd) || 0) - debitPlan.usdDebit,
+            updated_at: new Date()
+        })
+        .eq('telegram_id', from);
+
+    // Acreditar destino
     if (currency === 'CUP') {
         await supabase
             .from('users')
-            .update({ cup: parseFloat(userFrom.cup) - amount, updated_at: new Date() })
-            .eq('telegram_id', from);
+            .update({ cup: (parseFloat(targetUser.cup) || 0) + parseFloat(amount), updated_at: new Date() })
+            .eq('telegram_id', targetUserId);
+    } else if (currency === 'USD') {
         await supabase
             .from('users')
-            .update({ cup: parseFloat(targetUser.cup) + amount, updated_at: new Date() })
+            .update({ usd: (parseFloat(targetUser.usd) || 0) + parseFloat(amount), updated_at: new Date() })
             .eq('telegram_id', targetUserId);
     } else {
         await supabase
             .from('users')
-            .update({ usd: parseFloat(userFrom.usd) - amount, updated_at: new Date() })
-            .eq('telegram_id', from);
-        await supabase
-            .from('users')
-            .update({ usd: parseFloat(targetUser.usd) + amount, updated_at: new Date() })
+            .update({ cup: (parseFloat(targetUser.cup) || 0) + debitPlan.amountCUP, updated_at: new Date() })
             .eq('telegram_id', targetUserId);
     }
 
-    res.json({ success: true });
+    res.json({ success: true, creditedCupEquivalent: currency === 'CUP' || currency === 'USD' ? null : debitPlan.amountCUP });
 });
 
 // --- Registro de apuestas ---
@@ -954,13 +983,8 @@ app.post('/api/bets', async (req, res) => {
         let newCup = safe(userAfterRefund.cup);
 
         if (totalUSD > 0) {
-            const rateUsd = await getExchangeRateUSD();
-            const totalDisponible = newUsd + newBonus / rateUsd;
-            if (totalDisponible < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente para la edición' });
-            const bonoEnUSD = newBonus / rateUsd;
-            const usarBonoUSD = Math.min(bonoEnUSD, totalUSD);
-            newBonus -= usarBonoUSD * rateUsd;
-            newUsd -= (totalUSD - usarBonoUSD);
+            if (newUsd < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente para la edición. No se usa CUP para apostar en USD.' });
+            newUsd -= totalUSD;
         }
 
         if (totalCUP > 0) {
@@ -994,13 +1018,8 @@ app.post('/api/bets', async (req, res) => {
     let newCup = safe(user.cup);
 
     if (totalUSD > 0) {
-        const rateUsd = await getExchangeRateUSD();
-        const totalDisponible = newUsd + newBonus / rateUsd;
-        if (totalDisponible < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente' });
-        const bonoEnUSD = newBonus / rateUsd;
-        const usarBonoUSD = Math.min(bonoEnUSD, totalUSD);
-        newBonus -= usarBonoUSD * rateUsd;
-        newUsd -= (totalUSD - usarBonoUSD);
+        if (newUsd < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente. No se usa CUP para apostar en USD.' });
+        newUsd -= totalUSD;
     }
 
     if (totalCUP > 0) {
@@ -1777,6 +1796,13 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
             `📌 El saldo ya ha sido acreditado a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
+
+        if (request.currency === 'USD') {
+            await bot.telegram.sendMessage(
+                request.user_id,
+                'Con tu saldo USD tambien puedes jugar,transferir,ademas de retirar en CUP y en las otras monedas segun este disponibles.'
+            );
+        }
     } catch (e) {}
 
     res.json({ success: true });
@@ -1880,21 +1906,13 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
     // Por lo tanto, al aprobar debemos descontar el saldo.
 
     const user = await getOrCreateUser(request.user_id);
-    let newCup = parseFloat(user.cup) || 0;
-    let newUsd = parseFloat(user.usd) || 0;
-
-    if (request.currency === 'CUP') {
-        newCup -= parseFloat(request.amount);
-    } else if (request.currency === 'USD') {
-        newUsd -= parseFloat(request.amount);
-    } else {
-        const cupAmount = await convertToCUP(parseFloat(request.amount), request.currency);
-        newCup -= cupAmount;
-    }
-
-    if (newCup < 0 || newUsd < 0) {
+    const debitPlan = await buildCrossCurrencyDebitPlan(user, parseFloat(request.amount), request.currency);
+    if (!debitPlan.ok) {
         return res.status(400).json({ error: 'Saldo insuficiente (posible cambio de tasa). Rechace la solicitud.' });
     }
+
+    let newCup = (parseFloat(user.cup) || 0) - debitPlan.cupDebit;
+    let newUsd = (parseFloat(user.usd) || 0) - debitPlan.usdDebit;
 
     await supabase
         .from('users')
