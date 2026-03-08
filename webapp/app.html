@@ -699,11 +699,10 @@
                 betFormContainer.classList.add('hidden');
                 sessionStatus.classList.add('hidden');
 
-                const today = new Date().toISOString().split('T')[0];
                 try {
-                    // Consultar al servidor por la sesión ABIERTA para esta lotería/fecha.
+                    // Consultar al servidor por la sesión ABIERTA para esta lotería.
                     // El servidor determina apertura según su lógica (igual que el bot).
-                    const res = await fetch(`/api/lottery-sessions/active?lottery=${encodeURIComponent(selectedLottery)}&date=${today}`);
+                    const res = await fetch(`/api/lottery-sessions/active?lottery=${encodeURIComponent(selectedLottery)}`);
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const session = await res.json();
 
@@ -951,7 +950,7 @@
                 isAdmin = data.isAdmin || false;
                 exchangeRates = {
                     rate: data.exchangeRate || 110,
-                    rate_mlc: data.exchangeRateMLC || data.exchangeRate || 110,
+                    rate_mlc: data.exchangeRateMLC || 110,
                     rate_usdt: data.exchangeRateUSDT || 110,
                     rate_trx: data.exchangeRateTRX || 1
                 };
@@ -969,9 +968,11 @@
                 }
 
                 if (data.isNewUser && (parseFloat(currentUser.bonus_cup) || 0) > 0) {
+                    const bonusValue = parseFloat(currentUser.bonus_cup) || 0;
+                    const bonusDisplay = Number.isInteger(bonusValue) ? bonusValue.toFixed(0) : bonusValue.toFixed(2);
                     iziToast.success({
-                        title: '🎁 Bono acreditado',
-                        message: `Se te agregaron ${(parseFloat(currentUser.bonus_cup) || 0).toFixed(2)} CUP por crear tu cuenta.`
+                        title: '🎁 ¡Bono de bienvenida!',
+                        message: `Has recibido ${bonusDisplay} CUP como bono no retirable. Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`
                     });
                 }
 
@@ -1124,8 +1125,17 @@
                             switch (currency) {
                                 case 'CUP': balance = parseFloat(currentUser.cup) || 0; break;
                                 case 'USD': balance = parseFloat(currentUser.usd) || 0; break;
+                                case 'USDT':
+                                    balance = (parseFloat(currentUser.cup) || 0) / exchangeRates.rate_usdt;
+                                    break;
+                                case 'TRX':
+                                    balance = (parseFloat(currentUser.cup) || 0) / exchangeRates.rate_trx;
+                                    break;
+                                case 'MLC':
+                                    balance = (parseFloat(currentUser.cup) || 0) / exchangeRates.rate_mlc;
+                                    break;
                                 default:
-                                    balance = (parseFloat(currentUser.cup) || 0) / (currency === 'USDT' ? exchangeRates.rate_usdt : exchangeRates.rate_trx);
+                                    balance = parseFloat(currentUser.cup) || 0;
                                     break;
                             }
                             withdrawAvailableBalance.innerText = balance.toFixed(2);
@@ -1398,7 +1408,13 @@
         function updateTransferEquivalent() {
             const currency = document.getElementById('transferCurrency').value;
             const amount = parseFloat(document.getElementById('transferAmount').value) || 0;
-            let eq = currency === 'CUP' ? amount : amount * exchangeRates.rate;
+            let eq;
+            if (currency === 'CUP') eq = amount;
+            else if (currency === 'USD') eq = amount * exchangeRates.rate;
+            else if (currency === 'USDT') eq = amount * exchangeRates.rate_usdt;
+            else if (currency === 'TRX') eq = amount * exchangeRates.rate_trx;
+            else if (currency === 'MLC') eq = amount * exchangeRates.rate_mlc;
+            else eq = amount;
             document.getElementById('transferEquivalent').innerText = `Equivalente en CUP: ${eq.toFixed(2)}`;
         }
 
@@ -1474,7 +1490,12 @@
             else if (currency === 'USD') balance = parseFloat(currentUser.usd) || 0;
             else {
                 const cupBalance = parseFloat(currentUser.cup) || 0;
-                const requiredCUP = amount * (currency === 'USDT' ? exchangeRates.rate_usdt : exchangeRates.rate_trx);
+                const rateByCurrency = currency === 'USDT'
+                    ? exchangeRates.rate_usdt
+                    : currency === 'TRX'
+                        ? exchangeRates.rate_trx
+                        : exchangeRates.rate_mlc;
+                const requiredCUP = amount * rateByCurrency;
                 if (cupBalance < requiredCUP) {
                     iziToast.warning({ message: `Saldo CUP insuficiente. Necesitas ${requiredCUP.toFixed(2)} CUP.` });
                     return;
@@ -2076,8 +2097,8 @@
         function renderSetRateView() {
             adminViewContainer.innerHTML = `
                 <h4 class="text-xl font-semibold mb-4">💰 Configurar Tasas de Cambio</h4>
-                <p class="mb-2">Tasa MLC/CUP actual: <span class="text-cyan-300 font-bold">1 MLC = ${exchangeRates.rate_mlc ?? exchangeRates.rate} CUP</span></p>
-                <input type="number" id="newRateMLC" value="${exchangeRates.rate_mlc ?? exchangeRates.rate}" step="0.01" min="1" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-green-500 mb-3">
+                <p class="mb-2">Tasa MLC/CUP actual: <span class="text-cyan-300 font-bold">1 MLC = ${exchangeRates.rate_mlc} CUP</span></p>
+                <input type="number" id="newRateMLC" value="${exchangeRates.rate_mlc}" step="0.01" min="1" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-green-500 mb-3">
                 <button id="updateRateMLCBtn" class="w-full bg-green-600 py-2 rounded-xl mb-4">Actualizar MLC/CUP</button>
 
                 <p class="mb-2">Tasa USD/CUP actual: <span class="text-cyan-300 font-bold">1 USD = ${exchangeRates.rate} CUP</span></p>
@@ -2242,7 +2263,7 @@
                 const prices = await priceRes.json();
 
                 let text = `💰 <b>Tasas:</b>\n`;
-                text += `MLC/CUP: 1 MLC = ${exchangeRates.rate_mlc ?? exchangeRates.rate} CUP\n`;
+                text += `MLC/CUP: 1 MLC = ${exchangeRates.rate_mlc} CUP\n`;
                 text += `USD/CUP: 1 USD = ${exchangeRates.rate} CUP\n`;
                 text += `USDT/CUP: 1 USDT = ${exchangeRates.rate_usdt} CUP\n`;
                 text += `TRX/CUP: 1 TRX = ${exchangeRates.rate_trx} CUP\n\n`;
