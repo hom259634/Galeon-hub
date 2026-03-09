@@ -880,8 +880,8 @@ app.post('/api/transfer', async (req, res) => {
     if (!from || !to || !amount || !currency || amount <= 0) {
         return res.status(400).json({ error: 'Datos inválidos' });
     }
-    if (!['CUP', 'USD', 'USDT', 'TRX', 'MLC'].includes(currency)) {
-        return res.status(400).json({ error: 'Moneda no soportada. Usa CUP, USD, USDT, TRX o MLC' });
+    if (!['CUP', 'USD'].includes(currency)) {
+        return res.status(400).json({ error: 'Moneda no soportada. Usa CUP o USD' });
     }
     if (from === to) {
         return res.status(400).json({ error: 'No puedes transferirte a ti mismo' });

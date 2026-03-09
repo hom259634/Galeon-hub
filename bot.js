@@ -1197,7 +1197,7 @@ bot.action('transfer', async (ctx) => {
         '🔄 <b>Transferir saldo a otro usuario</b>\n\n' +
         'Envía el <b>nombre de usuario</b> de Telegram (ej: @usuario) de la persona a la que deseas transferir.\n' +
         'También puedes usar su ID numérico si lo conoces.\n\n' +
-        '⚠️ <b>Nota:</b> El bono no es transferible. Puedes transferir en CUP, USD, USDT, TRX o MLC.\n\n' +
+        'Solo puedes transferir CUP o USD. El bono de bienvenida no es transferible.\n\n' +
         'Por favor, ingresa el usuario:',
         null
     );
@@ -2844,7 +2844,7 @@ bot.on(message('text'), async (ctx) => {
         const displayName = targetUser.first_name || targetUser.username || targetUser.telegram_id;
         await ctx.reply(
             `✅ Usuario encontrado: ${escapeHTML(displayName)}\n\n` +
-            `Ahora envía el <b>monto y la moneda</b> que deseas transferir (ej: <code>500 cup</code>, <code>10 usd</code>, <code>5 usdt</code>).\n` +
+            `Ahora envía el <b>monto y la moneda</b> que deseas transferir (ej: <code>500 cup</code> o <code>10 usd</code>).\n` +
             `💰 Tus saldos: CUP: ${(parseFloat(user.cup) || 0).toFixed(2)}, USD: ${(parseFloat(user.usd) || 0).toFixed(2)}`,
             { parse_mode: 'HTML' }
         );
@@ -2859,8 +2859,8 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        if (!['CUP', 'USD', 'USDT', 'TRX', 'MLC'].includes(parsed.currency)) {
-            await ctx.reply('❌ Moneda no soportada. Usa CUP, USD, USDT, TRX o MLC.', getMainKeyboard(ctx));
+        if (!['CUP', 'USD'].includes(parsed.currency)) {
+            await ctx.reply('❌ Moneda no soportada. Usa CUP o USD.', getMainKeyboard(ctx));
             return;
         }
 
