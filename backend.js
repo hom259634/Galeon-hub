@@ -29,8 +29,6 @@ const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const BOT_LAUNCH_MAX_RETRIES = parseInt(process.env.BOT_LAUNCH_MAX_RETRIES || '0', 10); // 0 = infinito
 const BOT_LAUNCH_RETRY_BASE_MS = parseInt(process.env.BOT_LAUNCH_RETRY_BASE_MS || '5000', 10);
 const BOT_LAUNCH_RETRY_MAX_MS = parseInt(process.env.BOT_LAUNCH_RETRY_MAX_MS || '120000', 10);
-const TELEGRAM_WEBHOOK_PATH = `/telegram/webhook/${BOT_TOKEN}`;
-const SHOULD_USE_WEBHOOK = WEBAPP_URL.startsWith('https://') || !!process.env.RENDER_SERVICE_ID;
 
 // ========== INICIALIZAR SUPABASE ==========
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -2108,57 +2106,44 @@ try {
     bot = required.default || required;
 
     if (bot && typeof bot.launch === 'function') {
-        if (SHOULD_USE_WEBHOOK) {
-            app.use(TELEGRAM_WEBHOOK_PATH, bot.webhookCallback(TELEGRAM_WEBHOOK_PATH));
+        let launchAttempts = 0;
+        let launchInProgress = false;
+        let botStarted = false;
 
-            const webhookUrl = `${WEBAPP_URL}${TELEGRAM_WEBHOOK_PATH}`;
-            bot.telegram.setWebhook(webhookUrl)
-                .then(() => {
-                    console.log(`🤖 Bot iniciado en modo webhook: ${webhookUrl}`);
-                })
-                .catch((err) => {
-                    console.error('❌ Error configurando webhook de Telegram:', err?.message || err);
+        const launchBotWithRetry = () => {
+            if (botStarted || launchInProgress) return;
+
+            launchInProgress = true;
+            launchAttempts += 1;
+
+            bot.telegram.deleteWebhook()
+                .catch(() => {})
+                .finally(() => {
+                    bot.launch()
+                        .then(() => {
+                            botStarted = true;
+                            launchInProgress = false;
+                            console.log('🤖 Bot de Telegram iniciado correctamente (polling, webhook desactivado)');
+                        })
+                        .catch(err => {
+                            launchInProgress = false;
+                            const canRetry = BOT_LAUNCH_MAX_RETRIES === 0 || launchAttempts < BOT_LAUNCH_MAX_RETRIES;
+                            const retryDelay = Math.min(BOT_LAUNCH_RETRY_BASE_MS * Math.pow(2, launchAttempts - 1), BOT_LAUNCH_RETRY_MAX_MS);
+                            const errorCode = err?.code || err?.errno || 'UNKNOWN';
+
+                            console.error(`❌ Error al iniciar el bot (intento ${launchAttempts}, código ${errorCode}):`, err?.message || err);
+
+                            if (canRetry) {
+                                console.log(`🔁 Reintentando iniciar bot en ${Math.round(retryDelay / 1000)}s...`);
+                                setTimeout(launchBotWithRetry, retryDelay);
+                            } else {
+                                console.error('⛔ Se alcanzó el máximo de reintentos para iniciar el bot.');
+                            }
+                        });
                 });
-        } else {
-            let launchAttempts = 0;
-            let launchInProgress = false;
-            let botStarted = false;
+        };
 
-            const launchBotWithRetry = () => {
-                if (botStarted || launchInProgress) return;
-
-                launchInProgress = true;
-                launchAttempts += 1;
-
-                bot.telegram.deleteWebhook()
-                    .catch(() => {})
-                    .finally(() => {
-                        bot.launch()
-                            .then(() => {
-                                botStarted = true;
-                                launchInProgress = false;
-                                console.log('🤖 Bot de Telegram iniciado correctamente (polling)');
-                            })
-                            .catch(err => {
-                                launchInProgress = false;
-                                const canRetry = BOT_LAUNCH_MAX_RETRIES === 0 || launchAttempts < BOT_LAUNCH_MAX_RETRIES;
-                                const retryDelay = Math.min(BOT_LAUNCH_RETRY_BASE_MS * Math.pow(2, launchAttempts - 1), BOT_LAUNCH_RETRY_MAX_MS);
-                                const errorCode = err?.code || err?.errno || 'UNKNOWN';
-
-                                console.error(`❌ Error al iniciar el bot (intento ${launchAttempts}, código ${errorCode}):`, err?.message || err);
-
-                                if (canRetry) {
-                                    console.log(`🔁 Reintentando iniciar bot en ${Math.round(retryDelay / 1000)}s...`);
-                                    setTimeout(launchBotWithRetry, retryDelay);
-                                } else {
-                                    console.error('⛔ Se alcanzó el máximo de reintentos para iniciar el bot.');
-                                }
-                            });
-                    });
-            };
-
-            launchBotWithRetry();
-        }
+        launchBotWithRetry();
 
         process.once('SIGINT', () => bot.stop('SIGINT'));
         process.once('SIGTERM', () => bot.stop('SIGTERM'));
