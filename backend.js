@@ -1784,6 +1784,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
     let newCup = parseFloat(user.cup) || 0;
     let newUsd = parseFloat(user.usd) || 0;
     let newBonus = parseFloat(user.bonus_cup) || 0;
+    let bonusMovedCup = 0;
 
     // Convertir el monto a CUP si es necesario (los depósitos siempre incrementan CUP o USD según la moneda)
     if (request.currency === 'CUP') {
