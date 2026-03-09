@@ -129,8 +129,14 @@ function buildLastBetsText(bets) {
         const cup = (parseFloat(b.cost_cup) || 0).toFixed(2);
         const usd = (parseFloat(b.cost_usd) || 0).toFixed(2);
 
-        text += `<b>${i + 1}.</b>\n` +
-            `<pre>Lotería : ${lottery}\nTipo    : ${betType}\nJugada  : ${rawText}\nMonto   : ${cup} CUP / ${usd} USD\nHora    : ${date}</pre>\n`;
+        text +=
+            `━━━━━━━━━━━━━━\n` +
+            `<b>Jugada #${i + 1}</b>\n` +
+            `🎰 <b>Lotería:</b> ${lottery}\n` +
+            `🎯 <b>Tipo:</b> ${betType}\n` +
+            `📝 <b>Jugada:</b> ${rawText}\n` +
+            `💰 <b>Monto:</b> ${cup} CUP / ${usd} USD\n` +
+            `🕒 <b>Hora:</b> ${date}\n\n`;
     });
 
     text += '¿Quieres ver más? Puedes consultar el historial completo en la WebApp.';
