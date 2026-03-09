@@ -454,15 +454,12 @@
                     <!-- TRANSFERENCIA -->
                     <div id="transferSection" class="hidden mt-6">
                         <h4 class="text-lg font-semibold mb-3">🔄 Transferir saldo</h4>
-                        <p class="text-xs text-gray-400 mb-2">⚠️ Puedes transferir en cualquier moneda. Para USD solo cuenta tu saldo USD; para otras monedas se usa saldo combinado CUP + USD. El bono de bienvenida no es transferible.</p>
+                        <p class="text-xs text-gray-400 mb-2">⚠️ Solo puedes transferir CUP o USD. El bono de bienvenida no es transferible.</p>
                         <input type="text" id="transferTarget" placeholder="@usuario o ID de Telegram" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
                         
                         <select id="transferCurrency" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
                             <option value="CUP">CUP</option>
                             <option value="USD">USD</option>
-                            <option value="USDT">USDT</option>
-                            <option value="TRX">TRX</option>
-                            <option value="MLC">MLC</option>
                         </select>
                         
                         <input type="number" id="transferAmount" step="0.01" min="0.01" placeholder="Monto" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
@@ -1587,6 +1584,11 @@
                 return;
             }
 
+            if (!['CUP', 'USD'].includes(currency)) {
+                iziToast.warning({ message: 'Moneda no soportada. Usa CUP o USD' });
+                return;
+            }
+
             const balance = getWithdrawAvailableBalance(currency);
             if (amount > balance) {
                 iziToast.warning({ message: `Saldo insuficiente en ${currency}. Disponible: ${balance.toFixed(2)} ${currency}` });
@@ -1614,11 +1616,7 @@
                     if (currency === 'USD') {
                         currentUser.usd = (parseFloat(currentUser.usd) || 0) - amount;
                     } else {
-                        let amountCUP = amount;
-                        if (currency === 'USDT') amountCUP = amount * exchangeRates.rate_usdt;
-                        else if (currency === 'TRX') amountCUP = amount * exchangeRates.rate_trx;
-                        else if (currency === 'MLC') amountCUP = amount * exchangeRates.rate_mlc;
-
+                        const amountCUP = amount;
                         const cupBalance = parseFloat(currentUser.cup) || 0;
                         const cupDebit = Math.min(cupBalance, amountCUP);
                         const usdDebit = (amountCUP - cupDebit) / exchangeRates.rate;
