@@ -1100,6 +1100,7 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
     let newCup = parseFloat(user.cup) || 0;
     let newUsd = parseFloat(user.usd) || 0;
     let newBonus = parseFloat(user.bonus_cup) || 0;
+    let bonusMovedCup = 0;
 
     const hasApprovedDeposit = await userHasApprovedDeposit(parseInt(userId));
     const usdRate = hasApprovedDeposit ? 0 : await getExchangeRateUSD();
@@ -1801,6 +1802,25 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
         .update({ cup: newCup, usd: newUsd, updated_at: new Date() })
         .eq('telegram_id', request.user_id);
 
+    const { data: prevApproved } = await supabase
+        .from('deposit_requests')
+        .select('id')
+        .eq('user_id', request.user_id)
+        .eq('status', 'approved')
+        .neq('id', parseInt(id))
+        .limit(1);
+
+    const isFirstDeposit = !(prevApproved && prevApproved.length > 0);
+
+    if (isFirstDeposit && newBonus > 0) {
+        newCup += newBonus;
+        bonusMovedCup = newBonus;
+        await supabase
+            .from('users')
+            .update({ cup: newCup, bonus_cup: 0, updated_at: new Date() })
+            .eq('telegram_id', request.user_id);
+    }
+
     // Marcar solicitud como aprobada
     const { error: updateError } = await supabase
         .from('deposit_requests')
@@ -1813,19 +1833,33 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
 
     // Notificar al usuario
     try {
-        await bot.telegram.sendMessage(request.user_id,
-            `✅ <b>¡Depósito aprobado!</b>\n\n` +
-            `💰 Monto: ${request.amount} ${request.currency}\n` +
-            `📌 El saldo ya ha sido acreditado a tu cuenta.`,
-            { parse_mode: 'HTML' }
-        );
+        const creditedAmount = request.currency === 'USD'
+            ? parseFloat(request.amount)
+            : await convertToCUP(parseFloat(request.amount), request.currency);
+
+        const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
+            ? String(request.amount)
+            : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
+
+        let text =
+            `✅ <b>Depósito aprobado</b>\n\n` +
+            `💰 Monto depositado: ${depositedAmountText}\n` +
+            `💵 Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
 
         if (request.currency === 'USD') {
-            await bot.telegram.sendMessage(
-                request.user_id,
-                'Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles'
-            );
+            text += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
         }
+
+        if (bonusMovedCup > 0) {
+            text += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+        }
+
+        text += `\n¡Gracias por confiar en nosotros!`;
+
+        await bot.telegram.sendMessage(request.user_id,
+            text,
+            { parse_mode: 'HTML' }
+        );
     } catch (e) {}
 
     res.json({ success: true });

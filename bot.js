@@ -137,6 +137,24 @@ function buildLastBetsText(bets) {
     return text;
 }
 
+function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, creditedCurrency, includeUsdFollowup = false, bonusMovedCup = 0 }) {
+    let text =
+        `✅ <b>Depósito aprobado</b>\n\n` +
+        `💰 Monto depositado: ${depositedAmountText}\n` +
+        `💵 Se acreditaron ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
+
+    if (includeUsdFollowup) {
+        text += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+    }
+
+    if (bonusMovedCup > 0) {
+        text += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+    }
+
+    text += `\n¡Gracias por confiar en nosotros!`;
+    return text;
+}
+
 async function safeEdit(ctx, text, keyboard = null) {
     try {
         if (ctx.callbackQuery) {
@@ -3111,7 +3129,6 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             return;
         }
 
-        const rates = await getExchangeRates();
         const amountCUP = await convertToCUP(parsed.amount, parsed.currency);
 
         const { data: user } = await supabase
@@ -3132,138 +3149,57 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
 
         const isFirstDeposit = !(prevApproved && prevApproved.length > 0);
 
+        let bonusMovedCup = 0;
+
         if (parsed.currency === 'USD') {
-            const usdFollowupSms = 'Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles';
             const newUsd = (parseFloat(user.usd) || 0) + parsed.amount;
             await supabase
                 .from('users')
                 .update({ usd: newUsd, updated_at: new Date() })
                 .eq('telegram_id', request.user_id);
-
-            // If this is the user's first approved deposit, migrate any visible bonus into cup
-            if (isFirstDeposit) {
-                const bonus = parseFloat(user.bonus_cup) || 0;
-                if (bonus > 0) {
-                    const addCup = bonus;
-                    const { data: updatedUser } = await supabase
-                        .from('users')
-                        .select('cup')
-                        .eq('telegram_id', request.user_id)
-                        .single();
-                    const newCupAfterBonus = (parseFloat(updatedUser.cup) || 0) + addCup;
-                    await supabase
-                        .from('users')
-                        .update({ cup: newCupAfterBonus, bonus_cup: 0, updated_at: new Date() })
-                        .eq('telegram_id', request.user_id);
-
-                    await supabase
-                        .from('deposit_requests')
-                        .update({ status: 'approved', updated_at: new Date() })
-                        .eq('id', requestId);
-
-                    await ctx.telegram.sendMessage(request.user_id,
-                        `✅ <b>Depósito aprobado</b>\n\n` +
-                        `💰 Monto depositado: ${request.amount}\n` +
-                        `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n` +
-                        `ℹ️ ${usdFollowupSms}\n🎁 Tu bono de bienvenida de <b>${addCup.toFixed(2)} CUP</b> se ha movido a tu saldo principal.\n` +
-                        `🎁 Tu bono de bienvenida de <b>${addCup.toFixed(2)} CUP</b> se ha movido a tu saldo principal.\n\n` +
-                        `¡Gracias por confiar en nosotros!`,
-                        { parse_mode: 'HTML' }
-                    );
-                } else {
-                    await supabase
-                        .from('deposit_requests')
-                        .update({ status: 'approved', updated_at: new Date() })
-                        .eq('id', requestId);
-
-                    await ctx.telegram.sendMessage(request.user_id,
-                        `✅ <b>Depósito aprobado</b>\n\n` +
-                        `💰 Monto depositado: ${request.amount}\n` +
-                        `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n` +
-                        `ℹ️ ${usdFollowupSms}\n\n` +
-                        `¡Gracias por confiar en nosotros!`,
-                        { parse_mode: 'HTML' }
-                    );
-                }
-            } else {
-                await supabase
-                    .from('deposit_requests')
-                    .update({ status: 'approved', updated_at: new Date() })
-                    .eq('id', requestId);
-
-                await ctx.telegram.sendMessage(request.user_id,
-                    `✅ <b>Depósito aprobado</b>\n\n` +
-                    `💰 Monto depositado: ${request.amount}\n` +
-                    `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n` +
-                    `ℹ️ ${usdFollowupSms}\n\n` +
-                    `¡Gracias por confiar en nosotros!`,
-                    { parse_mode: 'HTML' }
-                );
-            }
         } else {
             const newCup = (parseFloat(user.cup) || 0) + amountCUP;
             await supabase
                 .from('users')
                 .update({ cup: newCup, updated_at: new Date() })
                 .eq('telegram_id', request.user_id);
+        }
 
-            await supabase
-                .from('deposit_requests')
-                .update({ status: 'approved', updated_at: new Date() })
-                .eq('id', requestId);
+        if (isFirstDeposit) {
+            const bonus = parseFloat(user.bonus_cup) || 0;
+            if (bonus > 0) {
+                const { data: updatedUser } = await supabase
+                    .from('users')
+                    .select('cup')
+                    .eq('telegram_id', request.user_id)
+                    .single();
 
-            // If this is the user's first approved deposit, migrate any visible bonus into cup
-            if (isFirstDeposit) {
-                const bonus = parseFloat(user.bonus_cup) || 0;
-                if (bonus > 0) {
-                    const newCupAfterBonus = newCup + bonus;
-                    await supabase
-                        .from('users')
-                        .update({ cup: newCupAfterBonus, bonus_cup: 0, updated_at: new Date() })
-                        .eq('telegram_id', request.user_id);
-
-                    await supabase
-                        .from('deposit_requests')
-                        .update({ status: 'approved', updated_at: new Date() })
-                        .eq('id', requestId);
-
-                    await ctx.telegram.sendMessage(request.user_id,
-                        `✅ <b>Depósito aprobado</b>\n\n` +
-                        `💰 Monto depositado: ${request.amount}\n` +
-                        `💵 Se acreditaron <b>${amountCUP.toFixed(2)} CUP</b> a tu saldo.\n` +
-                        `🎁 Tu bono de bienvenida de <b>${bonus.toFixed(2)} CUP</b> se ha movido a tu saldo principal.\n\n` +
-                        `¡Gracias por confiar en nosotros!`,
-                        { parse_mode: 'HTML' }
-                    );
-                } else {
-                    await supabase
-                        .from('deposit_requests')
-                        .update({ status: 'approved', updated_at: new Date() })
-                        .eq('id', requestId);
-
-                    await ctx.telegram.sendMessage(request.user_id,
-                        `✅ <b>Depósito aprobado</b>\n\n` +
-                        `💰 Monto depositado: ${request.amount}\n` +
-                        `💵 Se acreditaron <b>${amountCUP.toFixed(2)} CUP</b> a tu saldo.\n\n` +
-                        `¡Gracias por confiar en nosotros!`,
-                        { parse_mode: 'HTML' }
-                    );
-                }
-            } else {
+                const newCupAfterBonus = (parseFloat(updatedUser?.cup) || 0) + bonus;
                 await supabase
-                    .from('deposit_requests')
-                    .update({ status: 'approved', updated_at: new Date() })
-                    .eq('id', requestId);
+                    .from('users')
+                    .update({ cup: newCupAfterBonus, bonus_cup: 0, updated_at: new Date() })
+                    .eq('telegram_id', request.user_id);
 
-                await ctx.telegram.sendMessage(request.user_id,
-                    `✅ <b>Depósito aprobado</b>\n\n` +
-                    `💰 Monto depositado: ${request.amount}\n` +
-                    `💵 Se acreditaron <b>${amountCUP.toFixed(2)} CUP</b> a tu saldo.\n\n` +
-                    `¡Gracias por confiar en nosotros!`,
-                    { parse_mode: 'HTML' }
-                );
+                bonusMovedCup = bonus;
             }
         }
+
+        await supabase
+            .from('deposit_requests')
+            .update({ status: 'approved', updated_at: new Date() })
+            .eq('id', requestId);
+
+        await ctx.telegram.sendMessage(
+            request.user_id,
+            buildDepositApprovedMessage({
+                depositedAmountText: request.amount,
+                creditedAmount: parsed.currency === 'USD' ? parsed.amount : amountCUP,
+                creditedCurrency: parsed.currency === 'USD' ? 'USD' : 'CUP',
+                includeUsdFollowup: parsed.currency === 'USD',
+                bonusMovedCup
+            }),
+            { parse_mode: 'HTML' }
+        );
 
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('✅ Depósito aprobado y saldo actualizado correctamente.');
