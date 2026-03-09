@@ -489,14 +489,37 @@ async function broadcastToAllUsers(message, parseMode = 'HTML') {
         .from('users')
         .select('telegram_id');
 
+    const deliveryErrorsToIgnore = [
+        'chat not found',
+        'bot was blocked by the user',
+        'user is deactivated',
+        'forbidden: bot was blocked by the user'
+    ];
+
+    let sentCount = 0;
+    let inactiveCount = 0;
+    let failedCount = 0;
+
     for (const u of users || []) {
         try {
             await bot.telegram.sendMessage(u.telegram_id, message, { parse_mode: parseMode });
+            sentCount += 1;
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
+            const errorMessage = (e?.message || '').toLowerCase();
+            const isInactiveUser = deliveryErrorsToIgnore.some(fragment => errorMessage.includes(fragment));
+
+            if (isInactiveUser) {
+                inactiveCount += 1;
+                continue;
+            }
+
+            failedCount += 1;
             console.warn(`Error enviando broadcast a ${u.telegram_id}:`, e.message);
         }
     }
+
+    console.log(`[Broadcast] Enviado: ${sentCount} · Inactivos: ${inactiveCount} · Fallidos: ${failedCount}`);
 }
 
 // ========== MIDDLEWARE DE ADMIN ==========
@@ -1800,7 +1823,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
         if (request.currency === 'USD') {
             await bot.telegram.sendMessage(
                 request.user_id,
-                'Con tu saldo USD tambien puedes jugar,transferir,ademas de retirar en CUP y en las otras monedas segun este disponibles.'
+                'Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles'
             );
         }
     } catch (e) {}

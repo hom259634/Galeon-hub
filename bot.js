@@ -118,6 +118,25 @@ function escapeHTML(text) {
         .replace(/'/g, '&#039;');
 }
 
+function buildLastBetsText(bets) {
+    let text = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
+
+    bets.forEach((b, i) => {
+        const date = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY hh:mm A');
+        const lottery = escapeHTML(b.lottery || '-');
+        const betType = escapeHTML(b.bet_type || '-');
+        const rawText = escapeHTML((b.raw_text || '').replace(/\s+/g, ' ').trim());
+        const cup = (parseFloat(b.cost_cup) || 0).toFixed(2);
+        const usd = (parseFloat(b.cost_usd) || 0).toFixed(2);
+
+        text += `<b>${i + 1}.</b>\n` +
+            `<pre>Lotería : ${lottery}\nTipo    : ${betType}\nJugada  : ${rawText}\nMonto   : ${cup} CUP / ${usd} USD\nHora    : ${date}</pre>\n`;
+    });
+
+    text += '¿Quieres ver más? Puedes consultar el historial completo en la WebApp.';
+    return text;
+}
+
 async function safeEdit(ctx, text, keyboard = null) {
     try {
         if (ctx.callbackQuery) {
@@ -501,14 +520,37 @@ async function broadcastToAllUsers(message, parseMode = 'HTML') {
         .from('users')
         .select('telegram_id');
 
+    const deliveryErrorsToIgnore = [
+        'chat not found',
+        'bot was blocked by the user',
+        'user is deactivated',
+        'forbidden: bot was blocked by the user'
+    ];
+
+    let sentCount = 0;
+    let inactiveCount = 0;
+    let failedCount = 0;
+
     for (const u of users || []) {
         try {
             await bot.telegram.sendMessage(u.telegram_id, message, { parse_mode: parseMode });
+            sentCount += 1;
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
+            const errorMessage = (e?.message || '').toLowerCase();
+            const isInactiveUser = deliveryErrorsToIgnore.some(fragment => errorMessage.includes(fragment));
+
+            if (isInactiveUser) {
+                inactiveCount += 1;
+                continue;
+            }
+
+            failedCount += 1;
             console.warn(`Error enviando broadcast a ${u.telegram_id}:`, e.message);
         }
     }
+
+    console.log(`[Broadcast] Enviado: ${sentCount} · Inactivos: ${inactiveCount} · Fallidos: ${failedCount}`);
 }
 
 async function createDepositRequest(userId, methodId, fileBuffer, amountText, currency) {
@@ -729,15 +771,7 @@ bot.command('mis_jugadas', async (ctx) => {
             getMainKeyboard(ctx)
         );
     } else {
-        let text = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
-        bets.forEach((b, i) => {
-            const date = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY HH:mm');
-            text += `<b>${i + 1}.</b> 🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(b.bet_type)}\n` +
-                `   📝 <code>${escapeHTML(b.raw_text)}</code>\n` +
-                `   💰 ${b.cost_cup} CUP / ${b.cost_usd} USD\n` +
-                `   🕒 ${date}\n\n`;
-        });
-        text += '¿Quieres ver más? Puedes consultar el historial completo en la WebApp.';
+        const text = buildLastBetsText(bets);
         await safeEdit(ctx, text, getMainKeyboard(ctx));
     }
 });
@@ -1131,15 +1165,7 @@ bot.action('my_bets', async (ctx) => {
             getMainKeyboard(ctx)
         );
     } else {
-        let text = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
-        bets.forEach((b, i) => {
-            const date = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY HH:mm');
-            text += `<b>${i + 1}.</b> 🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(b.bet_type)}\n` +
-                `   📝 <code>${escapeHTML(b.raw_text)}</code>\n` +
-                `   💰 ${b.cost_cup} CUP / ${b.cost_usd} USD\n` +
-                `   🕒 ${date}\n\n`;
-        });
-        text += '¿Quieres ver más? Puedes consultar el historial completo en la WebApp.';
+        const text = buildLastBetsText(bets);
         await safeEdit(ctx, text, getMainKeyboard(ctx));
     }
 });
@@ -1989,15 +2015,7 @@ bot.on(message('text'), async (ctx) => {
                     getMainKeyboard(ctx)
                 );
             } else {
-                let text = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
-                bets.forEach((b, i) => {
-                    const date = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY HH:mm');
-                    text += `<b>${i + 1}.</b> 🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(b.bet_type)}\n` +
-                        `   📝 <code>${escapeHTML(b.raw_text)}</code>\n` +
-                        `   💰 ${b.cost_cup} CUP / ${b.cost_usd} USD\n` +
-                        `   🕒 ${date}\n\n`;
-                });
-                text += '¿Quieres ver más? Puedes consultar el historial completo en la WebApp.';
+                const text = buildLastBetsText(bets);
                 await safeEdit(ctx, text, getMainKeyboard(ctx));
             }
             return;
@@ -3115,7 +3133,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
         const isFirstDeposit = !(prevApproved && prevApproved.length > 0);
 
         if (parsed.currency === 'USD') {
-            const usdFollowupSms = 'Con tu saldo USD también puedes transferir y además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.';
+            const usdFollowupSms = 'Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles';
             const newUsd = (parseFloat(user.usd) || 0) + parsed.amount;
             await supabase
                 .from('users')
@@ -3147,8 +3165,8 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                         `✅ <b>Depósito aprobado</b>\n\n` +
                         `💰 Monto depositado: ${request.amount}\n` +
                         `💵 Se acreditaron <b>${parsed.amount.toFixed(2)} USD</b> a tu saldo USD.\n` +
-                        `🎁 Tu bono de bienvenida de <b>${addCup.toFixed(2)} CUP</b> se ha movido a tu saldo principal.\n` +
-                        `ℹ️ ${usdFollowupSms}\n\n` +
+                        `ℹ️ ${usdFollowupSms}\n🎁 Tu bono de bienvenida de <b>${addCup.toFixed(2)} CUP</b> se ha movido a tu saldo principal.\n` +
+                        `🎁 Tu bono de bienvenida de <b>${addCup.toFixed(2)} CUP</b> se ha movido a tu saldo principal.\n\n` +
                         `¡Gracias por confiar en nosotros!`,
                         { parse_mode: 'HTML' }
                     );
