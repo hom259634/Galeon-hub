@@ -451,15 +451,18 @@
                         <button id="submitWithdrawBtn" class="w-full bg-pink-600 py-3 rounded-xl font-semibold hover:bg-pink-700">Solicitar retiro</button>
                     </div>
 
-                    <!-- TRANSFERENCIA (solo CUP y USD) -->
+                    <!-- TRANSFERENCIA -->
                     <div id="transferSection" class="hidden mt-6">
                         <h4 class="text-lg font-semibold mb-3">🔄 Transferir saldo</h4>
-                        <p class="text-xs text-gray-400 mb-2">⚠️ Solo puedes transferir CUP o USD. El bono de bienvenida no es transferible.</p>
+                        <p class="text-xs text-gray-400 mb-2">⚠️ Puedes transferir en cualquier moneda. Para USD solo cuenta tu saldo USD; para otras monedas se usa saldo combinado CUP + USD. El bono de bienvenida no es transferible.</p>
                         <input type="text" id="transferTarget" placeholder="@usuario o ID de Telegram" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
                         
                         <select id="transferCurrency" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
                             <option value="CUP">CUP</option>
                             <option value="USD">USD</option>
+                            <option value="USDT">USDT</option>
+                            <option value="TRX">TRX</option>
+                            <option value="MLC">MLC</option>
                         </select>
                         
                         <input type="number" id="transferAmount" step="0.01" min="0.01" placeholder="Monto" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
@@ -661,7 +664,7 @@
                 case 'CUP':
                     return totalCup;
                 case 'USD':
-                    return totalCup / exchangeRates.rate;
+                    return usdBalance;
                 case 'USDT':
                     return totalCup / exchangeRates.rate_usdt;
                 case 'TRX':
@@ -1584,9 +1587,9 @@
                 return;
             }
 
-            let balance = currency === 'CUP' ? (parseFloat(currentUser.cup) || 0) : (parseFloat(currentUser.usd) || 0);
+            const balance = getWithdrawAvailableBalance(currency);
             if (amount > balance) {
-                iziToast.warning({ message: `Saldo insuficiente en ${currency}. Disponible: ${balance.toFixed(2)}` });
+                iziToast.warning({ message: `Saldo insuficiente en ${currency}. Disponible: ${balance.toFixed(2)} ${currency}` });
                 return;
             }
 
@@ -1608,8 +1611,21 @@
                 if (res.ok) {
                     iziToast.success({ message: 'Transferencia realizada' });
                     document.getElementById('transferSection').classList.add('hidden');
-                    if (currency === 'CUP') currentUser.cup -= amount;
-                    else currentUser.usd -= amount;
+                    if (currency === 'USD') {
+                        currentUser.usd = (parseFloat(currentUser.usd) || 0) - amount;
+                    } else {
+                        let amountCUP = amount;
+                        if (currency === 'USDT') amountCUP = amount * exchangeRates.rate_usdt;
+                        else if (currency === 'TRX') amountCUP = amount * exchangeRates.rate_trx;
+                        else if (currency === 'MLC') amountCUP = amount * exchangeRates.rate_mlc;
+
+                        const cupBalance = parseFloat(currentUser.cup) || 0;
+                        const cupDebit = Math.min(cupBalance, amountCUP);
+                        const usdDebit = (amountCUP - cupDebit) / exchangeRates.rate;
+
+                        currentUser.cup = cupBalance - cupDebit;
+                        currentUser.usd = (parseFloat(currentUser.usd) || 0) - usdDebit;
+                    }
                     updateBalanceUI();
                 } else {
                     iziToast.error({ message: data.error || 'Error al transferir' });
