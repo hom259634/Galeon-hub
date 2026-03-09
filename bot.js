@@ -307,6 +307,42 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
     };
 }
 
+async function buildRealBalanceDebitPlan(user, amount, currency) {
+    const cupBalance = parseFloat(user?.cup) || 0;
+    const usdBalance = parseFloat(user?.usd) || 0;
+    const rateUSD = await getExchangeRateUSD();
+    const parsedAmount = parseFloat(amount) || 0;
+
+    if (currency === 'USD') {
+        if (parsedAmount <= 0 || usdBalance < parsedAmount) {
+            return {
+                ok: false,
+                amountCUP: parsedAmount * rateUSD,
+                totalAvailableCUP: cupBalance + (usdBalance * rateUSD),
+                cupBalance,
+                usdBalance,
+                rateUSD,
+                cupDebit: 0,
+                usdDebit: 0,
+                errorMessage: `Saldo USD insuficiente. Disponible: ${usdBalance.toFixed(2)} USD, necesitas ${parsedAmount.toFixed(2)} USD.`
+            };
+        }
+
+        return {
+            ok: true,
+            amountCUP: parsedAmount * rateUSD,
+            totalAvailableCUP: cupBalance + (usdBalance * rateUSD),
+            cupBalance,
+            usdBalance,
+            rateUSD,
+            cupDebit: 0,
+            usdDebit: parsedAmount
+        };
+    }
+
+    return buildCrossCurrencyDebitPlan(user, parsedAmount, currency);
+}
+
 // ========== FUNCIÓN GETUSER MODIFICADA (AHORA NO ENVÍA BONO DIRECTAMENTE) ==========
 async function getUser(telegramId, firstName = 'Jugador', username = null, ctx = null) {
     try {
@@ -2569,12 +2605,10 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        const debitPlan = await buildCrossCurrencyDebitPlan(user, amount, currency);
+        const debitPlan = await buildRealBalanceDebitPlan(user, amount, currency);
         if (!debitPlan.ok) {
             await ctx.reply(
-                `❌ Saldo real insuficiente para retirar ${amount} ${currency}.\n` +
-                `Disponible total (CUP+USD): ${debitPlan.totalAvailableCUP.toFixed(2)} CUP\n` +
-                `Necesitas: ${debitPlan.amountCUP.toFixed(2)} CUP`,
+                `❌ ${debitPlan.errorMessage || `Saldo real insuficiente para retirar ${amount} ${currency}.\nDisponible total (CUP+USD): ${debitPlan.totalAvailableCUP.toFixed(2)} CUP\nNecesitas: ${debitPlan.amountCUP.toFixed(2)} CUP`}`,
                 getMainKeyboard(ctx)
             );
             return;
@@ -2834,12 +2868,10 @@ bot.on(message('text'), async (ctx) => {
         const currency = parsed.currency;
         const targetId = session.transferTarget;
 
-        const debitPlan = await buildCrossCurrencyDebitPlan(user, amount, currency);
+        const debitPlan = await buildRealBalanceDebitPlan(user, amount, currency);
         if (!debitPlan.ok) {
             await ctx.reply(
-                `❌ Saldo real insuficiente para transferir ${amount} ${currency}.\n` +
-                `Disponible total (CUP+USD): ${debitPlan.totalAvailableCUP.toFixed(2)} CUP\n` +
-                `Necesitas: ${debitPlan.amountCUP.toFixed(2)} CUP`,
+                `❌ ${debitPlan.errorMessage || `Saldo real insuficiente para transferir ${amount} ${currency}.\nDisponible total (CUP+USD): ${debitPlan.totalAvailableCUP.toFixed(2)} CUP\nNecesitas: ${debitPlan.amountCUP.toFixed(2)} CUP`}`,
                 getMainKeyboard(ctx)
             );
             return;
@@ -3226,8 +3258,9 @@ bot.action(/reject_deposit_(\d+)/, async (ctx) => {
             .single();
 
         if (request) {
-            await ctx.telegram.sendMessage(request.user_id,
-                '❌ <b>Depósito rechazado</b>\nLa solicitud no pudo ser procesada. Por favor, contacta al administrador para más información.',
+            await ctx.telegram.sendMessage(
+                request.user_id,
+                '❌ Depósito rechazado\n\n📌La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.',
                 { parse_mode: 'HTML' }
             );
         }
@@ -3265,10 +3298,10 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             .single();
 
         const amount = parseFloat(request.amount) || 0;
-        const debitPlan = await buildCrossCurrencyDebitPlan(user, amount, request.currency);
+        const debitPlan = await buildRealBalanceDebitPlan(user, amount, request.currency);
 
         if (!debitPlan.ok) {
-            await ctx.reply('❌ El usuario ya no tiene saldo suficiente para este retiro.');
+            await ctx.reply(`❌ ${debitPlan.errorMessage || 'El usuario ya no tiene saldo suficiente para este retiro.'}`);
             return;
         }
 

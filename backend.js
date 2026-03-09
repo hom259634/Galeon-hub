@@ -29,6 +29,8 @@ const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const BOT_LAUNCH_MAX_RETRIES = parseInt(process.env.BOT_LAUNCH_MAX_RETRIES || '0', 10); // 0 = infinito
 const BOT_LAUNCH_RETRY_BASE_MS = parseInt(process.env.BOT_LAUNCH_RETRY_BASE_MS || '5000', 10);
 const BOT_LAUNCH_RETRY_MAX_MS = parseInt(process.env.BOT_LAUNCH_RETRY_MAX_MS || '120000', 10);
+const TELEGRAM_WEBHOOK_PATH = `/telegram/webhook/${BOT_TOKEN}`;
+const SHOULD_USE_WEBHOOK = WEBAPP_URL.startsWith('https://') || !!process.env.RENDER_SERVICE_ID;
 
 // ========== INICIALIZAR SUPABASE ==========
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -220,6 +222,42 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
         cupDebit,
         usdDebit
     };
+}
+
+async function buildRealBalanceDebitPlan(user, amount, currency) {
+    const cupBalance = parseFloat(user?.cup) || 0;
+    const usdBalance = parseFloat(user?.usd) || 0;
+    const rateUSD = await getExchangeRateUSD();
+    const parsedAmount = parseFloat(amount) || 0;
+
+    if (currency === 'USD') {
+        if (parsedAmount <= 0 || usdBalance < parsedAmount) {
+            return {
+                ok: false,
+                amountCUP: parsedAmount * rateUSD,
+                totalAvailableCUP: cupBalance + (usdBalance * rateUSD),
+                cupBalance,
+                usdBalance,
+                rateUSD,
+                cupDebit: 0,
+                usdDebit: 0,
+                errorMessage: `Saldo USD insuficiente. Disponible: ${usdBalance.toFixed(2)} USD, necesitas ${parsedAmount.toFixed(2)} USD.`
+            };
+        }
+
+        return {
+            ok: true,
+            amountCUP: parsedAmount * rateUSD,
+            totalAvailableCUP: cupBalance + (usdBalance * rateUSD),
+            cupBalance,
+            usdBalance,
+            rateUSD,
+            cupDebit: 0,
+            usdDebit: parsedAmount
+        };
+    }
+
+    return buildCrossCurrencyDebitPlan(user, parsedAmount, currency);
 }
 
 // ========== FUNCIÓN GETORCREATEUSER CON MANEJO DE ERROR DE COLUMNA ==========
@@ -786,11 +824,12 @@ app.post('/api/withdraw-requests', async (req, res) => {
         return res.status(400).json({ error: `La moneda del método es ${method.currency}, no coincide.` });
     }
 
-    // Verificar saldo real disponible (CUP + USD convertido)
-    const debitPlan = await buildCrossCurrencyDebitPlan(user, parseFloat(amount), currency);
+    // Regla: USD solo se retira desde saldo USD.
+    // Otras monedas sí pueden usar saldo combinado CUP + USD.
+    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(amount), currency);
     if (!debitPlan.ok) {
         return res.status(400).json({
-            error: `Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
+            error: debitPlan.errorMessage || `Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
         });
     }
 
@@ -880,11 +919,12 @@ app.post('/api/transfer', async (req, res) => {
         return res.status(404).json({ error: 'Usuario destino no encontrado' });
     }
 
-    // Verificar y calcular débito real
-    const debitPlan = await buildCrossCurrencyDebitPlan(userFrom, parseFloat(amount), currency);
+    // Regla: USD solo se transfiere desde saldo USD.
+    // Otras monedas sí pueden usar saldo combinado CUP + USD.
+    const debitPlan = await buildRealBalanceDebitPlan(userFrom, parseFloat(amount), currency);
     if (!debitPlan.ok) {
         return res.status(400).json({
-            error: `Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
+            error: debitPlan.errorMessage || `Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
         });
     }
 
@@ -1894,10 +1934,9 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
 
     // Notificar al usuario
     try {
-        await bot.telegram.sendMessage(request.user_id,
-            `❌ <b>Depósito rechazado</b>\n\n` +
-            `💰 Monto: ${request.amount} ${request.currency}\n` +
-            `📌 Por favor, contacta con el administrador si tienes dudas.`,
+        await bot.telegram.sendMessage(
+            request.user_id,
+            `❌ Depósito rechazado\n\n📌La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.`,
             { parse_mode: 'HTML' }
         );
     } catch (e) {}
@@ -1964,9 +2003,9 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
     // Por lo tanto, al aprobar debemos descontar el saldo.
 
     const user = await getOrCreateUser(request.user_id);
-    const debitPlan = await buildCrossCurrencyDebitPlan(user, parseFloat(request.amount), request.currency);
+    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency);
     if (!debitPlan.ok) {
-        return res.status(400).json({ error: 'Saldo insuficiente (posible cambio de tasa). Rechace la solicitud.' });
+        return res.status(400).json({ error: debitPlan.errorMessage || 'Saldo insuficiente (posible cambio de tasa). Rechace la solicitud.' });
     }
 
     let newCup = (parseFloat(user.cup) || 0) - debitPlan.cupDebit;
@@ -2067,41 +2106,59 @@ app.listen(PORT, () => {
 try {
     const required = require('./bot.js');
     bot = required.default || required;
+
     if (bot && typeof bot.launch === 'function') {
-        let launchAttempts = 0;
-        let launchInProgress = false;
-        let botStarted = false;
+        if (SHOULD_USE_WEBHOOK) {
+            app.use(TELEGRAM_WEBHOOK_PATH, bot.webhookCallback(TELEGRAM_WEBHOOK_PATH));
 
-        const launchBotWithRetry = () => {
-            if (botStarted || launchInProgress) return;
-
-            launchInProgress = true;
-            launchAttempts += 1;
-
-            bot.launch()
+            const webhookUrl = `${WEBAPP_URL}${TELEGRAM_WEBHOOK_PATH}`;
+            bot.telegram.setWebhook(webhookUrl)
                 .then(() => {
-                    botStarted = true;
-                    launchInProgress = false;
-                    console.log('🤖 Bot de Telegram iniciado correctamente');
+                    console.log(`🤖 Bot iniciado en modo webhook: ${webhookUrl}`);
                 })
-                .catch(err => {
-                    launchInProgress = false;
-                    const canRetry = BOT_LAUNCH_MAX_RETRIES === 0 || launchAttempts < BOT_LAUNCH_MAX_RETRIES;
-                    const retryDelay = Math.min(BOT_LAUNCH_RETRY_BASE_MS * Math.pow(2, launchAttempts - 1), BOT_LAUNCH_RETRY_MAX_MS);
-                    const errorCode = err?.code || err?.errno || 'UNKNOWN';
-
-                    console.error(`❌ Error al iniciar el bot (intento ${launchAttempts}, código ${errorCode}):`, err?.message || err);
-
-                    if (canRetry) {
-                        console.log(`🔁 Reintentando iniciar bot en ${Math.round(retryDelay / 1000)}s...`);
-                        setTimeout(launchBotWithRetry, retryDelay);
-                    } else {
-                        console.error('⛔ Se alcanzó el máximo de reintentos para iniciar el bot.');
-                    }
+                .catch((err) => {
+                    console.error('❌ Error configurando webhook de Telegram:', err?.message || err);
                 });
-        };
+        } else {
+            let launchAttempts = 0;
+            let launchInProgress = false;
+            let botStarted = false;
 
-        launchBotWithRetry();
+            const launchBotWithRetry = () => {
+                if (botStarted || launchInProgress) return;
+
+                launchInProgress = true;
+                launchAttempts += 1;
+
+                bot.telegram.deleteWebhook()
+                    .catch(() => {})
+                    .finally(() => {
+                        bot.launch()
+                            .then(() => {
+                                botStarted = true;
+                                launchInProgress = false;
+                                console.log('🤖 Bot de Telegram iniciado correctamente (polling)');
+                            })
+                            .catch(err => {
+                                launchInProgress = false;
+                                const canRetry = BOT_LAUNCH_MAX_RETRIES === 0 || launchAttempts < BOT_LAUNCH_MAX_RETRIES;
+                                const retryDelay = Math.min(BOT_LAUNCH_RETRY_BASE_MS * Math.pow(2, launchAttempts - 1), BOT_LAUNCH_RETRY_MAX_MS);
+                                const errorCode = err?.code || err?.errno || 'UNKNOWN';
+
+                                console.error(`❌ Error al iniciar el bot (intento ${launchAttempts}, código ${errorCode}):`, err?.message || err);
+
+                                if (canRetry) {
+                                    console.log(`🔁 Reintentando iniciar bot en ${Math.round(retryDelay / 1000)}s...`);
+                                    setTimeout(launchBotWithRetry, retryDelay);
+                                } else {
+                                    console.error('⛔ Se alcanzó el máximo de reintentos para iniciar el bot.');
+                                }
+                            });
+                    });
+            };
+
+            launchBotWithRetry();
+        }
 
         process.once('SIGINT', () => bot.stop('SIGINT'));
         process.once('SIGTERM', () => bot.stop('SIGTERM'));
