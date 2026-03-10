@@ -2922,15 +2922,9 @@ bot.on(message('text'), async (ctx) => {
         const currency = parsed.currency;
         const targetId = session.transferTarget;
 
-        const transferMinUSD = 1;
-        const transferMinCUP = await convertToCUP(transferMinUSD, 'USD');
-        const minByCurrency = currency === 'USD' ? transferMinUSD : transferMinCUP;
-
-        if (amount < minByCurrency) {
-            await ctx.reply(
-                `❌ El monto mínimo para transferir en ${currency} es ${minByCurrency.toFixed(2)} ${currency}.`,
-                getMainKeyboard(ctx)
-            );
+        // Sin mínimo ni máximo para transferencias, solo debe ser positivo
+        if (amount <= 0) {
+            await ctx.reply('❌ El monto debe ser mayor que cero.', getMainKeyboard(ctx));
             return;
         }
 
