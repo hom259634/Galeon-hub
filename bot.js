@@ -55,7 +55,8 @@ const MENU_COMMANDS = [
   { command: 'mis_jugadas', description: '📋 Mis jugadas' },
   { command: 'referidos', description: '👥 Referidos' },
   { command: 'ayuda', description: '❓ Ayuda' },
-  { command: 'webapp', description: '🌐 Abrir WebApp' }
+    { command: 'webapp', description: '🌐 Abrir WebApp' },
+    { command: 'cancel', description: '❌ Cancelar operación' }
 ];
 
 async function setMenuCommandsWithRetry(attempt = 1) {
@@ -142,7 +143,7 @@ function buildLastBetsText(bets) {
     return text;
 }
 
-function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, creditedCurrency, includeUsdFollowup = false, bonusMovedCup = 0 }) {
+function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, creditedCurrency, includeUsdFollowup = false, bonusMovedCup = 0, showBonusMovedNotice = false }) {
     let text =
         `✅ <b>Depósito aprobado</b>\n\n` +
         `💰 Monto depositado: ${depositedAmountText}\n` +
@@ -154,6 +155,8 @@ function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, cred
 
     if (bonusMovedCup > 0) {
         text += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+    } else if (showBonusMovedNotice) {
+        text += `🎁 Tu bono de bienvenida se ha movido a tu saldo principal.\n`;
     }
 
     text += `\n¡Gracias por confiar en nosotros!`;
@@ -182,6 +185,35 @@ async function safeEdit(ctx, text, keyboard = null) {
             });
         } catch (e) {}
     }
+}
+
+function clearPendingFlow(session) {
+    const pendingKeys = [
+        'supportReplyTo',
+        'awaitingBet', 'betType', 'lottery', 'sessionId',
+        'awaitingDepositPhoto', 'awaitingDepositAmount', 'depositMethod', 'depositPhotoBuffer',
+        'awaitingWithdrawAmount', 'withdrawMethod', 'withdrawAmount', 'withdrawCurrency',
+        'awaitingWithdrawWallet', 'withdrawWallet',
+        'awaitingWithdrawNetwork', 'withdrawNetwork',
+        'awaitingWithdrawAccount',
+        'awaitingTransferTarget', 'transferTarget', 'awaitingTransferAmount',
+        'adminAction', 'adminStep',
+        'adminTempName', 'adminTempCurrency', 'adminTempCard',
+        'editMethodId', 'editMethodType', 'editStep', 'editField',
+        'priceStep', 'priceTempMultiplier', 'priceTempMinCup',
+        'minStep', 'minTempCup', 'minTempUsd', 'maxTempCup',
+        'winningSessionId',
+        'withdrawRequest'
+    ];
+
+    let cleared = false;
+    for (const key of pendingKeys) {
+        if (Object.prototype.hasOwnProperty.call(session, key)) {
+            delete session[key];
+            cleared = true;
+        }
+    }
+    return cleared;
 }
 
 async function getExchangeRates() {
@@ -804,12 +836,17 @@ bot.command('jugar', async (ctx) => {
 
 bot.command('mi_dinero', async (ctx) => {
     const user = ctx.dbUser;
+    const rate = await getExchangeRateUSD();
     const cup = parseFloat(user.cup) || 0;
     const usd = parseFloat(user.usd) || 0;
+    const bonusCup = parseFloat(user.bonus_cup) || 0;
+    const cupToUsd = (cup / rate).toFixed(2);
+    const usdToCup = (usd * rate).toFixed(2);
 
     const text = `💰 <b>Tu saldo actual es:</b>\n\n` +
-        `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)}\n` +
-        `💵 <b>USD:</b> ${usd.toFixed(2)}\n\n` +
+        `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (aprox. ${cupToUsd} USD)\n` +
+        `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n` +
+        `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n\n` +
         `¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
 });
@@ -876,6 +913,15 @@ bot.command('webapp', async (ctx) => {
         Markup.button.webApp('🚀 Abrir WebApp', `${WEBAPP_URL}/app.html`)
     ]);
     await ctx.reply('Haz clic en el botón para acceder a nuestra plataforma web interactiva:', webAppButton);
+});
+
+bot.command('cancel', async (ctx) => {
+    const cleared = clearPendingFlow(ctx.session || {});
+    if (cleared) {
+        await ctx.reply('✅ Operación cancelada. Ya puedes realizar otra acción.', getMainKeyboard(ctx));
+    } else {
+        await ctx.reply('ℹ️ No hay ninguna operación en curso para cancelar.', getMainKeyboard(ctx));
+    }
 });
 
 // ========== ACCIONES ==========
@@ -2020,6 +2066,17 @@ bot.on(message('text'), async (ctx) => {
     const session = ctx.session;
     const user = ctx.dbUser;
 
+    const normalizedText = text.toLowerCase();
+    if (normalizedText === 'cancelar' || normalizedText === '/cancel' || normalizedText === '❌ cancelar') {
+        const cleared = clearPendingFlow(session || {});
+        if (cleared) {
+            await ctx.reply('✅ Operación cancelada. Ya puedes realizar otra acción.', getMainKeyboard(ctx));
+        } else {
+            await ctx.reply('ℹ️ No hay ninguna operación en curso para cancelar.', getMainKeyboard(ctx));
+        }
+        return;
+    }
+
     // 1. Verificar si es un admin respondiendo a un usuario
     if (isAdmin(uid) && session.supportReplyTo) {
         const targetUserId = session.supportReplyTo;
@@ -2524,7 +2581,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(amountText);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: <code>500 cup</code> o <code>10 usdt</code>).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt).', getMainKeyboard(ctx));
             return;
         }
 
@@ -2534,18 +2591,14 @@ bot.on(message('text'), async (ctx) => {
         }
 
         const minDepositUSD = await getMinDepositUSD();
-        const rate = await getExchangeRateUSD();
-        const rateMLC = await getExchangeRateMLC();
-        let amountUSD = 0;
-        switch (parsed.currency) {
-            case 'USD': amountUSD = parsed.amount; break;
-            case 'CUP': amountUSD = parsed.amount / rate; break;
-            case 'USDT': amountUSD = parsed.amount; break;
-            case 'TRX': amountUSD = parsed.amount * await getExchangeRateTRX() / rate; break;
-            case 'MLC': amountUSD = parsed.amount * rateMLC / rate; break;
-        }
-        if (amountUSD < minDepositUSD) {
-            await ctx.reply(`❌ El monto mínimo de depósito es ${minDepositUSD} USD (equivalente a ${(minDepositUSD * rate).toFixed(2)} CUP). Tu monto equivale a ${amountUSD.toFixed(2)} USD.`, getMainKeyboard(ctx));
+        const minDepositInCurrency = await convertToCUP(minDepositUSD, 'USD')
+            .then(minCup => convertFromCUP(minCup, parsed.currency));
+
+        if (parsed.amount < minDepositInCurrency) {
+            await ctx.reply(
+                `❌ El monto mínimo de depósito es ${minDepositInCurrency.toFixed(2)} ${parsed.currency}.`,
+                getMainKeyboard(ctx)
+            );
             return;
         }
 
@@ -2850,7 +2903,7 @@ bot.on(message('text'), async (ctx) => {
         await ctx.reply(
             `✅ Usuario encontrado: ${escapeHTML(displayName)}\n\n` +
             `Ahora envía el <b>monto y la moneda</b> que deseas transferir (ej: <code>500 cup</code> o <code>10 usd</code>).\n` +
-            `💰 Tus saldos: CUP: ${(parseFloat(user.cup) || 0).toFixed(2)}, USD: ${(parseFloat(user.usd) || 0).toFixed(2)}`,
+            `💰 Tus saldos: CUP: ${(parseFloat(user.cup) || 0).toFixed(2)}, USD: ${(parseFloat(user.usd) || 0).toFixed(2)} (aprox. ${((parseFloat(user.usd) || 0) * await getExchangeRateUSD()).toFixed(2)} CUP)`,
             { parse_mode: 'HTML' }
         );
         return;
@@ -2872,6 +2925,18 @@ bot.on(message('text'), async (ctx) => {
         const amount = parsed.amount;
         const currency = parsed.currency;
         const targetId = session.transferTarget;
+
+        const transferMinUSD = 1;
+        const transferMinCUP = await convertToCUP(transferMinUSD, 'USD');
+        const minByCurrency = currency === 'USD' ? transferMinUSD : transferMinCUP;
+
+        if (amount < minByCurrency) {
+            await ctx.reply(
+                `❌ El monto mínimo para transferir en ${currency} es ${minByCurrency.toFixed(2)} ${currency}.`,
+                getMainKeyboard(ctx)
+            );
+            return;
+        }
 
         const debitPlan = await buildRealBalanceDebitPlan(user, amount, currency);
         if (!debitPlan.ok) {
@@ -3233,7 +3298,8 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                 creditedAmount: parsed.currency === 'USD' ? parsed.amount : amountCUP,
                 creditedCurrency: parsed.currency === 'USD' ? 'USD' : 'CUP',
                 includeUsdFollowup: parsed.currency === 'USD',
-                bonusMovedCup
+                bonusMovedCup,
+                showBonusMovedNotice: isFirstDeposit
             }),
             { parse_mode: 'HTML' }
         );

@@ -883,6 +883,15 @@ app.post('/api/transfer', async (req, res) => {
     if (!['CUP', 'USD'].includes(currency)) {
         return res.status(400).json({ error: 'Moneda no soportada. Usa CUP o USD' });
     }
+
+    const parsedAmount = parseFloat(amount);
+    const transferMinUSD = 1;
+    const transferMinCUP = await convertToCUP(transferMinUSD, 'USD');
+    const minByCurrency = currency === 'USD' ? transferMinUSD : transferMinCUP;
+    if (parsedAmount < minByCurrency) {
+        return res.status(400).json({ error: `El monto mínimo para transferir en ${currency} es ${minByCurrency.toFixed(2)} ${currency}.` });
+    }
+
     if (from === to) {
         return res.status(400).json({ error: 'No puedes transferirte a ti mismo' });
     }
@@ -919,7 +928,7 @@ app.post('/api/transfer', async (req, res) => {
 
     // Regla: USD solo se transfiere desde saldo USD.
     // Otras monedas sí pueden usar saldo combinado CUP + USD.
-    const debitPlan = await buildRealBalanceDebitPlan(userFrom, parseFloat(amount), currency);
+    const debitPlan = await buildRealBalanceDebitPlan(userFrom, parsedAmount, currency);
     if (!debitPlan.ok) {
         return res.status(400).json({
             error: debitPlan.errorMessage || `Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
@@ -940,12 +949,12 @@ app.post('/api/transfer', async (req, res) => {
     if (currency === 'CUP') {
         await supabase
             .from('users')
-            .update({ cup: (parseFloat(targetUser.cup) || 0) + parseFloat(amount), updated_at: new Date() })
+            .update({ cup: (parseFloat(targetUser.cup) || 0) + parsedAmount, updated_at: new Date() })
             .eq('telegram_id', targetUserId);
     } else if (currency === 'USD') {
         await supabase
             .from('users')
-            .update({ usd: (parseFloat(targetUser.usd) || 0) + parseFloat(amount), updated_at: new Date() })
+            .update({ usd: (parseFloat(targetUser.usd) || 0) + parsedAmount, updated_at: new Date() })
             .eq('telegram_id', targetUserId);
     } else {
         await supabase
@@ -1891,6 +1900,8 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
 
         if (bonusMovedCup > 0) {
             text += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+        } else if (isFirstDeposit) {
+            text += `🎁 Tu bono de bienvenida se ha movido a tu saldo principal.\n`;
         }
 
         text += `\n¡Gracias por confiar en nosotros!`;
