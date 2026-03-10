@@ -728,14 +728,10 @@ function adminPanelKbd() {
         ],
         [
             Markup.button.callback('➕ Añadir método DEPÓSITO', 'adm_add_dep'),
-            Markup.button.callback('✏️ Editar método DEPÓSITO', 'adm_edit_dep')
-        ],
-        [
-            Markup.button.callback('🗑 Eliminar método DEPÓSITO', 'adm_delete_dep'),
             Markup.button.callback('➕ Añadir método RETIRO', 'adm_add_wit')
         ],
         [
-            Markup.button.callback('✏️ Editar método RETIRO', 'adm_edit_wit'),
+            Markup.button.callback('🗑 Eliminar método DEPÓSITO', 'adm_delete_dep'),
             Markup.button.callback('🗑 Eliminar método RETIRO', 'adm_delete_wit')
         ],
         [
