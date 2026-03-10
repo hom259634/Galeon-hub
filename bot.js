@@ -680,7 +680,8 @@ function getMainKeyboard(ctx) {
     const buttons = [
         ['🎲 Jugar', '💰 Mi dinero'],
         ['📋 Mis jugadas', '👥 Referidos'],
-        ['❓ Cómo jugar', '🌐 Abrir WebApp']
+        ['❓ Cómo jugar', '🌐 Abrir WebApp'],
+        ['❌ Cancelar']
     ];
     if (isAdmin(ctx.from.id)) {
         buttons.push(['🔧 Admin']);
@@ -721,22 +722,34 @@ function myMoneyKbd() {
 
 function adminPanelKbd() {
     const buttons = [
-        [Markup.button.callback('🎰 Gestionar sesiones', 'admin_sessions')],
-        [Markup.button.callback('🔢 Publicar ganadores', 'admin_winning')],
-        [Markup.button.callback('➕ Añadir método DEPÓSITO', 'adm_add_dep')],
-        [Markup.button.callback('✏️ Editar método DEPÓSITO', 'adm_edit_dep')],
-        [Markup.button.callback('🗑 Eliminar método DEPÓSITO', 'adm_delete_dep')],
-        [Markup.button.callback('➕ Añadir método RETIRO', 'adm_add_wit')],
-        [Markup.button.callback('✏️ Editar método RETIRO', 'adm_edit_wit')],
-        [Markup.button.callback('🗑 Eliminar método RETIRO', 'adm_delete_wit')],
-        [Markup.button.callback('💰 Configurar tasa MLC/CUP', 'adm_set_rate_mlc')],
-        [Markup.button.callback('💰 Configurar tasa USD/CUP', 'adm_set_rate_usd')],
-        [Markup.button.callback('💰 Configurar tasa USDT/CUP', 'adm_set_rate_usdt')],
-        [Markup.button.callback('💰 Configurar tasa TRX/CUP', 'adm_set_rate_trx')],
-        [Markup.button.callback('🎲 Configurar precios y pagos', 'adm_set_prices')],
-        [Markup.button.callback('💰 Mínimos por jugada', 'adm_min_per_bet')],
-        [Markup.button.callback('💰 Mínimo depósito', 'adm_min_deposit')],
-        [Markup.button.callback('💰 Mínimo retiro', 'adm_min_withdraw')],
+        [
+            Markup.button.callback('🎰 Gestionar sesiones', 'admin_sessions'),
+            Markup.button.callback('🔢 Publicar ganadores', 'admin_winning')
+        ],
+        [
+            Markup.button.callback('➕ Añadir método DEPÓSITO', 'adm_add_dep'),
+            Markup.button.callback('✏️ Editar método DEPÓSITO', 'adm_edit_dep')
+        ],
+        [
+            Markup.button.callback('🗑 Eliminar método DEPÓSITO', 'adm_delete_dep'),
+            Markup.button.callback('➕ Añadir método RETIRO', 'adm_add_wit')
+        ],
+        [
+            Markup.button.callback('✏️ Editar método RETIRO', 'adm_edit_wit'),
+            Markup.button.callback('🗑 Eliminar método RETIRO', 'adm_delete_wit')
+        ],
+        [
+            Markup.button.callback('💰 Configurar tasa MLC/CUP', 'adm_set_rate_mlc'),
+            Markup.button.callback('💰 Configurar tasa USD/CUP', 'adm_set_rate_usd')
+        ],
+        [
+            Markup.button.callback('💰 Configurar tasa USDT/CUP', 'adm_set_rate_usdt'),
+            Markup.button.callback('💰 Configurar tasa TRX/CUP', 'adm_set_rate_trx')
+        ],
+        [
+            Markup.button.callback('🎲 Configurar precios y pagos', 'adm_set_prices'),
+            Markup.button.callback('💰 Mínimos por jugada', 'adm_min_per_bet')
+        ],
         [Markup.button.callback('📋 Ver datos actuales', 'adm_view')],
         [Markup.button.callback('◀ Menú principal', 'main')]
     ];
@@ -1105,17 +1118,16 @@ bot.action('recharge', async (ctx) => {
     const buttons = methods.map(m => [Markup.button.callback(`${m.name} (${m.currency})`, `dep_${m.id}`)]);
     buttons.push([Markup.button.callback('◀ Volver', 'my_money')]);
 
-    const rate = await getExchangeRateUSD();
     await safeEdit(ctx,
         `💵 <b>Recargar saldo</b>\n\n` +
         `Elige un método de pago. Luego deberás enviar una captura de pantalla de la transferencia realizada.\n\n` +
-        `<b>Mínimo de depósito:</b> ${minDeposit} USD (equivalente a ${(minDeposit * rate).toFixed(2)} CUP)\n\n` +
+        `<b>Mínimo de depósito configurado:</b> ${minDeposit} (en la moneda del método que elijas)\n\n` +
         `Selecciona el método:`,
         Markup.inlineKeyboard(buttons)
     );
 });
 
-bot.action(/dep_(\d+)/, async (ctx) => {
+bot.action(/^dep_(\d+)$/, async (ctx) => {
     const methodId = parseInt(ctx.match[1]);
     const { data: method } = await supabase
         .from('deposit_methods')
@@ -1158,17 +1170,6 @@ bot.action('withdraw', async (ctx) => {
         return;
     }
 
-    const user = ctx.dbUser;
-    const minWithdrawUSD = await getMinWithdrawUSD();
-    const rate = await getExchangeRateUSD();
-    const minWithdrawCUP = (minWithdrawUSD * rate).toFixed(2);
-
-    const totalCUP = parseFloat(user.cup) + parseFloat(user.usd) * rate;
-    if (totalCUP < minWithdrawUSD * rate) {
-        await ctx.answerCbQuery(`❌ Necesitas al menos ${minWithdrawCUP} CUP (o su equivalente en USD) en tu saldo real para solicitar un retiro.`, { show_alert: true });
-        return;
-    }
-
     const { data: methods } = await supabase
         .from('withdraw_methods')
         .select('*')
@@ -1185,7 +1186,7 @@ bot.action('withdraw', async (ctx) => {
     await safeEdit(ctx, '📤 <b>Selecciona un método de retiro:</b>', Markup.inlineKeyboard(buttons));
 });
 
-bot.action(/wit_(\d+)/, async (ctx) => {
+bot.action(/^wit_(\d+)$/, async (ctx) => {
     const methodId = parseInt(ctx.match[1]);
     const { data: method } = await supabase
         .from('withdraw_methods')
@@ -1202,9 +1203,7 @@ bot.action(/wit_(\d+)/, async (ctx) => {
     ctx.session.awaitingWithdrawAmount = true;
 
     const user = ctx.dbUser;
-    const minWithdrawUSD = await getMinWithdrawUSD();
-    const rate = await getExchangeRateUSD();
-    const minWithdrawCUP = (minWithdrawUSD * rate).toFixed(2);
+    const minWithdraw = await getMinWithdrawUSD();
 
     let saldoEnMoneda = 0;
     let mensajeSaldo = '';
@@ -1233,7 +1232,7 @@ bot.action(/wit_(\d+)/, async (ctx) => {
         `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n\n` +
         `💳 <b>Instrucciones:</b> ${method.confirm}\n\n` +
         `${mensajeSaldo}\n\n` +
-        `⏳ <b>Mínimo de retiro:</b> ${minWithdrawCUP} CUP (equivalente a ${minWithdrawUSD} USD).\n` +
+        `⏳ <b>Mínimo de retiro configurado:</b> ${minWithdraw} ${method.currency}.\n` +
         (method.min_amount ? `📉 Límite mínimo: ${method.min_amount} ${method.currency}\n` : '') +
         (method.max_amount ? `📈 Límite máximo: ${method.max_amount} ${method.currency}\n` : '') +
         `\nPor favor, escribe el <b>monto que deseas retirar</b> en ${method.currency} (ej: <code>500</code> para 500 ${method.currency}).` +
@@ -2590,13 +2589,11 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        const minDepositUSD = await getMinDepositUSD();
-        const minDepositInCurrency = await convertToCUP(minDepositUSD, 'USD')
-            .then(minCup => convertFromCUP(minCup, parsed.currency));
+        const minDeposit = await getMinDepositUSD();
 
-        if (parsed.amount < minDepositInCurrency) {
+        if (parsed.amount < minDeposit) {
             await ctx.reply(
-                `❌ El monto mínimo de depósito es ${minDepositInCurrency.toFixed(2)} ${parsed.currency}.`,
+                `❌ El monto mínimo de depósito configurado es ${minDeposit} ${parsed.currency}.`,
                 getMainKeyboard(ctx)
             );
             return;
@@ -2647,19 +2644,9 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        const minWithdrawUSD = await getMinWithdrawUSD();
-        const rateUSD = await getExchangeRateUSD();
-        const rateMLC = await getExchangeRateMLC();
-        let amountUSD = 0;
-        switch (currency) {
-            case 'USD': amountUSD = amount; break;
-            case 'CUP': amountUSD = amount / rateUSD; break;
-            case 'USDT': amountUSD = amount; break;
-            case 'TRX': amountUSD = amount * await getExchangeRateTRX() / rateUSD; break;
-            case 'MLC': amountUSD = amount * rateMLC / rateUSD; break;
-        }
-        if (amountUSD < minWithdrawUSD) {
-            await ctx.reply(`❌ El monto mínimo de retiro es ${minWithdrawUSD} USD (equivalente a ${(minWithdrawUSD * rateUSD).toFixed(2)} CUP). Tu monto equivale a ${amountUSD.toFixed(2)} USD.`, getMainKeyboard(ctx));
+        const minWithdraw = await getMinWithdrawUSD();
+        if (amount < minWithdraw) {
+            await ctx.reply(`❌ El monto mínimo de retiro configurado es ${minWithdraw} ${currency}.`, getMainKeyboard(ctx));
             return;
         }
 
@@ -2958,26 +2945,43 @@ bot.on(message('text'), async (ctx) => {
 
         const { data: targetUser } = await supabase
             .from('users')
-            .select('cup, usd, first_name, username')
+            .select('cup, usd, bonus_cup, first_name, username')
             .eq('telegram_id', targetId)
             .single();
 
+        const targetCup = parseFloat(targetUser.cup) || 0;
+        const targetUsd = parseFloat(targetUser.usd) || 0;
+        const targetBonusCup = parseFloat(targetUser.bonus_cup) || 0;
+
+        let updatedTargetCup = targetCup;
+        let updatedTargetUsd = targetUsd;
+
         if (currency === 'CUP') {
-            await supabase
-                .from('users')
-                .update({ cup: (parseFloat(targetUser.cup) || 0) + amount, updated_at: new Date() })
-                .eq('telegram_id', targetId);
-        } else if (currency === 'USD') {
-            await supabase
-                .from('users')
-                .update({ usd: (parseFloat(targetUser.usd) || 0) + amount, updated_at: new Date() })
-                .eq('telegram_id', targetId);
+            updatedTargetCup += amount;
         } else {
-            await supabase
-                .from('users')
-                .update({ cup: (parseFloat(targetUser.cup) || 0) + debitPlan.amountCUP, updated_at: new Date() })
-                .eq('telegram_id', targetId);
+            updatedTargetUsd += amount;
         }
+
+        let bonusMovedCup = 0;
+        if (targetBonusCup > 0) {
+            updatedTargetCup += targetBonusCup;
+            bonusMovedCup = targetBonusCup;
+        }
+
+        const targetUpdatePayload = {
+            cup: updatedTargetCup,
+            usd: updatedTargetUsd,
+            updated_at: new Date()
+        };
+
+        if (bonusMovedCup > 0) {
+            targetUpdatePayload.bonus_cup = 0;
+        }
+
+        await supabase
+            .from('users')
+            .update(targetUpdatePayload)
+            .eq('telegram_id', targetId);
 
         const fromName = user.first_name || user.username || uid;
         const toName = targetUser.first_name || targetUser.username || targetId;
@@ -2996,6 +3000,7 @@ bot.on(message('text'), async (ctx) => {
                 `🔄 <b>Has recibido una transferencia</b>\n\n` +
                 `👤 De: ${escapeHTML(fromName)}\n` +
                 `💰 Monto: ${amount} ${currency}\n` +
+                (bonusMovedCup > 0 ? `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n` : '') +
                 `📊 Saldo actualizado.`,
                 { parse_mode: 'HTML' }
             );
