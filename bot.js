@@ -1117,7 +1117,7 @@ bot.action('recharge', async (ctx) => {
     await safeEdit(ctx,
         `💵 <b>Recargar saldo</b>\n\n` +
         `Elige un método de pago. Luego deberás enviar una captura de pantalla de la transferencia realizada.\n\n` +
-        `<b>Mínimo de depósito configurado:</b> ${minDeposit} (en la moneda del método que elijas)\n\n` +
+        `<b>Mínimo de depósito aceptado:</b> ${minDeposit} (en la moneda del método que elijas)\n\n` +
         `Selecciona el método:`,
         Markup.inlineKeyboard(buttons)
     );
@@ -1228,7 +1228,7 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
         `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n\n` +
         `💳 <b>Instrucciones:</b> ${method.confirm}\n\n` +
         `${mensajeSaldo}\n\n` +
-        `⏳ <b>Mínimo de retiro configurado:</b> ${minWithdraw} ${method.currency}.\n` +
+        `⏳ <b>Mínimo de retiro aceptado:</b> ${minWithdraw} ${method.currency}.\n` +
         (method.min_amount ? `📉 Límite mínimo: ${method.min_amount} ${method.currency}\n` : '') +
         (method.max_amount ? `📈 Límite máximo: ${method.max_amount} ${method.currency}\n` : '') +
         `\nPor favor, escribe el <b>monto que deseas retirar</b> en ${method.currency} (ej: <code>500</code> para 500 ${method.currency}).` +
@@ -2586,10 +2586,23 @@ bot.on(message('text'), async (ctx) => {
         }
 
         const minDeposit = await getMinDepositUSD();
+        const methodMinAmount = method.min_amount !== null ? parseFloat(method.min_amount) : null;
+        const methodMaxAmount = method.max_amount !== null ? parseFloat(method.max_amount) : null;
+        const effectiveMinDeposit = methodMinAmount !== null && !Number.isNaN(methodMinAmount)
+            ? Math.max(minDeposit, methodMinAmount)
+            : minDeposit;
 
-        if (parsed.amount < minDeposit) {
+        if (parsed.amount < effectiveMinDeposit) {
             await ctx.reply(
-                `❌ El monto mínimo de depósito configurado es ${minDeposit} ${parsed.currency}.`,
+                `❌ El monto mínimo de depósito aceptado es ${effectiveMinDeposit} ${parsed.currency}.`,
+                getMainKeyboard(ctx)
+            );
+            return;
+        }
+
+        if (methodMaxAmount !== null && !Number.isNaN(methodMaxAmount) && parsed.amount > methodMaxAmount) {
+            await ctx.reply(
+                `❌ Monto máximo: ${methodMaxAmount} ${parsed.currency}.`,
                 getMainKeyboard(ctx)
             );
             return;
@@ -2642,7 +2655,7 @@ bot.on(message('text'), async (ctx) => {
 
         const minWithdraw = await getMinWithdrawUSD();
         if (amount < minWithdraw) {
-            await ctx.reply(`❌ El monto mínimo de retiro configurado es ${minWithdraw} ${currency}.`, getMainKeyboard(ctx));
+            await ctx.reply(`❌ El monto mínimo de retiro aceptado es ${minWithdraw} ${currency}.`, getMainKeyboard(ctx));
             return;
         }
 
@@ -2996,6 +3009,7 @@ bot.on(message('text'), async (ctx) => {
                 `🔄 <b>Has recibido una transferencia</b>\n\n` +
                 `👤 De: ${escapeHTML(fromName)}\n` +
                 `💰 Monto: ${amount} ${currency}\n` +
+                (currency == 'USD' ? `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n` :'' ) +
                 (bonusMovedCup > 0 ? `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n` : '') +
                 `📊 Saldo actualizado.`,
                 { parse_mode: 'HTML' }
