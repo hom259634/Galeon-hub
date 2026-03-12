@@ -1116,7 +1116,8 @@ bot.action('recharge', async (ctx) => {
 
     await safeEdit(ctx,
         `💵 <b>Recargar saldo</b>\n\n` +
-        `Elige un método de pago. Primero deberás enviar el monto que vas a transferir para validarlo, y luego la captura de pantalla de la transferencia.\n\n` +
+        `Elige un método de pago. Luego deberás enviar una captura de pantalla de la transferencia realizada.\n\n` +
+        `<b>Mínimo de depósito aceptado:</b> ${minDeposit} (en la moneda del método que elijas)\n\n` +
         `Selecciona el método:`,
         Markup.inlineKeyboard(buttons)
     );
@@ -1138,16 +1139,6 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
     ctx.session.depositMethod = method;
     ctx.session.awaitingDepositAmount = true;
 
-    // Calcular mínimo efectivo para mostrar (sin tags <code>)
-    const minDepositGlobal = await getMinDepositUSD();
-    const methodMinAmount = method.min_amount !== null ? parseFloat(method.min_amount) : null;
-    const effectiveMin = methodMinAmount !== null && !Number.isNaN(methodMinAmount)
-        ? Math.max(minDepositGlobal, methodMinAmount)
-        : minDepositGlobal;
-    const minDisplay = method.currency === 'USD'
-        ? `${effectiveMin} USD`
-        : `${(effectiveMin * await getExchangeRateUSD()).toFixed(2)} CUP`;
-
     let extraInstructions = '';
     if (method.currency === 'USDT' || method.currency === 'TRX') {
         extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${method.currency} a la dirección indicada.\n- Asegúrate de usar la red correcta: ${method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada'}.\n- La captura debe mostrar claramente el hash de la transacción (TXID) y el monto.`;
@@ -1158,7 +1149,7 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
         `Moneda: ${method.currency}\n` +
         `Datos: <code>${escapeHTML(method.card)}</code>\n` +
         `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n${extraInstructions}\n\n` +
-        `Por favor, envía ahora el <b>monto</b> que vas a transferir en el formato monto moneda (ej: 500 cup o 10 usd). (mínimo: ${minDisplay}) Luego te pediré la captura.`,
+        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code>).`,
         null
     );
 });
@@ -1809,6 +1800,8 @@ bot.action('adm_view', async (ctx) => {
     text += `USD/CUP: 1 USD = ${rates.rate} CUP\n`;
     text += `USDT/CUP: 1 USDT = ${rates.rate_usdt} CUP\n`;
     text += `TRX/CUP: 1 TRX = ${rates.rate_trx} CUP\n\n`;
+    text += `📥 <b>Mínimo depósito:</b> ${minDep} USD (${(minDep * rates.rate).toFixed(2)} CUP)\n`;
+    text += `📤 <b>Mínimo retiro:</b> ${minWit} USD (${(minWit * rates.rate).toFixed(2)} CUP)\n\n`;
     text += `📥 <b>Métodos de DEPÓSITO:</b>\n`;
     depMethods?.forEach(m => text += `  ID ${m.id}: ${escapeHTML(m.name)} (${m.currency}) - ${escapeHTML(m.card)} / ${escapeHTML(m.confirm)} | Mín: ${m.min_amount !== null ? m.min_amount : '-'} | Máx: ${m.max_amount !== null ? m.max_amount : '-'}\n`);
     text += `\n📤 <b>Métodos de RETIRO:</b>\n`;
@@ -2573,18 +2566,7 @@ bot.on(message('text'), async (ctx) => {
     if (session.awaitingDepositAmount) {
         const amountText = text;
         const method = session.depositMethod;
-        const buffer = session.depositPhotoBuffer;
 
-        // Si aún no hay captura, guardamos el monto y pedimos la captura al usuario
-        if (!buffer) {
-            session.depositAmountText = amountText;
-            session.awaitingDepositPhoto = true;
-            delete session.awaitingDepositAmount;
-            await ctx.reply('📸 <b>Ahora, por favor, envía una captura de pantalla de la transferencia que realizaste.</b>\n(Asegúrate de que se vea claramente el monto, la moneda y, para cripto, el hash)', { parse_mode: 'HTML' });
-            return;
-        }
-
-        // Si ya hay captura, procesamos normalmente
         const parsed = parseAmountWithCurrency(amountText);
         if (!parsed) {
             await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt).', getMainKeyboard(ctx));
@@ -2619,37 +2601,27 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        try {
-            const request = await createDepositRequest(uid, method.id, buffer, amountText, parsed.currency);
-            for (const adminId of ADMIN_IDS) {
-                try {
-                    await bot.telegram.sendMessage(adminId,
-                        `📥 <b>Nueva solicitud de DEPÓSITO</b>\n` +
-                        `👤 Usuario: ${ctx.from.first_name} (${uid})\n` +
-                        `🏦 Método: ${escapeHTML(method.name)} (${method.currency})\n` +
-                        `💰 Monto: ${amountText}\n` +
-                        `📎 <a href="${request.screenshot_url}">Ver captura</a>\n` +
-                        `🆔 Solicitud: ${request.id}`,
-                        {
-                            parse_mode: 'HTML',
-                            reply_markup: Markup.inlineKeyboard([
-                                [Markup.button.callback('✅ Aprobar', `approve_deposit_${request.id}`),
-                                 Markup.button.callback('❌ Rechazar', `reject_deposit_${request.id}`)]
-                            ]).reply_markup
-                        }
-                    );
-                } catch (e) {}
-            }
-            await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${amountText}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite. ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
-        } catch (e) {
-            console.error(e);
-            await ctx.reply('❌ Error al procesar la solicitud. Por favor, intenta más tarde o contacta a soporte.', getMainKeyboard(ctx));
+        // Guardamos el monto validado y pedimos la captura
+        session.depositAmountText = amountText;
+        session.depositParsed = parsed;
+        delete session.awaitingDepositAmount;
+        session.awaitingDepositPhoto = true;
+
+        let extraInstructions = '';
+        if (method.currency === 'USDT' || method.currency === 'TRX') {
+            extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${method.currency} a la dirección indicada.\n- Asegúrate de usar la red correcta: ${method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada'}.\n- La captura debe mostrar claramente el hash de la transacción (TXID) y el monto.`;
         }
 
-        delete session.awaitingDepositAmount;
-        delete session.depositMethod;
-        delete session.depositPhotoBuffer;
-        delete session.depositAmountText;
+        await safeEdit(ctx,
+            `🧾 <b>${escapeHTML(method.name)}</b>\n` +
+            `Moneda: ${method.currency}\n` +
+            `Datos: <code>${escapeHTML(method.card)}</code>\n` +
+            `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n${extraInstructions}\n\n` +
+            `📸 <b>Ahora, por favor, envía una captura de pantalla de la transferencia que realizaste.</b>\n` +
+            `(Asegúrate de que se vea claramente el monto, la moneda y, para cripto, el hash)`,
+            null
+        );
+
         return;
     }
 
@@ -2908,14 +2880,10 @@ bot.on(message('text'), async (ctx) => {
         session.awaitingTransferAmount = true;
         delete session.awaitingTransferTarget;
         const displayName = targetUser.first_name || targetUser.username || targetUser.telegram_id;
-        // Mostrar mínimos en paréntesis (convertir a CUP para mostrar ambos)
-        const minUSD = await getMinDepositUSD();
-        const rate = await getExchangeRateUSD();
-        const minCUP = (minUSD * rate).toFixed(2);
         await ctx.reply(
             `✅ Usuario encontrado: ${escapeHTML(displayName)}\n\n` +
-            `Ahora envía el <b>monto y la moneda</b> que deseas transferir (ej: 500 cup o 10 usd) (mínimo: ${minCUP} CUP / ${minUSD} USD).\n` +
-            `💰 Tus saldos: CUP: ${(parseFloat(user.cup) || 0).toFixed(2)}, USD: ${(parseFloat(user.usd) || 0).toFixed(2)} (aprox. ${((parseFloat(user.usd) || 0) * rate).toFixed(2)} CUP)`,
+            `Ahora envía el <b>monto y la moneda</b> que deseas transferir (ej: <code>500 cup</code> o <code>10 usd</code>).\n` +
+            `💰 Tus saldos: CUP: ${(parseFloat(user.cup) || 0).toFixed(2)}, USD: ${(parseFloat(user.usd) || 0).toFixed(2)} (aprox. ${((parseFloat(user.usd) || 0) * await getExchangeRateUSD()).toFixed(2)} CUP)`,
             { parse_mode: 'HTML' }
         );
         return;
@@ -2926,7 +2894,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(text);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: 500 cup).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debe ser <code>monto moneda</code> (ej: 500 cup).', getMainKeyboard(ctx));
             return;
         }
 
@@ -3230,43 +3198,12 @@ bot.on(message('photo'), async (ctx) => {
         const response = await axios({ url: fileLink.href, responseType: 'arraybuffer' });
         const buffer = Buffer.from(response.data, 'binary');
 
-        session.depositPhotoBuffer = buffer;
-        delete session.awaitingDepositPhoto;
-
-        // Si ya hay un monto previo guardado, procesamos la solicitud ahora
-        const amountText = session.depositAmountText;
         const method = session.depositMethod;
-        if (amountText && method) {
-            // Validar y crear la solicitud tal como en el flujo de texto
-            const parsed = parseAmountWithCurrency(amountText);
-            if (!parsed) {
-                // Pedir al usuario que reenvíe el monto correctamente
-                session.awaitingDepositAmount = true;
-                delete session.depositPhotoBuffer;
-                await ctx.reply('❌ Formato inválido del monto. Por favor, envía el monto en formato: monto moneda (ej: 500 cup o 10 usd).', getMainKeyboard(ctx));
-                return;
-            }
+        const amountText = session.depositAmountText;
+        const parsed = session.depositParsed;
 
-            if (parsed.currency !== method.currency) {
-                session.awaitingDepositAmount = true;
-                delete session.depositPhotoBuffer;
-                await ctx.reply(`❌ La moneda del monto (${parsed.currency}) no coincide con la del método (${method.currency}). Por favor, envía el monto en ${method.currency}.`, getMainKeyboard(ctx));
-                return;
-            }
-
-            const minDeposit = await getMinDepositUSD();
-            const methodMinAmount = method.min_amount !== null ? parseFloat(method.min_amount) : null;
-            const effectiveMinDeposit = methodMinAmount !== null && !Number.isNaN(methodMinAmount)
-                ? Math.max(minDeposit, methodMinAmount)
-                : minDeposit;
-
-            if (parsed.amount < effectiveMinDeposit) {
-                session.awaitingDepositAmount = true;
-                delete session.depositPhotoBuffer;
-                await ctx.reply(`❌ El monto mínimo de depósito aceptado es ${effectiveMinDeposit} ${parsed.currency}.`, getMainKeyboard(ctx));
-                return;
-            }
-
+        // Si ya tenemos monto validado, procesamos la solicitud ahora
+        if (amountText && parsed && method) {
             try {
                 const request = await createDepositRequest(uid, method.id, buffer, amountText, parsed.currency);
                 for (const adminId of ADMIN_IDS) {
@@ -3294,17 +3231,20 @@ bot.on(message('photo'), async (ctx) => {
                 await ctx.reply('❌ Error al procesar la solicitud. Por favor, intenta más tarde o contacta a soporte.', getMainKeyboard(ctx));
             }
 
-            delete session.awaitingDepositAmount;
+            delete session.awaitingDepositPhoto;
             delete session.depositMethod;
             delete session.depositPhotoBuffer;
             delete session.depositAmountText;
+            delete session.depositParsed;
             return;
         }
 
-        // Si no había monto previo, confirmamos la recepción de la captura
-        // (se asume que normalmente la captura llega después de haber enviado el monto)
-        session.awaitingDepositAmount = true; // mantenemos el estado por seguridad
-        await ctx.reply('✅ Captura recibida correctamente.', { parse_mode: 'HTML' });
+        // Si no hay monto aún, guardamos la captura y pedimos el monto
+        session.depositPhotoBuffer = buffer;
+        delete session.awaitingDepositPhoto;
+        session.awaitingDepositAmount = true;
+
+        await ctx.reply('✅ Captura recibida correctamente. Ahora, por favor, envía el <b>monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code>).', { parse_mode: 'HTML' });
         return;
     }
 
