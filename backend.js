@@ -978,9 +978,17 @@ app.post('/api/transfer', async (req, res) => {
         updatedTargetCup += debitPlan.amountCUP;
     }
 
-    if (targetBonusCup > 0) {
-        updatedTargetCup += targetBonusCup;
-        bonusMovedCup = targetBonusCup;
+    // Mover bono SOLO si el usuario no tenía saldo principal y no tuvo depósitos aprobados antes
+    try {
+        const hadNoMainBalance = (targetCup === 0 && targetUsd === 0);
+        const hadApprovedDeposit = await userHasApprovedDeposit(targetUserId);
+        if (targetBonusCup > 0 && hadNoMainBalance && !hadApprovedDeposit) {
+            updatedTargetCup += targetBonusCup;
+            bonusMovedCup = targetBonusCup;
+        }
+    } catch (e) {
+        // En caso de error al verificar depósitos aprobados, no mover el bono por seguridad
+        console.warn('Error verificando depósitos aprobados para migrar bono:', e?.message || e);
     }
 
     const targetUpdatePayload = {

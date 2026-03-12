@@ -1141,12 +1141,16 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
         extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${method.currency} a la dirección indicada.\n- Asegúrate de usar la red correcta: ${method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada'}.\n- La captura debe mostrar claramente el hash de la transacción (TXID) y el monto.`;
     }
 
+    const minLine = (method.min_amount !== null && method.min_amount !== undefined) ? `Mínimo: ${method.min_amount} ${method.currency}\n\n` : '';
+
     await safeEdit(ctx,
         `🧾 <b>${escapeHTML(method.name)}</b>\n` +
         `Moneda: ${method.currency}\n` +
         `Datos: <code>${escapeHTML(method.card)}</code>\n` +
-        `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n${extraInstructions}\n\n` +
-        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code>).`,
+        `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n` +
+        `${minLine}` +
+        `${extraInstructions}\n\n` +
+        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code).`,
         null
     );
 });
@@ -2566,7 +2570,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(amountText);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
             return;
         }
 
@@ -2953,9 +2957,15 @@ bot.on(message('text'), async (ctx) => {
         }
 
         let bonusMovedCup = 0;
-        if (targetBonusCup > 0) {
-            updatedTargetCup += targetBonusCup;
-            bonusMovedCup = targetBonusCup;
+        try {
+            const hadNoMainBalance = (targetCup === 0 && targetUsd === 0);
+            const hadApprovedDeposit = await userHasApprovedDeposit(targetId);
+            if (targetBonusCup > 0 && hadNoMainBalance && !hadApprovedDeposit) {
+                updatedTargetCup += targetBonusCup;
+                bonusMovedCup = targetBonusCup;
+            }
+        } catch (e) {
+            console.warn('Error verificando depósitos aprobados para migrar bono (transferencia):', e?.message || e);
         }
 
         const targetUpdatePayload = {
@@ -3287,7 +3297,12 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             .neq('id', requestId)
             .limit(1);
 
-        const isFirstDeposit = !(prevApproved && prevApproved.length > 0);
+        // Consider transfers as "already received balance" too: if user already had any CUP or USD, treat as not-first
+        const userCup = parseFloat(user.cup) || 0;
+        const userUsd = parseFloat(user.usd) || 0;
+        const hadAnyMainBalance = (userCup > 0) || (userUsd > 0);
+
+        const isFirstDeposit = !(prevApproved && prevApproved.length > 0) && !hadAnyMainBalance;
 
         let bonusMovedCup = 0;
 
