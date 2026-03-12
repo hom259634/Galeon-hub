@@ -1115,10 +1115,7 @@ bot.action('recharge', async (ctx) => {
     buttons.push([Markup.button.callback('◀ Volver', 'my_money')]);
 
     await safeEdit(ctx,
-        `💵 <b>Recargar saldo</b>\n\n` +
-        `Elige un método de pago. Luego deberás enviar una captura de pantalla de la transferencia realizada.\n\n` +
-        `<b>Mínimo de depósito aceptado:</b> ${minDeposit} (en la moneda del método que elijas)\n\n` +
-        `Selecciona el método:`,
+        `💵 Recargar saldo\n\nPor favor, elige un método de pago\n\nSelecciona el método:`,
         Markup.inlineKeyboard(buttons)
     );
 });
@@ -2601,24 +2598,20 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        // Guardamos el monto validado y pedimos la captura
+        // Guardamos el monto validado y pedimos la captura (mensaje simplificado según especificación)
         session.depositAmountText = amountText;
         session.depositParsed = parsed;
         delete session.awaitingDepositAmount;
         session.awaitingDepositPhoto = true;
 
-        let extraInstructions = '';
-        if (method.currency === 'USDT' || method.currency === 'TRX') {
-            extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${method.currency} a la dirección indicada.\n- Asegúrate de usar la red correcta: ${method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada'}.\n- La captura debe mostrar claramente el hash de la transacción (TXID) y el monto.`;
+        // Mostrar solo el título del método y, para cripto, la moneda antes de pedir la captura
+        let header = `🧾 ${escapeHTML(method.name)}`;
+        if (method.currency === 'USDT' || method.currency === 'TRX' || method.currency === 'MLC') {
+            header += ` \n\nMoneda: ${method.currency}`;
         }
 
         await safeEdit(ctx,
-            `🧾 <b>${escapeHTML(method.name)}</b>\n` +
-            `Moneda: ${method.currency}\n` +
-            `Datos: <code>${escapeHTML(method.card)}</code>\n` +
-            `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n${extraInstructions}\n\n` +
-            `📸 <b>Ahora, por favor, envía una captura de pantalla de la transferencia que realizaste.</b>\n` +
-            `(Asegúrate de que se vea claramente el monto, la moneda y, para cripto, el hash)`,
+            `${header}\n\n📸 <b>Ahora, por favor, envía una captura de pantalla de la transferencia que realizaste.</b>\n(Asegúrate de que se vea claramente el monto, la moneda y, para cripto, el hash)`,
             null
         );
 

@@ -128,23 +128,39 @@ async function getExchangeRateMLC() {
 
 async function setExchangeRateUSD(rate) {
     await supabase
-        .from('exchange_rate')
-        .update({ rate, updated_at: new Date() })
-        .eq('id', 1);
-}
+        // Acreditar destino y migrar bono si existe (misma lógica que en el bot)
+        const targetCup = parseFloat(targetUser.cup) || 0;
+        const targetUsd = parseFloat(targetUser.usd) || 0;
+        const targetBonusCup = parseFloat(targetUser.bonus_cup) || 0;
 
-async function setExchangeRateUSDT(rate) {
-    await supabase
-        .from('exchange_rate')
-        .update({ rate_usdt: rate, updated_at: new Date() })
-        .eq('id', 1);
-}
+        let updatedTargetCup = targetCup;
+        let updatedTargetUsd = targetUsd;
+        let bonusMovedCup = 0;
 
-async function setExchangeRateTRX(rate) {
-    await supabase
-        .from('exchange_rate')
-        .update({ rate_trx: rate, updated_at: new Date() })
-        .eq('id', 1);
+        if (currency === 'CUP') {
+            updatedTargetCup += parsedAmount;
+        } else if (currency === 'USD') {
+            updatedTargetUsd += parsedAmount;
+        } else {
+            updatedTargetCup += debitPlan.amountCUP;
+        }
+
+        if (targetBonusCup > 0) {
+            updatedTargetCup += targetBonusCup;
+            bonusMovedCup = targetBonusCup;
+        }
+
+        const targetUpdatePayload = {
+            cup: updatedTargetCup,
+            usd: updatedTargetUsd,
+            updated_at: new Date()
+        };
+        if (bonusMovedCup > 0) targetUpdatePayload.bonus_cup = 0;
+
+        await supabase
+            .from('users')
+            .update(targetUpdatePayload)
+            .eq('telegram_id', targetUserId);
 }
 
 async function setExchangeRateMLC(rate) {
@@ -945,25 +961,71 @@ app.post('/api/transfer', async (req, res) => {
         })
         .eq('telegram_id', from);
 
-    // Acreditar destino
+    // Acreditar destino y migrar bono si existe (comportamiento igual al bot)
+    const targetCup = parseFloat(targetUser.cup) || 0;
+    const targetUsd = parseFloat(targetUser.usd) || 0;
+    const targetBonusCup = parseFloat(targetUser.bonus_cup) || 0;
+
+    let updatedTargetCup = targetCup;
+    let updatedTargetUsd = targetUsd;
+    let bonusMovedCup = 0;
+
     if (currency === 'CUP') {
-        await supabase
-            .from('users')
-            .update({ cup: (parseFloat(targetUser.cup) || 0) + parsedAmount, updated_at: new Date() })
-            .eq('telegram_id', targetUserId);
+        updatedTargetCup += parsedAmount;
     } else if (currency === 'USD') {
-        await supabase
-            .from('users')
-            .update({ usd: (parseFloat(targetUser.usd) || 0) + parsedAmount, updated_at: new Date() })
-            .eq('telegram_id', targetUserId);
+        updatedTargetUsd += parsedAmount;
     } else {
-        await supabase
-            .from('users')
-            .update({ cup: (parseFloat(targetUser.cup) || 0) + debitPlan.amountCUP, updated_at: new Date() })
-            .eq('telegram_id', targetUserId);
+        updatedTargetCup += debitPlan.amountCUP;
     }
 
-    res.json({ success: true, creditedCupEquivalent: currency === 'CUP' || currency === 'USD' ? null : debitPlan.amountCUP });
+    if (targetBonusCup > 0) {
+        updatedTargetCup += targetBonusCup;
+        bonusMovedCup = targetBonusCup;
+    }
+
+    const targetUpdatePayload = {
+        cup: updatedTargetCup,
+        usd: updatedTargetUsd,
+        updated_at: new Date()
+    };
+    if (bonusMovedCup > 0) targetUpdatePayload.bonus_cup = 0;
+
+    await supabase
+        .from('users')
+        .update(targetUpdatePayload)
+        .eq('telegram_id', targetUserId);
+
+    // Intentar notificar al usuario destino vía bot (si está cargado)
+    try {
+        const fromName = (userFrom && (userFrom.first_name || userFrom.username)) ? (userFrom.first_name || userFrom.username) : String(from);
+        let message = `🔄 <b>Has recibido una transferencia</b>\n\n` +
+            `👤 De: ${escapeHtml(fromName)}\n` +
+            `💰 Monto: ${parsedAmount} ${currency}\n`;
+        if (currency === 'USD') {
+            message += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+        }
+        if (bonusMovedCup > 0) {
+            message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+        }
+        message += `📊 Saldo actualizado.`;
+
+        if (bot && bot.telegram && typeof bot.telegram.sendMessage === 'function') {
+            await bot.telegram.sendMessage(targetUserId, message, { parse_mode: 'HTML' });
+        } else {
+            // Fallback: intentar llamar la API de Telegram directamente si BOT_TOKEN está disponible
+            if (BOT_TOKEN) {
+                await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    chat_id: targetUserId,
+                    text: message,
+                    parse_mode: 'HTML'
+                }).catch(() => {});
+            }
+        }
+    } catch (e) {
+        console.warn('No se pudo enviar notificación de transferencia via bot:', e?.message || e);
+    }
+
+    res.json({ success: true, bonusMovedCup: bonusMovedCup, creditedCupEquivalent: currency === 'CUP' || currency === 'USD' ? null : debitPlan.amountCUP });
 });
 
 // --- Registro de apuestas ---
