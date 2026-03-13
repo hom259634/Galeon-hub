@@ -1153,7 +1153,7 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
         `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n` +
         `${minLine}` +
         `${extraInstructions}\n\n` +
-        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code>).`,
+        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code>, etc).`,
         null
     );
 });
