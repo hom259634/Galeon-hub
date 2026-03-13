@@ -2611,14 +2611,14 @@ bot.on(message('text'), async (ctx) => {
         delete session.awaitingDepositAmount;
         session.awaitingDepositPhoto = true;
 
-        // Mostrar solo el título del método y, para cripto, la moneda antes de pedir la captura
+        // Mensaje unificado para todos los métodos de depósito
         let header = `🧾 ${escapeHTML(method.name)}`;
-        if (method.currency === 'USDT' || method.currency === 'TRX' || method.currency === 'MLC') {
-            header += ` \n\nMoneda: ${method.currency}`;
+        if (method.currency && method.currency.trim()) {
+            header += ` \nMoneda: ${escapeHTML(method.currency)}`;
         }
 
         await safeEdit(ctx,
-            `${header}\n\n📸 <b>Ahora, por favor, envía una captura de pantalla de la transferencia que realizaste.</b>\n(Asegúrate de que se vea claramente el monto, la moneda y, para cripto, el hash)`,
+            `${header}\n\n\n📸 Ahora, por favor, envía una captura de pantalla de la transferencia que realizaste.\n(Asegúrate de que se vea claramente el monto, la moneda y, para cripto, el hash)`,
             null
         );
 
