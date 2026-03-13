@@ -1141,19 +1141,19 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
 
     let extraInstructions = '';
     if (method.currency === 'USDT' || method.currency === 'TRX') {
-        extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${method.currency} a la dirección indicada.\n- Asegúrate de usar la red correcta: ${method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada'}.\n- La captura debe mostrar claramente el hash de la transacción (TXID) y el monto.`;
+        extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${escapeHTML(method.currency)} a la dirección indicada.\n- Asegúrate de usar la red correcta: ${escapeHTML(method.confirm && method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm && method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada')}.\n- La captura debe mostrar claramente el hash de la transacción (TXID) y el monto.`;
     }
 
-    const minLine = (method.min_amount !== null && method.min_amount !== undefined) ? `Mínimo: ${method.min_amount} ${method.currency}\n\n` : '';
+    const minLine = (method.min_amount !== null && method.min_amount !== undefined) ? `Mínimo: ${escapeHTML(String(method.min_amount))} ${escapeHTML(method.currency)}\n\n` : '';
 
     await safeEdit(ctx,
         `🧾 <b>${escapeHTML(method.name)}</b>\n` +
-        `Moneda: ${method.currency}\n` +
+        `Moneda: ${escapeHTML(method.currency)}\n` +
         `Datos: <code>${escapeHTML(method.card)}</code>\n` +
         `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n` +
         `${minLine}` +
         `${extraInstructions}\n\n` +
-        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code).`,
+        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code>).`,
         null
     );
 });
@@ -3216,11 +3216,11 @@ bot.on(message('photo'), async (ctx) => {
                     try {
                         await bot.telegram.sendMessage(adminId,
                             `📥 <b>Nueva solicitud de DEPÓSITO</b>\n` +
-                            `👤 Usuario: ${ctx.from.first_name} (${uid})\n` +
-                            `🏦 Método: ${escapeHTML(method.name)} (${method.currency})\n` +
-                            `💰 Monto: ${amountText}\n` +
-                            `📎 <a href="${request.screenshot_url}">Ver captura</a>\n` +
-                            `🆔 Solicitud: ${request.id}`,
+                            `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
+                            `🏦 Método: ${escapeHTML(method.name)} (${escapeHTML(method.currency)})\n` +
+                            `💰 Monto: ${escapeHTML(amountText)}\n` +
+                            `📎 <a href="${escapeHTML(request.screenshot_url)}">Ver captura</a>\n` +
+                            `🆔 Solicitud: ${escapeHTML(String(request.id))}`,
                             {
                                 parse_mode: 'HTML',
                                 reply_markup: Markup.inlineKeyboard([
@@ -3231,7 +3231,7 @@ bot.on(message('photo'), async (ctx) => {
                         );
                     } catch (e) {}
                 }
-                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${amountText}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite. ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
+                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite. ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
             } catch (e) {
                 console.error(e);
                 await ctx.reply('❌ Error al procesar la solicitud. Por favor, intenta más tarde o contacta a soporte.', getMainKeyboard(ctx));
