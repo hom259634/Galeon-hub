@@ -1118,6 +1118,7 @@ bot.action('recharge', async (ctx) => {
         `💵 Recargar saldo\n\nPor favor, elige un método de pago\n\nSelecciona el método:`,
         Markup.inlineKeyboard(buttons)
     );
+    try { await ctx.answerCbQuery(); } catch (e) {}
 });
 
 bot.action(/^dep_(\d+)$/, async (ctx) => {
@@ -1132,6 +1133,8 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
         await ctx.answerCbQuery('Método no encontrado. Por favor, selecciona otro.', { show_alert: true });
         return;
     }
+
+    try { await ctx.answerCbQuery(); } catch (e) {}
 
     ctx.session.depositMethod = method;
     ctx.session.awaitingDepositAmount = true;
