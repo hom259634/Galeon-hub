@@ -1589,7 +1589,7 @@
             const targetInput = document.getElementById('transferTarget').value.trim();
             const currency = document.getElementById('transferCurrency').value;
             const amount = parseFloat(document.getElementById('transferAmount').value);
-            
+
             if (!targetInput || isNaN(amount) || amount <= 0) {
                 iziToast.warning({ message: 'Ingresa un usuario válido y un monto positivo' });
                 return;
@@ -1600,8 +1600,18 @@
                 return;
             }
 
-            // Validar monto mínimo según configuración
-            const minForCurrency = currency === 'USD' ? (minDeposit.usd || 1) : (minDeposit.cup || (minDeposit.usd * exchangeRates.rate));
+            // Validar monto mínimo usando el menor min_amount de los métodos de depósito habilitados para la moneda
+            let minForCurrency = null;
+            if (Array.isArray(depositMethods) && depositMethods.length > 0) {
+                const enabledMethods = depositMethods.filter(m => m.currency === currency && m.enabled !== false && m.min_amount != null);
+                if (enabledMethods.length > 0) {
+                    minForCurrency = Math.min(...enabledMethods.map(m => m.min_amount));
+                }
+            }
+            // Fallback si no hay métodos configurados
+            if (minForCurrency == null) {
+                minForCurrency = currency === 'USD' ? (minDeposit.usd || 1) : (minDeposit.cup || (minDeposit.usd * exchangeRates.rate));
+            }
             if (amount < minForCurrency) {
                 iziToast.warning({ message: `Monto mínimo: ${minForCurrency.toFixed(2)} ${currency}` });
                 return;
