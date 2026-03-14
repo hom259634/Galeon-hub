@@ -2897,7 +2897,7 @@ bot.on(message('text'), async (ctx) => {
         const displayName = targetUser.first_name || targetUser.username || targetUser.telegram_id;
         await ctx.reply(
             `✅ Usuario encontrado: ${escapeHTML(displayName)}\n\n` +
-            `Ahora envía el <b>monto y la moneda</b> que deseas transferir (ej: <code>500 cup</code> o <code>10 usd</code>).\n` +
+            `Ahora envía el <b>monto y la moneda</b> que deseas transferir (ej: 500 cup o 10 usd).\n` +
             `💰 Tus saldos: CUP: ${(parseFloat(user.cup) || 0).toFixed(2)}, USD: ${(parseFloat(user.usd) || 0).toFixed(2)} (aprox. ${((parseFloat(user.usd) || 0) * await getExchangeRateUSD()).toFixed(2)} CUP)`,
             { parse_mode: 'HTML' }
         );
@@ -2909,7 +2909,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(text);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debe ser <code>monto moneda</code> (ej: 500 cup).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debe ser monto moneda(ej: 500 cup o 10 usd).', getMainKeyboard(ctx));
             return;
         }
 
@@ -2922,12 +2922,21 @@ bot.on(message('text'), async (ctx) => {
         const currency = parsed.currency;
         const targetId = session.transferTarget;
 
-        // Validar mínimo de transferencia usando el mínimo de depósito configurado por moneda
+        // Validar mínimo de transferencia usando el min_amount del método de depósito correspondiente
         let minTransfer = 0;
-        if (currency === 'USD') {
-            minTransfer = await getMinDepositUSD();
-        } else if (currency === 'CUP') {
-            minTransfer = await getMinDepositCUP();
+        let method = null;
+        if (currency === 'USD' || currency === 'CUP') {
+            // Buscar método de depósito activo para la moneda
+            const { data: methods } = await supabase
+                .from('deposit_methods')
+                .select('*')
+                .eq('currency', currency)
+                .eq('enabled', true);
+            if (methods && methods.length > 0) {
+                // Tomar el menor min_amount de los métodos activos
+                minTransfer = Math.min(...methods.map(m => parseFloat(m.min_amount) || 0).filter(x => x > 0));
+                method = methods.find(m => parseFloat(m.min_amount) === minTransfer);
+            }
         }
         if (minTransfer > 0 && amount < minTransfer) {
             await ctx.reply(`❌ El monto mínimo para transferir es ${minTransfer.toFixed(2)} ${currency}.`, getMainKeyboard(ctx));
