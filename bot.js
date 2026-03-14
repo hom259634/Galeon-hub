@@ -459,6 +459,21 @@ async function getMinDepositUSD() {
     return data ? parseFloat(data.value) : 1.0;
 }
 
+async function getMinDepositCUP() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'min_deposit_cup')
+        .single();
+    if (data && data.value !== null && data.value !== undefined) {
+        return parseFloat(data.value);
+    }
+    // Si no está configurado, convertir el mínimo USD a CUP
+    const minUsd = await getMinDepositUSD();
+    const minCup = await convertToCUP(minUsd, 'USD');
+    return minCup;
+}
+
 async function getMinWithdrawUSD() {
     const { data } = await supabase
         .from('app_config')
@@ -2907,14 +2922,16 @@ bot.on(message('text'), async (ctx) => {
         const currency = parsed.currency;
         const targetId = session.transferTarget;
 
-        // Validar mínimo de transferencia igual al mínimo de depósito
+        // Validar mínimo de transferencia usando el mínimo de depósito configurado por moneda
         let minTransfer = 0;
-        if (currency === 'USD' || currency === 'CUP') {
+        if (currency === 'USD') {
             minTransfer = await getMinDepositUSD();
-            if (amount < minTransfer) {
-                await ctx.reply(`❌ El monto mínimo para transferir es ${minTransfer} ${currency}.`, getMainKeyboard(ctx));
-                return;
-            }
+        } else if (currency === 'CUP') {
+            minTransfer = await getMinDepositCUP();
+        }
+        if (minTransfer > 0 && amount < minTransfer) {
+            await ctx.reply(`❌ El monto mínimo para transferir es ${minTransfer.toFixed(2)} ${currency}.`, getMainKeyboard(ctx));
+            return;
         }
 
         if (amount <= 0) {
