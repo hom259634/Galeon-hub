@@ -573,6 +573,7 @@
         let selectedBetType = null;
         let activeSlot = null;
         let userBets = [];
+        let minDeposit = { usd: 1, cup: exchangeRates.rate };
 
         // Elementos DOM
         const globalLoader = document.getElementById('globalLoader');
@@ -1014,6 +1015,16 @@
 
                 document.getElementById('userName').innerText = currentUser.first_name || 'Jugador';
                 updateBalanceUI();
+
+                // Cargar mínimos de depósito (USD y CUP)
+                try {
+                    const cfgRes = await fetch('/api/config/min-deposit');
+                    if (cfgRes.ok) {
+                        const cfg = await cfgRes.json();
+                        minDeposit.usd = cfg.usd || minDeposit.usd;
+                        minDeposit.cup = cfg.cup || minDeposit.cup;
+                    }
+                } catch (e) { console.warn('No se pudo cargar mínimo de depósito', e); }
 
                 if (isAdmin) {
                     document.getElementById('adminNavBtn').classList.remove('hidden');
@@ -1586,6 +1597,13 @@
 
             if (!['CUP', 'USD'].includes(currency)) {
                 iziToast.warning({ message: 'Moneda no soportada. Usa CUP o USD' });
+                return;
+            }
+
+            // Validar monto mínimo según configuración
+            const minForCurrency = currency === 'USD' ? (minDeposit.usd || 1) : (minDeposit.cup || (minDeposit.usd * exchangeRates.rate));
+            if (amount < minForCurrency) {
+                iziToast.warning({ message: `Monto mínimo: ${minForCurrency.toFixed(2)} ${currency}` });
                 return;
             }
 
