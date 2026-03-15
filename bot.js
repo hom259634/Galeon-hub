@@ -2866,7 +2866,7 @@ bot.on(message('text'), async (ctx) => {
         }
 
         if (!targetUser) {
-            await ctx.reply('❌ Usuario no encontrado. Asegúrate de que el nombre de usuario sea correcto o de que el ID numérico esté registrado.\nPor favor vuelve a iniciar la operacion.', getMainKeyboard(ctx));
+            await ctx.reply('❌ Usuario no encontrado. Asegúrate de que el nombre de usuario sea correcto o de que el ID numérico esté registrado.\nPor favor, vuelve a iniciar la operación', getMainKeyboard(ctx));
             delete session.awaitingTransferTarget;
             return;
         }
@@ -2907,14 +2907,23 @@ bot.on(message('text'), async (ctx) => {
         const currency = parsed.currency;
         const targetId = session.transferTarget;
 
-        // Validar mínimo de transferencia igual al mínimo de depósito
-        let minTransfer = 0;
+        // Validar mínimo de transferencia igual al mínimo de depósito (por método)
+        let method = null;
         if (currency === 'USD' || currency === 'CUP') {
-            minTransfer = await getMinDepositUSD();
-            if (amount < minTransfer) {
-                await ctx.reply(`❌ El monto mínimo para transferir es ${minTransfer} ${currency}.`, getMainKeyboard(ctx));
-                return;
+            // Buscar el método de depósito activo para la moneda
+            const { data: methods } = await supabase
+                .from('deposit_methods')
+                .select('*')
+                .eq('currency', currency)
+                .eq('enabled', true);
+            if (methods && methods.length > 0) {
+                // Seleccionar el primer método activo (igual que en depósito)
+                method = methods[0];
             }
+        }
+        if (!method || method.min_amount === null || isNaN(parseFloat(method.min_amount)) || amount < parseFloat(method.min_amount)) {
+            await ctx.reply(`❌ El monto mínimo para transferir es ${method && method.min_amount ? method.min_amount : '?'} ${currency}.`, getMainKeyboard(ctx));
+            return;
         }
 
         if (amount <= 0) {
