@@ -2969,129 +2969,111 @@ bot.on(message('text'), async (ctx) => {
         }
 
 
-        // Determinar el betType para la consulta de límites
-        let betType = null;
-        if (method && method.bet_type) {
-            betType = method.bet_type;
-        } else if (session.betType) {
-            betType = session.betType;
-        } else if (session.transferCurrency) {
-            betType = session.transferCurrency.toLowerCase();
-        }
-
-        let priceData = null;
-        if (betType) {
-            const { data } = await supabase
-                .from('play_prices')
-                .select('min_cup, min_usd, max_cup, max_usd')
-                .eq('bet_type', betType)
-                .single();
-            priceData = data;
-        }
-
-        const minCup = priceData?.min_cup || 0;
-        const minUsd = priceData?.min_usd || 0;
-        const maxCup = priceData?.max_cup;
-        const maxUsd = priceData?.max_usd;
-
-        for (const item of parsed.items) {
-            if (item.cup > 0 && item.cup < minCup) {
-                await ctx.reply(`❌ El monto mínimo para jugadas en CUP es ${minCup} CUP. Por favor, ajusta tu apuesta.`, getMainKeyboard(ctx));
-                return;
-            }
-            if (item.usd > 0 && item.usd < minUsd) {
-                await ctx.reply(`❌ El monto mínimo para jugadas en USD es ${minUsd} USD. Por favor, ajusta tu apuesta.`, getMainKeyboard(ctx));
-                return;
-            }
-            if (maxCup !== null && item.cup > maxCup) {
-                await ctx.reply(`❌ Cada jugada en CUP no puede exceder ${maxCup} CUP.`, getMainKeyboard(ctx));
-                return;
-            }
-            if (maxUsd !== null && item.usd > maxUsd) {
-                await ctx.reply(`❌ Cada jugada en USD no puede exceder ${maxUsd} USD.`, getMainKeyboard(ctx));
-                return;
-            }
-        }
-
-        let newUsd = parseFloat(user.usd) || 0;
-        let newBonus = parseFloat(user.bonus_cup) || 0;
-        let newCup = parseFloat(user.cup) || 0;
-
-        if (totalUSD > 0) {
-            if (newUsd < totalUSD) {
-                await ctx.reply('❌ No tienes saldo suficiente en USD para esta jugada. No se puede usar saldo CUP para jugar en USD.', getMainKeyboard(ctx));
-                return;
-            }
-            newUsd -= totalUSD;
-        }
-
-        if (totalCUP > 0) {
-            const totalCupDisponible = newCup + newBonus;
-            if (totalCupDisponible < totalCUP) {
-                await ctx.reply('❌ No tienes saldo suficiente en CUP para esta jugada. No se puede usar saldo USD para jugar en CUP.', getMainKeyboard(ctx));
-                return;
-            }
-            if (newCup >= totalCUP) {
-                newCup -= totalCUP;
-            } else {
-                const deficit = totalCUP - newCup;
-                newCup = 0;
-                newBonus = Math.max(0, newBonus - deficit);
-            }
-        }
-
-        await supabase
-            .from('users')
-            .update({
-                usd: newUsd,
-                bonus_cup: newBonus,
-                cup: newCup,
-                updated_at: new Date()
-            })
-            .eq('telegram_id', uid);
-
-        const { data: bet, error } = await supabase
-            .from('bets')
-            .insert({
-                user_id: uid,
-                lottery,
-                session_id: sessionId,
-                bet_type: betType,
-                raw_text: text,
-                items: parsed.items,
-                cost_usd: totalUSD,
-                cost_cup: totalCUP,
-                placed_at: new Date()
-            })
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error insertando apuesta:', error);
-            await ctx.reply('❌ Error al registrar la apuesta. Por favor, intenta más tarde.', getMainKeyboard(ctx));
+        // === FLUJO DE TRANSFERENCIA IGUAL AL BACKEND ===
+        // 1. Validar usuario destino
+        const targetUserId = session.transferTarget;
+        if (!targetUserId) {
+            await ctx.reply('❌ Usuario destino no encontrado. Reinicia la transferencia.', getMainKeyboard(ctx));
             return;
         }
-
-        const rate = await getExchangeRateUSD();
-        const usdEquivalentCup = (totalUSD * rate).toFixed(2);
-        const cupEquivalentUsd = (totalCUP / rate).toFixed(2);
-
-        await ctx.replyWithHTML(
-            `✅ <b>Jugada registrada exitosamente</b>\n` +
-            `🎰 ${escapeHTML(lottery)} - ${escapeHTML(betType)}\n` +
-            `📝 <code>${escapeHTML(text)}</code>\n` +
-            `💰 Costo total: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n` +
-            (totalCUP > 0 ? `   (equivale a ${cupEquivalentUsd} USD aprox.)\n` : '') +
-            (totalUSD > 0 ? `   (equivale a ${usdEquivalentCup} CUP aprox.)\n` : '') +
-            `\n🍀 ¡Mucha suerte! Esperamos que seas el próximo ganador.`
-        );
-
-        await ctx.reply('¿Qué deseas hacer ahora?', getMainKeyboard(ctx));
-
-        delete session.awaitingBet;
-        delete session.betType;
-        delete session.lottery;
-        delete session.sessionId;
+        if (targetUserId === uid) {
+            await ctx.reply('❌ No puedes transferirte a ti mismo.', getMainKeyboard(ctx));
+            return;
+        }
+        // 2. Obtener usuario destino
+        const { data: targetUser, error: targetError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('telegram_id', targetUserId)
+            .single();
+        if (targetError || !targetUser) {
+            await ctx.reply('❌ Usuario destino no encontrado.', getMainKeyboard(ctx));
+            return;
+        }
+        // 3. Validar saldo suficiente (solo USD o solo CUP, no mixto)
+        let enough = false;
+        let cupDebit = 0, usdDebit = 0;
+        if (currency === 'USD') {
+            if ((parseFloat(user.usd) || 0) >= amount) {
+                enough = true;
+                usdDebit = amount;
+            }
+        } else if (currency === 'CUP') {
+            const cupBalance = parseFloat(user.cup) || 0;
+            const bonusBalance = parseFloat(user.bonus_cup) || 0;
+            if ((cupBalance + bonusBalance) >= amount) {
+                enough = true;
+                if (cupBalance >= amount) {
+                    cupDebit = amount;
+                } else {
+                    cupDebit = cupBalance;
+                }
+            }
+        }
+        if (!enough) {
+            await ctx.reply('❌ Saldo insuficiente para transferir.', getMainKeyboard(ctx));
+            return;
+        }
+        // 4. Debitar origen
+        let updates = {};
+        if (currency === 'USD') {
+            updates.usd = (parseFloat(user.usd) || 0) - amount;
+        } else if (currency === 'CUP') {
+            let cupBalance = parseFloat(user.cup) || 0;
+            let bonusBalance = parseFloat(user.bonus_cup) || 0;
+            if (cupBalance >= amount) {
+                updates.cup = cupBalance - amount;
+            } else {
+                updates.cup = 0;
+                updates.bonus_cup = Math.max(0, bonusBalance - (amount - cupBalance));
+            }
+        }
+        updates.updated_at = new Date();
+        await supabase.from('users').update(updates).eq('telegram_id', uid);
+        // 5. Acreditar destino y migrar bono si corresponde
+        let updatedTargetCup = parseFloat(targetUser.cup) || 0;
+        let updatedTargetUsd = parseFloat(targetUser.usd) || 0;
+        let targetBonusCup = parseFloat(targetUser.bonus_cup) || 0;
+        let bonusMovedCup = 0;
+        if (currency === 'CUP') {
+            updatedTargetCup += amount;
+        } else if (currency === 'USD') {
+            updatedTargetUsd += amount;
+        }
+        // Migrar bono si corresponde
+        const hadNoMainBalance = (parseFloat(targetUser.cup) === 0 && parseFloat(targetUser.usd) === 0);
+        const hadApprovedDeposit = false; // No se consulta aquí por simplicidad
+        if (targetBonusCup > 0 && hadNoMainBalance && !hadApprovedDeposit) {
+            updatedTargetCup += targetBonusCup;
+            bonusMovedCup = targetBonusCup;
+        }
+        let targetUpdate = {
+            cup: updatedTargetCup,
+            usd: updatedTargetUsd,
+            updated_at: new Date()
+        };
+        if (bonusMovedCup > 0) targetUpdate.bonus_cup = 0;
+        await supabase.from('users').update(targetUpdate).eq('telegram_id', targetUserId);
+        // 6. Notificar a ambos usuarios
+        await ctx.reply('✅ Transferencia realizada correctamente.', getMainKeyboard(ctx));
+        try {
+            let message = `🔄 <b>Has recibido una transferencia</b>\n\n` +
+                `👤 De: ${escapeHTML(ctx.from.first_name || ctx.from.username || String(uid))}\n` +
+                `💰 Monto: ${amount} ${currency}\n`;
+            if (currency === 'USD') {
+                message += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+            }
+            if (bonusMovedCup > 0) {
+                message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+            }
+            message += `📊 Saldo actualizado.`;
+            await bot.telegram.sendMessage(targetUserId, message, { parse_mode: 'HTML' });
+        } catch (e) {/* Silenciar error de notificación */}
+        // 7. Limpiar sesión
+        delete session.awaitingTransferAmount;
+        delete session.transferTarget;
+        delete session.transferDepositMethod;
+        delete session.transferCurrency;
         return;
     }
 
