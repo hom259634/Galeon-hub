@@ -1336,7 +1336,7 @@ bot.action('how_to_play', async (ctx) => {
     await safeEdit(ctx,
         '📩 <b>¿Necesitas ayuda?</b>\n\n' +
         'Puedes escribirnos directamente en este chat. Nuestro equipo de soporte te responderá a la mayor brevedad.\n\n' +
-        'También puedes consultar la sección de preguntas frecuentes en nuestra WebApp.',
+        'También puedes consultar la sección de preguntas frecuentes en nuestra Web-App.',
         Markup.inlineKeyboard([[Markup.button.callback('◀ Volver al inicio', 'main')]])
     );
 });
@@ -1414,7 +1414,7 @@ async function showRegionSessions(ctx, lottery) {
         console.error(e);
         await ctx.answerCbQuery('❌ Error al cargar sesiones. Intenta más tarde.', { show_alert: true });
     }
-}
+};
 
 bot.action(/create_session_(.+)_(.+)/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
@@ -2950,6 +2950,13 @@ bot.on(message('text'), async (ctx) => {
 
     // --- Flujo: transferencia - monto ---
     if (session.awaitingTransferAmount) {
+        const parsed = parseAmountWithCurrency(text);
+        if (!parsed) {
+            await ctx.reply('❌ Formato inválido. Debe ser monto moneda(ej: 500 cup o 10 usd).', getMainKeyboard(ctx));
+            return;
+        }
+        const amount = parsed.amount;
+        const currency = parsed.currency;
         const method = session.transferDepositMethod;
         if (!method) {
             await ctx.reply('❌ No se pudo determinar el método de transferencia. Intenta de nuevo.', getMainKeyboard(ctx));
@@ -3157,7 +3164,7 @@ bot.on(message('photo'), async (ctx) => {
         delete session.awaitingDepositPhoto;
         session.awaitingDepositAmount = true;
 
-        await ctx.reply('✅ Captura recibida correctamente. Ahora, por favor, envía el <b>monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code>).', { parse_mode: 'HTML' });
+        await ctx.reply('✅ Captura recibida correctamente. Ahora, por favor, envía el <b>monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usd</code>).', { parse_mode: 'HTML' });
         return;
     }
 
