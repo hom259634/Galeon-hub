@@ -2922,20 +2922,21 @@ bot.on(message('text'), async (ctx) => {
         const currency = parsed.currency;
         const targetId = session.transferTarget;
 
-        // Validar mínimo de transferencia usando el min_amount del método de depósito correspondiente
+        // Validar mínimo de transferencia usando el menor min_amount ACTUALIZADO de los métodos de depósito activos
         let minTransfer = 0;
-        let method = null;
         if (currency === 'USD' || currency === 'CUP') {
-            // Buscar método de depósito activo para la moneda
             const { data: methods } = await supabase
                 .from('deposit_methods')
-                .select('*')
+                .select('min_amount,enabled')
                 .eq('currency', currency)
                 .eq('enabled', true);
             if (methods && methods.length > 0) {
-                // Tomar el menor min_amount de los métodos activos
-                minTransfer = Math.min(...methods.map(m => parseFloat(m.min_amount) || 0).filter(x => x > 0));
-                method = methods.find(m => parseFloat(m.min_amount) === minTransfer);
+                const minAmounts = methods.map(m => parseFloat(m.min_amount)).filter(x => !isNaN(x) && x > 0);
+                if (minAmounts.length > 0) {
+                    minTransfer = Math.min(...minAmounts);
+                } else {
+                    minTransfer = 0;
+                }
             }
         }
         if (minTransfer > 0 && amount < minTransfer) {
