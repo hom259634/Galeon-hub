@@ -1254,15 +1254,32 @@ bot.action('transfer', async (ctx) => {
 bot.action(/^transfer_currency_(CUP|USD)$/, async (ctx) => {
     const currency = ctx.match[1];
     ctx.session.transferCurrency = currency;
+    // Buscar el método de depósito más reciente para la moneda seleccionada
+    const { data: allMethods } = await supabase
+        .from('deposit_methods')
+        .select('*')
+        .order('id', { ascending: true });
+    const methods = (allMethods || []).filter(m => {
+        const curr = (m.currency || '').toString().trim().toUpperCase();
+        return curr === currency;
+    });
+    if (!methods || methods.length === 0) {
+        await ctx.reply(`❌ No hay métodos de depósito activos para transferir ${currency}.`, getMainKeyboard(ctx));
+        return;
+    }
+    // Elegir el método más reciente (mayor id)
+    const method = methods.reduce((a, b) => (a.id > b.id ? a : b));
+    ctx.session.transferDepositMethod = method;
     ctx.session.awaitingTransferTarget = true;
     delete ctx.session.awaitingTransferCurrency;
     // Mensaje original de pedir usuario (no modificar)
+    let minLine = (method.min_amount !== null && method.min_amount !== undefined) ? `\nMínimo: ${method.min_amount} ${method.currency}` : '';
     await safeEdit(ctx,
         '🔄 <b>Transferir saldo a otro usuario</b>\n\n' +
         'Envía el <b>nombre de usuario</b> de Telegram (ej: @usuario) de la persona a la que deseas transferir.\n' +
-        'También puedes usar su ID numérico si lo conoces.\n\n' +
-        'El bono de bienvenida no es transferible.\n\n' +
-        'Por favor, ingresa el usuario:',
+        'También puedes usar su ID numérico si lo conoces.' +
+        minLine +
+        '\n\nEl bono de bienvenida no es transferible.\n\nPor favor, ingresa el usuario:',
         null
     );
 });
@@ -2177,7 +2194,7 @@ bot.on(message('text'), async (ctx) => {
         } else if (text === '❓ Cómo jugar') {
             await safeEdit(ctx,
                 '📩 <b>¿Necesitas ayuda?</b>\n\n' +
-                'Puedes escribirnos directamente en este chat. Tu mensaje será recibido por nuestro equipo de soporte y te responderemos a la mayor brevedad.\n\n' +
+                'Puedes escribirnos directamente en este chat. Nuestro equipo de soporte te responderá a la mayor brevedad.\n\n' +
                 'También puedes consultar la sección de preguntas frecuentes en nuestra Web-App.',
                 Markup.inlineKeyboard([[Markup.button.callback('◀ Volver al inicio', 'main')]])
             );
@@ -2872,283 +2889,75 @@ bot.on(message('text'), async (ctx) => {
 
     // --- Flujo: transferencia - destino ---
     if (session.awaitingTransferTarget) {
-        let targetIdentifier = text.trim();
-        if (targetIdentifier.startsWith('@')) {
-            targetIdentifier = targetIdentifier.slice(1);
-        }
-        let targetUser = null;
-        if (targetIdentifier) {
-            const { data: userByUsername } = await supabase
-                .from('users')
-                .select('telegram_id, username, first_name')
-                .eq('username', targetIdentifier)
-                .maybeSingle();
-            if (userByUsername) {
-                targetUser = userByUsername;
-            } else {
-                const targetId = parseInt(targetIdentifier);
-                if (!isNaN(targetId)) {
-                    const { data: userById } = await supabase
-                        .from('users')
-                        .select('telegram_id, username, first_name')
-                        .eq('telegram_id', targetId)
-                        .maybeSingle();
-                    if (userById) {
-                        targetUser = userById;
+        try {
+            let targetIdentifier = text.trim();
+            if (targetIdentifier.startsWith('@')) {
+                targetIdentifier = targetIdentifier.slice(1);
+            }
+            let targetUser = null;
+            if (targetIdentifier) {
+                const { data: userByUsername } = await supabase
+                    .from('users')
+                    .select('telegram_id, username, first_name')
+                    .eq('username', targetIdentifier)
+                    .maybeSingle();
+                if (userByUsername) {
+                    targetUser = userByUsername;
+                } else {
+                    const targetId = parseInt(targetIdentifier);
+                    if (!isNaN(targetId)) {
+                        const { data: userById } = await supabase
+                            .from('users')
+                            .select('telegram_id, username, first_name')
+                            .eq('telegram_id', targetId)
+                            .maybeSingle();
+                        if (userById) {
+                            targetUser = userById;
+                        }
                     }
                 }
             }
-        }
 
-        if (!targetUser) {
-            await ctx.reply('❌ Usuario no encontrado. Asegúrate de que el nombre de usuario sea correcto o de que el ID numérico esté registrado.\nPor favor, vuelve a iniciar la operación', getMainKeyboard(ctx));
-            delete session.awaitingTransferTarget;
-            return;
-        }
-        if (targetUser.telegram_id === uid) {
-            await ctx.reply('❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.', getMainKeyboard(ctx));
-            delete session.awaitingTransferTarget;
-            return;
-        }
-
-        session.transferTarget = targetUser.telegram_id;
-        // Pedir al usuario que elija el método de depósito según la moneda elegida
-        const transferCurrency = session.transferCurrency;
-        const { data: allMethods } = await supabase
-            .from('deposit_methods')
-            .select('*')
-            .order('id', { ascending: true });
-        // Normalizar currency y filtrar solo la moneda elegida
-        const methods = (allMethods || []).filter(m => {
-            const curr = (m.currency || '').toString().trim().toUpperCase();
-            return curr === transferCurrency;
-        });
-        if (!methods || methods.length === 0) {
-            await ctx.reply(`❌ No hay métodos de depósito activos para transferir ${transferCurrency}.`, getMainKeyboard(ctx));
-            delete session.awaitingTransferTarget;
-            return;
-        }
-        // Mostrar botones para elegir método, label personalizado
-        // Mostrar solo el nombre del método y la moneda, sin texto fijo de "Método CUP (tarjeta Bandec)"
-        const buttons = methods.map(m => [
-            Markup.button.callback(
-                `${m.name} (${m.currency})`,
-                `transfer_method_${m.id}`
-            )
-        ]);
-            if (method.currency === 'USDT' || method.currency === 'TRX') {
-                extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${escapeHTML(method.currency)}.\n- Asegúrate de usar la red correcta: ${escapeHTML(method.confirm && method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm && method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada')}.`;
+            if (!targetUser) {
+                await ctx.reply('❌ Usuario no encontrado. Asegúrate de que el nombre de usuario sea correcto o de que el ID numérico esté registrado.\nPor favor, vuelve a iniciar la operación', getMainKeyboard(ctx));
+                delete session.awaitingTransferTarget;
+                return;
             }
-            const minLine = (method.min_amount !== null && method.min_amount !== undefined) ? `Mínimo: ${escapeHTML(String(method.min_amount))} ${escapeHTML(method.currency)}\n\n` : '';
+            if (targetUser.telegram_id === uid) {
+                await ctx.reply('❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.', getMainKeyboard(ctx));
+                delete session.awaitingTransferTarget;
+                return;
+            }
+
+            session.transferTarget = targetUser.telegram_id;
+            // Ahora pedir el monto directamente, mostrando el mínimo del método elegido
+            const method = session.transferDepositMethod;
+            let minLine = (method && method.min_amount !== null && method.min_amount !== undefined) ? `\nMínimo: ${method.min_amount} ${method.currency}` : '';
+            session.awaitingTransferAmount = true;
+            delete session.awaitingTransferTarget;
             await safeEdit(ctx,
-                `${minLine}${extraInstructions}\n\n` +
-                `📥 <b>Por favor, envía el monto que deseas transferir</b> (ej: <code>500 cup</code> o <code>10 usd</code>, etc).`,
+                `📥 <b>Por favor, envía el monto que deseas transferir</b> (ej: <code>500 cup</code> o <code>10 usd</code>).` + minLine,
                 null
             );
-        buttons.push([Markup.button.callback('◀ Cancelar', 'main')]);
-        await safeEdit(ctx, `Selecciona el método de transferencia (${transferCurrency}):`, Markup.inlineKeyboard(buttons));
-        session.awaitingTransferMethod = true;
-        delete session.awaitingTransferTarget;
-        return;
+            return;
+        } catch (e) {
+            console.error('Error inesperado en transferencia destino:', e);
+            await ctx.reply('❌ Error inesperado al buscar el usuario destino. Por favor, intenta de nuevo o contacta soporte.', getMainKeyboard(ctx));
+            delete session.awaitingTransferTarget;
+            return;
+        }
     }
 
     // --- Flujo: transferencia - monto ---
     if (session.awaitingTransferAmount) {
-
-        const parsed = parseAmountWithCurrency(text);
-        if (!parsed) {
-           await ctx.reply('❌ Formato inválido. Debe ser monto moneda(ej: 500 cup o 10 usd).', getMainKeyboard(ctx));
-            return;
-        }
-
-        if (!['CUP', 'USD'].includes(parsed.currency)) {
-            await ctx.reply('❌ Moneda no soportada. Usa CUP o USD.', getMainKeyboard(ctx));
-            return;
-        }
-
-        const amount = parsed.amount;
-        const currency = parsed.currency;
-        const targetId = session.transferTarget;
-
-        // Validar mínimo de transferencia igual al mínimo de depósito (por método)
-        // Usar el método de depósito seleccionado por el usuario (por id), igual que en recarga
         const method = session.transferDepositMethod;
         if (!method) {
-            await ctx.reply('❌ Debes seleccionar un método de depósito válido.', getMainKeyboard(ctx));
+            await ctx.reply('❌ No se pudo determinar el método de transferencia. Intenta de nuevo.', getMainKeyboard(ctx));
             return;
         }
         const methodMinAmount = method.min_amount !== null && !isNaN(parseFloat(method.min_amount)) ? parseFloat(method.min_amount) : 0;
         if (amount < methodMinAmount) {
             await ctx.reply(`❌ El monto mínimo para transferir es ${methodMinAmount} ${method.currency}.`, getMainKeyboard(ctx));
-            return;
-        }
-// Acción para elegir método de depósito en transferencia
-bot.action(/^transfer_method_(\d+)$/, async (ctx) => {
-    const methodId = parseInt(ctx.match[1]);
-    const { data: method } = await supabase
-        .from('deposit_methods')
-        .select('*')
-        .eq('id', methodId)
-        .single();
-    if (!method) {
-        await ctx.answerCbQuery('Método no encontrado. Por favor, selecciona otro.', { show_alert: true });
-        return;
-    }
-    ctx.session.transferDepositMethod = method;
-    ctx.session.awaitingTransferAmount = true;
-    delete ctx.session.awaitingTransferMethod;
-    let extraInstructions = '';
-    if (method.currency === 'USDT' || method.currency === 'TRX') {
-        extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${escapeHTML(method.currency)}.\n- Asegúrate de usar la red correcta: ${escapeHTML(method.confirm && method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm && method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada')}.`;
-    }
-    const minLine = (method.min_amount !== null && method.min_amount !== undefined) ? `Mínimo: ${escapeHTML(String(method.min_amount))} ${escapeHTML(method.currency)}\n\n` : '';
-    await safeEdit(ctx,
-        `🧾 <b>${escapeHTML(method.name)}</b>\n` +
-        `Moneda: ${escapeHTML(method.currency)}\n` +
-        `Datos: <code>${escapeHTML(method.card)}</code>\n` +
-        `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n` +
-        `${minLine}` +
-        `${extraInstructions}\n\n` +
-        `📥 <b>Ahora, por favor, envía el monto a transferir</b> con la moneda (ej: 500 cup o 10 usd, etc).`,
-        null
-    );
-    try { await ctx.answerCbQuery(); } catch (e) {}
-});
-
-        if (amount <= 0) {
-            await ctx.reply('❌ El monto debe ser mayor que cero.', getMainKeyboard(ctx));
-            return;
-        }
-
-        const debitPlan = await buildRealBalanceDebitPlan(user, amount, currency);
-        if (!debitPlan.ok) {
-            await ctx.reply(
-                `❌ ${debitPlan.errorMessage || `Saldo real insuficiente para transferir ${amount} ${currency}.\nDisponible total (CUP+USD): ${debitPlan.totalAvailableCUP.toFixed(2)} CUP\nNecesitas: ${debitPlan.amountCUP.toFixed(2)} CUP`}`,
-                getMainKeyboard(ctx)
-            );
-            return;
-        }
-
-        await supabase
-            .from('users')
-            .update({
-                cup: (parseFloat(user.cup) || 0) - debitPlan.cupDebit,
-                usd: (parseFloat(user.usd) || 0) - debitPlan.usdDebit,
-                updated_at: new Date()
-            })
-            .eq('telegram_id', uid);
-
-        const { data: targetUser } = await supabase
-            .from('users')
-            .select('cup, usd, bonus_cup, first_name, username')
-            .eq('telegram_id', targetId)
-            .single();
-
-        const targetCup = parseFloat(targetUser.cup) || 0;
-        const targetUsd = parseFloat(targetUser.usd) || 0;
-        const targetBonusCup = parseFloat(targetUser.bonus_cup) || 0;
-
-        let updatedTargetCup = targetCup;
-        let updatedTargetUsd = targetUsd;
-
-        if (currency === 'CUP') {
-            updatedTargetCup += amount;
-        } else {
-            updatedTargetUsd += amount;
-        }
-
-        let bonusMovedCup = 0;
-        try {
-            const hadNoMainBalance = (targetCup === 0 && targetUsd === 0);
-            const hadApprovedDeposit = await userHasApprovedDeposit(targetId);
-            if (targetBonusCup > 0 && hadNoMainBalance && !hadApprovedDeposit) {
-                updatedTargetCup += targetBonusCup;
-                bonusMovedCup = targetBonusCup;
-            }
-        } catch (e) {
-            console.warn('Error verificando depósitos aprobados para migrar bono (transferencia):', e?.message || e);
-        }
-
-        const targetUpdatePayload = {
-            cup: updatedTargetCup,
-            usd: updatedTargetUsd,
-            updated_at: new Date()
-        };
-
-        if (bonusMovedCup > 0) {
-            targetUpdatePayload.bonus_cup = 0;
-        }
-
-        await supabase
-            .from('users')
-            .update(targetUpdatePayload)
-            .eq('telegram_id', targetId);
-
-        const fromName = user.first_name || user.username || uid;
-        const toName = targetUser.first_name || targetUser.username || targetId;
-
-        await ctx.reply(
-            `✅ Transferencia realizada con éxito:\n` +
-            `💰 Monto: ${amount} ${currency}\n` +
-            (currency !== 'CUP' && currency !== 'USD' ? `💱 Equivalente acreditado: ${debitPlan.amountCUP.toFixed(2)} CUP\n` : '') +
-            `👤 De: ${escapeHTML(fromName)}\n` +
-            `👤 A: ${escapeHTML(toName)}`,
-            { parse_mode: 'HTML' }
-        );
-
-        try {
-            await bot.telegram.sendMessage(targetId,
-                `🔄 <b>Has recibido una transferencia</b>\n\n` +
-                `👤 De: ${escapeHTML(fromName)}\n` +
-                `💰 Monto: ${amount} ${currency}\n` +
-                (currency == 'USD' ? `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n` :'' ) +
-                (bonusMovedCup > 0 ? `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n` : '') +
-                `📊 Saldo actualizado.`,
-                { parse_mode: 'HTML' }
-            );
-        } catch (e) {}
-
-        delete session.transferTarget;
-        delete session.awaitingTransferAmount;
-        return;
-    }
-
-    // --- Flujo: apuesta (awaitingBet) ---
-    if (session.awaitingBet) {
-        const betType = session.betType;
-        const lottery = session.lottery;
-        const sessionId = session.sessionId;
-
-        if (!sessionId) {
-            await ctx.reply('❌ No se ha seleccionado una sesión activa. Por favor, comienza de nuevo desde "🎲 Jugar".', getMainKeyboard(ctx));
-            delete session.awaitingBet;
-            return;
-        }
-
-        const { data: activeSession } = await supabase
-            .from('lottery_sessions')
-            .select('*')
-            .eq('id', sessionId)
-            .eq('status', 'open')
-            .maybeSingle();
-
-        if (!activeSession) {
-            await ctx.reply('❌ La sesión de juego ha sido cerrada. No se pueden registrar más apuestas para esta sesión.', getMainKeyboard(ctx));
-            delete session.awaitingBet;
-            return;
-        }
-
-        const parsed = parseBetMessage(text, betType);
-        if (!parsed.ok) {
-            await ctx.reply('❌ No se pudo interpretar tu apuesta. Verifica el formato y vuelve a intentarlo.\n\nSi necesitas ayuda, escribe "❓ Cómo jugar".', getMainKeyboard(ctx));
-            return;
-        }
-
-        const totalUSD = parsed.totalUSD;
-        const totalCUP = parsed.totalCUP;
-
-        if (totalUSD === 0 && totalCUP === 0) {
-            await ctx.reply('❌ Debes especificar un monto válido en USD o CUP.', getMainKeyboard(ctx));
             return;
         }
 
