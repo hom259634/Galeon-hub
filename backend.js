@@ -818,6 +818,7 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
 
 // --- Solicitud de retiro ---
 app.post('/api/withdraw-requests', async (req, res) => {
+
     const { methodId, amount, currency, userId, accountInfo } = req.body;
     if (!methodId || !amount || !currency || !userId || !accountInfo) {
         return res.status(400).json({ error: 'Faltan datos' });
@@ -854,6 +855,22 @@ app.post('/api/withdraw-requests', async (req, res) => {
         return res.status(400).json({ error: `Monto máximo: ${method.max_amount} ${currency}` });
     }
 
+    // Calcular amount_usd igual que en el bot
+    let amount_usd = null;
+    if (currency === 'USD') {
+        amount_usd = parseFloat(amount);
+    } else if (currency === 'CUP') {
+        // Obtener tasa USD
+        const { data: rateData } = await supabase
+            .from('exchange_rate')
+            .select('rate_usd')
+            .single();
+        const rate = rateData?.rate_usd || 1;
+        amount_usd = parseFloat(amount) / rate;
+    } else if (currency === 'USDT' || currency === 'TRX' || currency === 'MLC') {
+        amount_usd = parseFloat(amount); // Asumimos 1:1
+    }
+
     const { data: request, error: insertError } = await supabase
         .from('withdraw_requests')
         .insert({
@@ -862,7 +879,8 @@ app.post('/api/withdraw-requests', async (req, res) => {
             amount,
             currency,
             account_info: accountInfo,
-            status: 'pending'
+            status: 'pending',
+            amount_usd
         })
         .select()
         .single();

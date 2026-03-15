@@ -2661,15 +2661,29 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
+        // Calcular amountUSD para mostrar y guardar en la base de datos
+        let amountUSD = null;
+        if (currency === 'USD') {
+            amountUSD = amount;
+        } else if (currency === 'CUP') {
+            const rate = await getExchangeRateUSD();
+            amountUSD = amount / rate;
+        } else if (currency === 'USDT' || currency === 'TRX' || currency === 'MLC') {
+            // Si tienes tasas específicas para estas monedas, cámbialo aquí
+            // Por ahora, asumimos 1:1 con USD
+            amountUSD = amount;
+        }
+
         session.withdrawAmount = amount;
         session.withdrawCurrency = currency;
-        
+        session.withdrawAmountUSD = amountUSD;
+
         // Dependiendo de la moneda, pedimos los datos de la cuenta
         if (currency === 'USDT' || currency === 'TRX') {
             session.awaitingWithdrawWallet = true; // Nuevo estado para pedir wallet
             delete session.awaitingWithdrawAmount;
             await ctx.reply(
-                `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD.toFixed(2)} USD)\n\n` +
+                `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
                 `Por favor, escribe tu <b>dirección de wallet</b> para recibir el retiro.\n` +
                 `(Ejemplo: TXYZ... o 0x... según la red)`,
                 { parse_mode: 'HTML' }
@@ -2678,7 +2692,7 @@ bot.on(message('text'), async (ctx) => {
             session.awaitingWithdrawAccount = true;
             delete session.awaitingWithdrawAmount;
             await ctx.reply(
-                `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD.toFixed(2)} USD)\n\n` +
+                `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
                 `Por favor, escribe los <b>datos de tu cuenta</b> (número de teléfono, tarjeta, etc.) para recibir el retiro.`,
                 { parse_mode: 'HTML' }
             );
@@ -2716,6 +2730,7 @@ bot.on(message('text'), async (ctx) => {
         const amount = session.withdrawAmount;
         const currency = session.withdrawCurrency;
         const method = session.withdrawMethod;
+        const amountUSD = session.withdrawAmountUSD;
 
         const accountInfo = `Wallet: ${wallet} (Red: ${network})`;
 
@@ -2728,7 +2743,8 @@ bot.on(message('text'), async (ctx) => {
                     amount: amount,
                     currency: currency,
                     account_info: accountInfo,
-                    status: 'pending'
+                    status: 'pending',
+                    amount_usd: amountUSD
                 })
                 .select()
                 .single();
@@ -2772,6 +2788,7 @@ bot.on(message('text'), async (ctx) => {
         delete session.withdrawMethod;
         delete session.withdrawAmount;
         delete session.withdrawCurrency;
+        delete session.withdrawAmountUSD;
         return;
     }
 
@@ -2781,6 +2798,7 @@ bot.on(message('text'), async (ctx) => {
         const amount = session.withdrawAmount;
         const currency = session.withdrawCurrency;
         const method = session.withdrawMethod;
+        const amountUSD = session.withdrawAmountUSD;
         try {
             const { data: request, error } = await supabase
                 .from('withdraw_requests')
@@ -2790,7 +2808,8 @@ bot.on(message('text'), async (ctx) => {
                     amount: amount,
                     currency: currency,
                     account_info: accountInfo,
-                    status: 'pending'
+                    status: 'pending',
+                    amount_usd: amountUSD
                 })
                 .select()
                 .single();
@@ -2832,6 +2851,7 @@ bot.on(message('text'), async (ctx) => {
         delete session.withdrawMethod;
         delete session.withdrawAmount;
         delete session.withdrawCurrency;
+        delete session.withdrawAmountUSD;
         return;
     }
 
@@ -2918,7 +2938,12 @@ bot.on(message('text'), async (ctx) => {
                 .eq('enabled', true)
                 .order('id', { ascending: false });
             if (methods && methods.length > 0) {
-                method = methods.find(m => m.min_amount !== null && !isNaN(parseFloat(m.min_amount)));
+                // Tomar el primer método con min_amount válido (no null y mayor a 0)
+                method = methods.find(m => m.min_amount !== null && !isNaN(parseFloat(m.min_amount)) && parseFloat(m.min_amount) > 0);
+                // Si no hay ninguno mayor a 0, tomar el primero con min_amount no null
+                if (!method) {
+                    method = methods.find(m => m.min_amount !== null && !isNaN(parseFloat(m.min_amount)));
+                }
             }
         }
         if (!method) {
@@ -2926,7 +2951,7 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
         const methodMinAmount = parseFloat(method.min_amount);
-        if (amount < methodMinAmount) {
+        if (isNaN(methodMinAmount) || amount < methodMinAmount) {
             await ctx.reply(`❌ El monto mínimo para transferir es ${methodMinAmount} ${currency}.`, getMainKeyboard(ctx));
             return;
         }
