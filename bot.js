@@ -1153,7 +1153,7 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
         `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n` +
         `${minLine}` +
         `${extraInstructions}\n\n` +
-        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usdt</code>, etc).`,
+        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usd</code>, etc).`,
         null
     );
 });
@@ -2968,11 +2968,26 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        const { data: priceData } = await supabase
-            .from('play_prices')
-            .select('min_cup, min_usd, max_cup, max_usd')
-            .eq('bet_type', betType)
-            .single();
+
+        // Determinar el betType para la consulta de límites
+        let betType = null;
+        if (method && method.bet_type) {
+            betType = method.bet_type;
+        } else if (session.betType) {
+            betType = session.betType;
+        } else if (session.transferCurrency) {
+            betType = session.transferCurrency.toLowerCase();
+        }
+
+        let priceData = null;
+        if (betType) {
+            const { data } = await supabase
+                .from('play_prices')
+                .select('min_cup, min_usd, max_cup, max_usd')
+                .eq('bet_type', betType)
+                .single();
+            priceData = data;
+        }
 
         const minCup = priceData?.min_cup || 0;
         const minUsd = priceData?.min_usd || 0;
