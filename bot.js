@@ -1100,7 +1100,6 @@ bot.action('my_money', async (ctx) => {
 });
 
 bot.action('recharge', async (ctx) => {
-    const minDeposit = await getMinDepositUSD();
     const { data: methods } = await supabase
         .from('deposit_methods')
         .select('*')
@@ -2614,16 +2613,11 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        const minDeposit = await getMinDepositUSD();
-        const methodMinAmount = method.min_amount !== null ? parseFloat(method.min_amount) : null;
-        const methodMaxAmount = method.max_amount !== null ? parseFloat(method.max_amount) : null;
-        const effectiveMinDeposit = methodMinAmount !== null && !Number.isNaN(methodMinAmount)
-            ? Math.max(minDeposit, methodMinAmount)
-            : minDeposit;
-
-        if (parsed.amount < effectiveMinDeposit) {
+        const methodMinAmount = method.min_amount !== null && !Number.isNaN(parseFloat(method.min_amount)) ? parseFloat(method.min_amount) : null;
+        const methodMaxAmount = method.max_amount !== null && !Number.isNaN(parseFloat(method.max_amount)) ? parseFloat(method.max_amount) : null;
+        if (methodMinAmount !== null && parsed.amount < methodMinAmount) {
             await ctx.reply(
-                `❌ El monto mínimo de depósito aceptado es ${effectiveMinDeposit} ${parsed.currency}.`,
+                `❌ El monto mínimo de depósito aceptado es ${methodMinAmount} ${parsed.currency}.`,
                 getMainKeyboard(ctx)
             );
             return;

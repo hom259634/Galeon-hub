@@ -628,7 +628,13 @@ app.post('/api/auth', async (req, res) => {
 // --- Métodos de depósito ---
 app.get('/api/deposit-methods', async (req, res) => {
     const { data } = await supabase.from('deposit_methods').select('*').order('id');
-    res.json(data || []);
+    // Forzar min_amount y max_amount a número si existen
+    const fixed = (data || []).map(m => ({
+        ...m,
+        min_amount: m.min_amount !== null && m.min_amount !== undefined ? Number(m.min_amount) : null,
+        max_amount: m.max_amount !== null && m.max_amount !== undefined ? Number(m.max_amount) : null
+    }));
+    res.json(fixed);
 });
 app.get('/api/deposit-methods/:id', async (req, res) => {
     const { data } = await supabase.from('deposit_methods').select('*').eq('id', req.params.id).single();
