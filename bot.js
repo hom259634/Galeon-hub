@@ -2897,15 +2897,29 @@ bot.on(message('text'), async (ctx) => {
         }
 
         session.transferTarget = targetUser.telegram_id;
-        session.awaitingTransferAmount = true;
+        // Pedir al usuario que elija el método de depósito igual que en recarga
+        const { data: methods } = await supabase
+            .from('deposit_methods')
+            .select('*')
+            .eq('enabled', true)
+            .in('currency', ['CUP', 'USD'])
+            .order('id', { ascending: true });
+        if (!methods || methods.length === 0) {
+            await ctx.reply('❌ No hay métodos de depósito activos para transferir CUP o USD.', getMainKeyboard(ctx));
+            delete session.awaitingTransferTarget;
+            return;
+        }
+        // Mostrar botones para elegir método, label personalizado
+        const buttons = methods.map(m => [
+            Markup.button.callback(
+                `Método ${m.currency} (${m.name})`,
+                `transfer_method_${m.id}`
+            )
+        ]);
+        buttons.push([Markup.button.callback('◀ Cancelar', 'main')]);
+        await safeEdit(ctx, 'Selecciona el método de transferencia (solo CUP o USD):', Markup.inlineKeyboard(buttons));
+        session.awaitingTransferMethod = true;
         delete session.awaitingTransferTarget;
-        const displayName = targetUser.first_name || targetUser.username || targetUser.telegram_id;
-        await ctx.reply(
-            `✅ Usuario encontrado: ${escapeHTML(displayName)}\n\n` +
-            `Ahora envía el <b>monto y la moneda</b> que deseas transferir (ej: <code>500 cup</code> o <code>10 usd</code>).\n` +
-            `💰 Tus saldos: CUP: ${(parseFloat(user.cup) || 0).toFixed(2)}, USD: ${(parseFloat(user.usd) || 0).toFixed(2)} (aprox. ${((parseFloat(user.usd) || 0) * await getExchangeRateUSD()).toFixed(2)} CUP)`,
-            { parse_mode: 'HTML' }
-        );
         return;
     }
 
@@ -2928,33 +2942,49 @@ bot.on(message('text'), async (ctx) => {
         const targetId = session.transferTarget;
 
         // Validar mínimo de transferencia igual al mínimo de depósito (por método)
-        let method = null;
-        if (currency === 'USD' || currency === 'CUP') {
-            // Buscar el método de depósito activo más reciente (mayor id) para la moneda con min_amount válido
-            const { data: methods } = await supabase
-                .from('deposit_methods')
-                .select('*')
-                .eq('currency', currency)
-                .eq('enabled', true)
-                .order('id', { ascending: false });
-            if (methods && methods.length > 0) {
-                // Tomar el primer método con min_amount válido (no null y mayor a 0)
-                method = methods.find(m => m.min_amount !== null && !isNaN(parseFloat(m.min_amount)) && parseFloat(m.min_amount) > 0);
-                // Si no hay ninguno mayor a 0, tomar el primero con min_amount no null
-                if (!method) {
-                    method = methods.find(m => m.min_amount !== null && !isNaN(parseFloat(m.min_amount)));
-                }
-            }
-        }
-        if (!method) {
-            await ctx.reply(`❌ No hay método de depósito activo para ${currency} con mínimo configurado.`, getMainKeyboard(ctx));
+        // Usar el método de depósito elegido por el usuario (guardado en sesión)
+        const method = session.transferDepositMethod;
+        if (!method || method.currency !== currency) {
+            await ctx.reply(`❌ Debes seleccionar un método de depósito válido para ${currency}.`, getMainKeyboard(ctx));
             return;
         }
-        const methodMinAmount = parseFloat(method.min_amount);
-        if (isNaN(methodMinAmount) || amount < methodMinAmount) {
+        const methodMinAmount = method.min_amount !== null && !isNaN(parseFloat(method.min_amount)) ? parseFloat(method.min_amount) : 0;
+        if (amount < methodMinAmount) {
             await ctx.reply(`❌ El monto mínimo para transferir es ${methodMinAmount} ${currency}.`, getMainKeyboard(ctx));
             return;
         }
+// Acción para elegir método de depósito en transferencia
+bot.action(/^transfer_method_(\d+)$/, async (ctx) => {
+    const methodId = parseInt(ctx.match[1]);
+    const { data: method } = await supabase
+        .from('deposit_methods')
+        .select('*')
+        .eq('id', methodId)
+        .single();
+    if (!method) {
+        await ctx.answerCbQuery('Método no encontrado. Por favor, selecciona otro.', { show_alert: true });
+        return;
+    }
+    ctx.session.transferDepositMethod = method;
+    ctx.session.awaitingTransferAmount = true;
+    delete ctx.session.awaitingTransferMethod;
+    let extraInstructions = '';
+    if (method.currency === 'USDT' || method.currency === 'TRX') {
+        extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${escapeHTML(method.currency)}.\n- Asegúrate de usar la red correcta: ${escapeHTML(method.confirm && method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm && method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada')}.`;
+    }
+    const minLine = (method.min_amount !== null && method.min_amount !== undefined) ? `Mínimo: ${escapeHTML(String(method.min_amount))} ${escapeHTML(method.currency)}\n\n` : '';
+    await safeEdit(ctx,
+        `🧾 <b>${escapeHTML(method.name)}</b>\n` +
+        `Moneda: ${escapeHTML(method.currency)}\n` +
+        `Datos: <code>${escapeHTML(method.card)}</code>\n` +
+        `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n` +
+        `${minLine}` +
+        `${extraInstructions}\n\n` +
+        `📥 <b>Ahora, por favor, envía el monto a transferir</b> con la moneda (ej: 500 cup o 10 usd, etc).`,
+        null
+    );
+    try { await ctx.answerCbQuery(); } catch (e) {}
+});
 
         if (amount <= 0) {
             await ctx.reply('❌ El monto debe ser mayor que cero.', getMainKeyboard(ctx));
