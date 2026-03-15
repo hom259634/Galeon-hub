@@ -2910,19 +2910,24 @@ bot.on(message('text'), async (ctx) => {
         // Validar mínimo de transferencia igual al mínimo de depósito (por método)
         let method = null;
         if (currency === 'USD' || currency === 'CUP') {
-            // Buscar el método de depósito activo para la moneda
+            // Buscar el método de depósito activo más reciente (mayor id) para la moneda con min_amount válido
             const { data: methods } = await supabase
                 .from('deposit_methods')
                 .select('*')
                 .eq('currency', currency)
-                .eq('enabled', true);
+                .eq('enabled', true)
+                .order('id', { ascending: false });
             if (methods && methods.length > 0) {
-                // Seleccionar el primer método activo (igual que en depósito)
-                method = methods[0];
+                method = methods.find(m => m.min_amount !== null && !isNaN(parseFloat(m.min_amount)));
             }
         }
-        if (!method || method.min_amount === null || isNaN(parseFloat(method.min_amount)) || amount < parseFloat(method.min_amount)) {
-            await ctx.reply(`❌ El monto mínimo para transferir es ${method && method.min_amount ? method.min_amount : '?'} ${currency}.`, getMainKeyboard(ctx));
+        if (!method) {
+            await ctx.reply(`❌ No hay método de depósito activo para ${currency} con mínimo configurado.`, getMainKeyboard(ctx));
+            return;
+        }
+        const methodMinAmount = parseFloat(method.min_amount);
+        if (amount < methodMinAmount) {
+            await ctx.reply(`❌ El monto mínimo para transferir es ${methodMinAmount} ${currency}.`, getMainKeyboard(ctx));
             return;
         }
 
