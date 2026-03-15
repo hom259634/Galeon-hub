@@ -1261,7 +1261,7 @@ bot.action(/^transfer_currency_(CUP|USD)$/, async (ctx) => {
         '🔄 <b>Transferir saldo a otro usuario</b>\n\n' +
         'Envía el <b>nombre de usuario</b> de Telegram (ej: @usuario) de la persona a la que deseas transferir.\n' +
         'También puedes usar su ID numérico si lo conoces.\n\n' +
-        'Solo puedes transferir CUP o USD. El bono de bienvenida no es transferible.\n\n' +
+        'El bono de bienvenida no es transferible.\n\n' +
         'Por favor, ingresa el usuario:',
         null
     );
@@ -2929,12 +2929,22 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
         // Mostrar botones para elegir método, label personalizado
+        // Mostrar solo el nombre del método y la moneda, sin texto fijo de "Método CUP (tarjeta Bandec)"
         const buttons = methods.map(m => [
             Markup.button.callback(
-                `Método ${m.currency} (${m.name})`,
+                `${m.name} (${m.currency})`,
                 `transfer_method_${m.id}`
             )
         ]);
+            if (method.currency === 'USDT' || method.currency === 'TRX') {
+                extraInstructions = `\n\n🔐 <b>Importante:</b>\n- Envía el monto exacto en ${escapeHTML(method.currency)}.\n- Asegúrate de usar la red correcta: ${escapeHTML(method.confirm && method.confirm.includes('TRC20') ? 'TRC-20' : method.confirm && method.confirm.includes('BEP20') ? 'BEP-20' : method.confirm || 'la red especificada')}.`;
+            }
+            const minLine = (method.min_amount !== null && method.min_amount !== undefined) ? `Mínimo: ${escapeHTML(String(method.min_amount))} ${escapeHTML(method.currency)}\n\n` : '';
+            await safeEdit(ctx,
+                `${minLine}${extraInstructions}\n\n` +
+                `📥 <b>Por favor, envía el monto que deseas transferir</b> (ej: <code>500 cup</code> o <code>10 usd</code>, etc).`,
+                null
+            );
         buttons.push([Markup.button.callback('◀ Cancelar', 'main')]);
         await safeEdit(ctx, `Selecciona el método de transferencia (${transferCurrency}):`, Markup.inlineKeyboard(buttons));
         session.awaitingTransferMethod = true;
