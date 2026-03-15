@@ -1106,6 +1106,16 @@ bot.action('recharge', async (ctx) => {
         .select('*')
         .order('id', { ascending: true });
 
+    // LOG: Mostrar todos los métodos de depósito y sus valores
+    console.log('Métodos de depósito (recarga):');
+    if (methods && methods.length > 0) {
+        methods.forEach(m => {
+            console.log(`ID: ${m.id}, Nombre: ${m.name}, Moneda: ${m.currency}, Mínimo: ${m.min_amount}, Máximo: ${m.max_amount}, Habilitado: ${m.enabled}`);
+        });
+    } else {
+        console.log('No hay métodos de depósito.');
+    }
+
     if (!methods || methods.length === 0) {
         await ctx.answerCbQuery('❌ Por el momento no hay métodos de depósito disponibles. Intenta más tarde.', { show_alert: true });
         return;
@@ -2919,6 +2929,15 @@ bot.on(message('text'), async (ctx) => {
             .select('*')
             .eq('enabled', true)
             .order('id', { ascending: true });
+        // LOG: Mostrar todos los métodos de depósito y sus valores (transferencia)
+        console.log('Métodos de depósito (transferencia):');
+        if (allMethods && allMethods.length > 0) {
+            allMethods.forEach(m => {
+                console.log(`ID: ${m.id}, Nombre: ${m.name}, Moneda: ${m.currency}, Mínimo: ${m.min_amount}, Máximo: ${m.max_amount}, Habilitado: ${m.enabled}`);
+            });
+        } else {
+            console.log('No hay métodos de depósito.');
+        }
         // Normalizar currency y filtrar solo la moneda elegida
         const methods = (allMethods || []).filter(m => {
             const curr = (m.currency || '').toString().trim().toUpperCase();
