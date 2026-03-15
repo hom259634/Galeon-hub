@@ -390,21 +390,6 @@ async function getMinDepositUSD() {
     return data ? parseFloat(data.value) : 1.0;
 }
 
-async function getMinDepositCUP() {
-    const { data } = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', 'min_deposit_cup')
-        .single();
-    if (data && data.value !== null && data.value !== undefined) {
-        return parseFloat(data.value);
-    }
-    // Si no está configurado, convertir el mínimo USD a CUP
-    const minUsd = await getMinDepositUSD();
-    const minCup = await convertToCUP(minUsd, 'USD');
-    return minCup;
-}
-
 async function getMinWithdrawUSD() {
     const { data } = await supabase
         .from('app_config')
@@ -674,9 +659,8 @@ app.get('/api/exchange-rates', async (req, res) => {
 
 // --- Mínimo depósito ---
 app.get('/api/config/min-deposit', async (req, res) => {
-    const usd = await getMinDepositUSD();
-    const cup = await getMinDepositCUP();
-    res.json({ usd, cup });
+    const value = await getMinDepositUSD();
+    res.json({ value });
 });
 
 // --- Mínimo retiro ---
@@ -917,10 +901,9 @@ app.post('/api/transfer', async (req, res) => {
     }
 
     const parsedAmount = parseFloat(amount);
-    // Obtener mínimos configurados
-    const minDepositUsd = await getMinDepositUSD();
-    const minDepositCup = await getMinDepositCUP();
-    const minByCurrency = currency === 'USD' ? minDepositUsd : minDepositCup;
+    const transferMinUSD = 1;
+    const transferMinCUP = await convertToCUP(transferMinUSD, 'USD');
+    const minByCurrency = currency === 'USD' ? transferMinUSD : transferMinCUP;
     if (parsedAmount < minByCurrency) {
         return res.status(400).json({ error: `El monto mínimo para transferir en ${currency} es ${minByCurrency.toFixed(2)} ${currency}.` });
     }
