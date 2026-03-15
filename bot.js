@@ -2961,13 +2961,16 @@ bot.on(message('text'), async (ctx) => {
         const method = session.transferDepositMethod;
         if (!method) {
             await ctx.reply('❌ No se pudo determinar el método de transferencia. Intenta de nuevo.', getMainKeyboard(ctx));
-            // No limpiar sesión, solo pedir de nuevo
+            return;
+        }
+        // Validar que la moneda escrita coincida con la del método
+        if (currency !== method.currency) {
+            await ctx.reply(`❌ La moneda del monto (${currency}) no coincide con la del método (${method.currency}). Por favor, envía el monto en ${method.currency}.`, getMainKeyboard(ctx));
             return;
         }
         const methodMinAmount = method.min_amount !== null && !isNaN(parseFloat(method.min_amount)) ? parseFloat(method.min_amount) : 0;
         if (amount < methodMinAmount) {
             await ctx.reply(`❌ El monto mínimo para transferir es ${methodMinAmount} ${method.currency}.`, getMainKeyboard(ctx));
-            // No limpiar sesión, solo pedir de nuevo
             return;
         }
 
