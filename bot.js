@@ -2952,7 +2952,8 @@ bot.on(message('text'), async (ctx) => {
     if (session.awaitingTransferAmount) {
         const parsed = parseAmountWithCurrency(text);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debe ser monto moneda(ej: 500 cup o 10 usd).', getMainKeyboard(ctx));
+            // Si el usuario pone un monto inválido, NO limpiar la sesión, solo pedir de nuevo
+            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: 500 cup o 10 usd).', getMainKeyboard(ctx));
             return;
         }
         const amount = parsed.amount;
@@ -2960,11 +2961,13 @@ bot.on(message('text'), async (ctx) => {
         const method = session.transferDepositMethod;
         if (!method) {
             await ctx.reply('❌ No se pudo determinar el método de transferencia. Intenta de nuevo.', getMainKeyboard(ctx));
+            // No limpiar sesión, solo pedir de nuevo
             return;
         }
         const methodMinAmount = method.min_amount !== null && !isNaN(parseFloat(method.min_amount)) ? parseFloat(method.min_amount) : 0;
         if (amount < methodMinAmount) {
             await ctx.reply(`❌ El monto mínimo para transferir es ${methodMinAmount} ${method.currency}.`, getMainKeyboard(ctx));
+            // No limpiar sesión, solo pedir de nuevo
             return;
         }
 
@@ -3055,7 +3058,16 @@ bot.on(message('text'), async (ctx) => {
         if (bonusMovedCup > 0) targetUpdate.bonus_cup = 0;
         await supabase.from('users').update(targetUpdate).eq('telegram_id', targetUserId);
         // 6. Notificar a ambos usuarios
-        await ctx.reply('✅ Transferencia realizada correctamente.', getMainKeyboard(ctx));
+        // Mensaje de éxito personalizado
+        const senderName = ctx.from.first_name || ctx.from.username || String(uid);
+        const receiverName = targetUser.first_name || targetUser.username || String(targetUserId);
+        await ctx.reply(
+            `✅ Transferencia realizada con éxito:\n` +
+            `💰 Monto: ${amount} ${currency}\n` +
+            `👤 De: ${senderName}\n` +
+            `👤 A: ${receiverName}`,
+            getMainKeyboard(ctx)
+        );
         try {
             let message = `🔄 <b>Has recibido una transferencia</b>\n\n` +
                 `👤 De: ${escapeHTML(ctx.from.first_name || ctx.from.username || String(uid))}\n` +
