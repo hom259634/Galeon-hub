@@ -2898,12 +2898,16 @@ bot.on(message('text'), async (ctx) => {
 
         session.transferTarget = targetUser.telegram_id;
         // Pedir al usuario que elija el método de depósito igual que en recarga
-        const { data: methods } = await supabase
+        const { data: allMethods } = await supabase
             .from('deposit_methods')
             .select('*')
             .eq('enabled', true)
-            .in('currency', ['CUP', 'USD'])
             .order('id', { ascending: true });
+        // Normalizar currency y filtrar solo CUP o USD
+        const methods = (allMethods || []).filter(m => {
+            const curr = (m.currency || '').toString().trim().toUpperCase();
+            return curr === 'CUP' || curr === 'USD';
+        });
         if (!methods || methods.length === 0) {
             await ctx.reply('❌ No hay métodos de depósito activos para transferir CUP o USD.', getMainKeyboard(ctx));
             delete session.awaitingTransferTarget;
