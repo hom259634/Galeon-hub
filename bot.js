@@ -2597,16 +2597,11 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        const minDeposit = await getMinDepositUSD();
         const methodMinAmount = method.min_amount !== null ? parseFloat(method.min_amount) : null;
         const methodMaxAmount = method.max_amount !== null ? parseFloat(method.max_amount) : null;
-        const effectiveMinDeposit = methodMinAmount !== null && !Number.isNaN(methodMinAmount)
-            ? Math.max(minDeposit, methodMinAmount)
-            : minDeposit;
-
-        if (parsed.amount < effectiveMinDeposit) {
+        if (methodMinAmount !== null && !Number.isNaN(methodMinAmount) && parsed.amount < methodMinAmount) {
             await ctx.reply(
-                `❌ El monto mínimo de depósito aceptado es ${effectiveMinDeposit} ${parsed.currency}.`,
+                `❌ El monto mínimo de depósito aceptado es ${methodMinAmount} ${parsed.currency}.`,
                 getMainKeyboard(ctx)
             );
             return;
@@ -2909,7 +2904,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(text);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debe ser monto moneda(ej: 500 cup o 10 usd).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debe ser monto moneda(ej: 500 cup o 10 usd).\nPor favor vuelve a iniciar la operacion.', getMainKeyboard(ctx));
             return;
         }
 
@@ -2923,7 +2918,7 @@ bot.on(message('text'), async (ctx) => {
         const targetId = session.transferTarget;
 
         // Validar mínimo de transferencia usando el menor min_amount ACTUALIZADO de los métodos de depósito activos
-        let minTransfer = 0;
+        let minTransfer = null;
         if (currency === 'USD' || currency === 'CUP') {
             const { data: methods } = await supabase
                 .from('deposit_methods')
@@ -2931,16 +2926,15 @@ bot.on(message('text'), async (ctx) => {
                 .eq('currency', currency)
                 .eq('enabled', true);
             if (methods && methods.length > 0) {
-                const minAmounts = methods.map(m => parseFloat(m.min_amount)).filter(x => !isNaN(x) && x > 0);
+                // Solo considerar métodos con min_amount válido y mayor o igual a 0
+                const minAmounts = methods.map(m => parseFloat(m.min_amount)).filter(x => !isNaN(x));
                 if (minAmounts.length > 0) {
                     minTransfer = Math.min(...minAmounts);
-                } else {
-                    minTransfer = 0;
                 }
             }
         }
-        if (minTransfer > 0 && amount < minTransfer) {
-            await ctx.reply(`❌ El monto mínimo para transferir es ${minTransfer.toFixed(2)} ${currency}.`, getMainKeyboard(ctx));
+        if (minTransfer !== null && !isNaN(minTransfer) && amount < minTransfer) {
+            await ctx.reply(`❌ El monto mínimo para transferir es ${minTransfer} ${currency}.`, getMainKeyboard(ctx));
             return;
         }
 
