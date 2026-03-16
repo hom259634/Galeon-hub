@@ -2918,7 +2918,7 @@ bot.on(message('text'), async (ctx) => {
                 return;
             }
             if (targetUser.telegram_id === uid) {
-                await ctx.reply('❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.', getMainKeyboard(ctx));
+                await ctx.reply('❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.\nPor favor, vuelve a iniciar la operación', getMainKeyboard(ctx));
                 delete session.awaitingTransferTarget;
                 return;
             }
@@ -2990,43 +2990,30 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('❌ Usuario destino no encontrado.', getMainKeyboard(ctx));
             return;
         }
-        // 3. Validar saldo suficiente (solo USD o solo CUP, no mixto)
-        let enough = false;
+        // 3. Validar saldo suficiente: usar saldo real (CUP + USD convertido) cuando corresponda
         let cupDebit = 0, usdDebit = 0;
-        if (currency === 'USD') {
-            if ((parseFloat(user.usd) || 0) >= amount) {
-                enough = true;
-                usdDebit = amount;
+        try {
+            const debitPlan = await buildRealBalanceDebitPlan(user, amount, currency);
+            if (!debitPlan.ok) {
+                await ctx.reply(debitPlan.errorMessage || '❌ Saldo insuficiente para transferir.', getMainKeyboard(ctx));
+                return;
             }
-        } else if (currency === 'CUP') {
-            const cupBalance = parseFloat(user.cup) || 0;
-            const bonusBalance = parseFloat(user.bonus_cup) || 0;
-            if ((cupBalance + bonusBalance) >= amount) {
-                enough = true;
-                if (cupBalance >= amount) {
-                    cupDebit = amount;
-                } else {
-                    cupDebit = cupBalance;
-                }
-            }
-        }
-        if (!enough) {
-            await ctx.reply('❌ Saldo insuficiente para transferir.', getMainKeyboard(ctx));
+            cupDebit = parseFloat(debitPlan.cupDebit) || 0;
+            usdDebit = parseFloat(debitPlan.usdDebit) || 0;
+        } catch (e) {
+            console.error('Error building debit plan for transfer (bot):', e);
+            await ctx.reply('❌ Error al validar saldo. Intenta nuevamente.', getMainKeyboard(ctx));
             return;
         }
-        // 4. Debitar origen
-        let updates = {};
-        if (currency === 'USD') {
-            updates.usd = (parseFloat(user.usd) || 0) - amount;
-        } else if (currency === 'CUP') {
-            let cupBalance = parseFloat(user.cup) || 0;
-            let bonusBalance = parseFloat(user.bonus_cup) || 0;
-            if (cupBalance >= amount) {
-                updates.cup = cupBalance - amount;
-            } else {
-                updates.cup = 0;
-                updates.bonus_cup = Math.max(0, bonusBalance - (amount - cupBalance));
-            }
+        // 4. Debitar origen usando el plan calculado
+        const updates = {};
+        if (cupDebit && cupDebit > 0) {
+            const curCup = parseFloat(user.cup) || 0;
+            updates.cup = Math.max(0, curCup - cupDebit);
+        }
+        if (usdDebit && usdDebit > 0) {
+            const curUsd = parseFloat(user.usd) || 0;
+            updates.usd = Math.max(0, curUsd - usdDebit);
         }
         updates.updated_at = new Date();
         await supabase.from('users').update(updates).eq('telegram_id', uid);
