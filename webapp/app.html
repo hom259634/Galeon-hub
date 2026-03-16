@@ -64,17 +64,22 @@
             top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.7);
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: center;
+            padding: 20px 12px;
+            overflow: auto;
             z-index: 1000;
         }
         .modal-content {
-            max-width: 500px;
-            width: 90%;
+            max-width: 680px;
+            width: 100%;
             background: #2d3349;
-            border-radius: 24px;
-            padding: 20px;
+            border-radius: 16px;
+            padding: 16px;
             border: 1px solid #00ffff;
+            box-sizing: border-box;
+            max-height: calc(100vh - 48px);
+            overflow-y: auto;
         }
         .error-box {
             background: #ef4444;
@@ -199,6 +204,16 @@
             border-radius: 8px;
             padding: 8px;
             margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .bet-detail-item .font-mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Courier New', monospace;
+            word-break: break-word;
+            font-size: 0.95rem;
         }
         .edit-cancel-btn {
             transition: all 0.2s;
@@ -1578,7 +1593,7 @@
             const targetInput = document.getElementById('transferTarget').value.trim();
             const currency = document.getElementById('transferCurrency').value;
             const amount = parseFloat(document.getElementById('transferAmount').value);
-            
+
             if (!targetInput || isNaN(amount) || amount <= 0) {
                 iziToast.warning({ message: 'Ingresa un usuario válido y un monto positivo' });
                 return;
@@ -1586,6 +1601,24 @@
 
             if (!['CUP', 'USD'].includes(currency)) {
                 iziToast.warning({ message: 'Moneda no soportada. Usa CUP o USD' });
+                return;
+            }
+
+            // Buscar el método de depósito activo para la moneda seleccionada (igual que en recarga)
+            let minAmount = null;
+            if (depositMethods && depositMethods.length > 0) {
+                // Buscar el método más reciente (mayor id) para la moneda seleccionada
+                const filtered = depositMethods.filter(m => (m.currency || '').toUpperCase() === currency);
+                if (filtered.length > 0) {
+                    // Elegir el de mayor id (más reciente)
+                    const method = filtered.reduce((a, b) => (a.id > b.id ? a : b));
+                    if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
+                        minAmount = parseFloat(method.min_amount);
+                    }
+                }
+            }
+            if (minAmount !== null && amount < minAmount) {
+                iziToast.warning({ message: `Monto mínimo para transferir: ${minAmount} ${currency}` });
                 return;
             }
 
