@@ -925,9 +925,32 @@ app.post('/api/transfer', async (req, res) => {
     }
 
     const parsedAmount = parseFloat(amount);
-    const transferMinUSD = 1;
-    const transferMinCUP = await convertToCUP(transferMinUSD, 'USD');
-    const minByCurrency = currency === 'USD' ? transferMinUSD : transferMinCUP;
+
+    // Intentar obtener el mínimo desde el método de depósito más reciente
+    let minByCurrency = null;
+    try {
+        const { data: allMethods } = await supabase
+            .from('deposit_methods')
+            .select('*')
+            .order('id', { ascending: true });
+        const methods = (allMethods || []).filter(m => ((m.currency || '').toString().trim().toUpperCase()) === currency);
+        if (methods && methods.length > 0) {
+            const method = methods.reduce((a, b) => (a.id > b.id ? a : b));
+            if (method && method.min_amount !== null && method.min_amount !== undefined) {
+                minByCurrency = parseFloat(method.min_amount);
+            }
+        }
+    } catch (e) {
+        console.error('Error obteniendo métodos de depósito para mínimo de transferencia:', e);
+    }
+
+    // Fallback: regla antigua (1 USD)
+    if (minByCurrency === null) {
+        const transferMinUSD = 1;
+        const transferMinCUP = await convertToCUP(transferMinUSD, 'USD');
+        minByCurrency = currency === 'USD' ? transferMinUSD : transferMinCUP;
+    }
+
     if (parsedAmount < minByCurrency) {
         return res.status(400).json({ error: `El monto mínimo para transferir en ${currency} es ${minByCurrency.toFixed(2)} ${currency}.` });
     }
