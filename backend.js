@@ -956,7 +956,7 @@ app.post('/api/transfer', async (req, res) => {
     }
 
     if (from === to) {
-        return res.status(400).json({ error: 'No puedes transferirte a ti mismo' });
+        return res.status(400).json({ error: 'No puedes transferirte a ti mismo\nPor favor, vuelve a iniciar la operación' });
     }
 
     const userFrom = await getOrCreateUser(parseInt(from));
