@@ -911,8 +911,7 @@ bot.command('referidos', async (ctx) => {
 bot.command('ayuda', async (ctx) => {
     await safeEdit(ctx,
         '📩 <b>¿Tienes dudas o necesitas ayuda?</b>\n\n' +
-        'Puedes escribir directamente en este chat. Tu mensaje será recibido por nuestro equipo de soporte y te responderemos a la mayor brevedad.\n\n' +
-        'También puedes consultar la sección de preguntas frecuentes en nuestra WebApp.',
+        'Puedes escribir directamente en este chat. Tu mensaje será recibido por nuestro equipo de soporte y te responderemos a la mayor brevedad.\n\n',
         Markup.inlineKeyboard([[Markup.button.callback('◀ Volver al inicio', 'main')]])
     );
 });
@@ -1334,8 +1333,7 @@ bot.action('referrals', async (ctx) => {
 bot.action('how_to_play', async (ctx) => {
     await safeEdit(ctx,
         '📩 <b>¿Necesitas ayuda?</b>\n\n' +
-        'Puedes escribirnos directamente en este chat. Nuestro equipo de soporte te responderá a la mayor brevedad.\n\n' +
-        'También puedes consultar la sección de preguntas frecuentes en nuestra Web-App.',
+        'Puedes escribirnos directamente en este chat. Nuestro equipo de soporte te responderá a la mayor brevedad.\n\n',
         Markup.inlineKeyboard([[Markup.button.callback('◀ Volver al inicio', 'main')]])
     );
 });
@@ -2193,8 +2191,7 @@ bot.on(message('text'), async (ctx) => {
         } else if (text === '❓ Cómo jugar') {
             await safeEdit(ctx,
                 '📩 <b>¿Necesitas ayuda?</b>\n\n' +
-                'Puedes escribirnos directamente en este chat. Nuestro equipo de soporte te responderá a la mayor brevedad.\n\n' +
-                'También puedes consultar la sección de preguntas frecuentes en nuestra Web-App.',
+                'Puedes escribirnos directamente en este chat. Nuestro equipo de soporte te responderá a la mayor brevedad.\n\n',
                 Markup.inlineKeyboard([[Markup.button.callback('◀ Volver al inicio', 'main')]])
             );
             return;
