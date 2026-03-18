@@ -255,7 +255,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency) {
                 rateUSD,
                 cupDebit: 0,
                 usdDebit: 0,
-                errorMessage: `Saldo USD insuficiente. Disponible: ${usdBalance.toFixed(2)} USD, necesitas ${parsedAmount.toFixed(2)} USD.`
+                errorMessage: `Saldo USD insuficiente. Por favor, recarga.`
             };
         }
 
@@ -1170,14 +1170,14 @@ app.post('/api/bets', async (req, res) => {
         let newCup = safe(userAfterRefund.cup);
 
         if (totalUSD > 0) {
-            if (newUsd < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente para la edición. No se usa CUP para apostar en USD.' });
+            if (newUsd < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente para la edición. Por favor. racarga' });
             newUsd -= totalUSD;
         }
 
         if (totalCUP > 0) {
             // Permitir usar bono en CUP además del saldo CUP
             const availableCupTotal = newCup + newBonus;
-            if (availableCupTotal < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente para la edición' });
+            if (availableCupTotal < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente para la edición. Por favor, recarga' });
             if (newCup >= totalCUP) {
                 newCup -= totalCUP;
             } else {
@@ -1205,14 +1205,14 @@ app.post('/api/bets', async (req, res) => {
     let newCup = safe(user.cup);
 
     if (totalUSD > 0) {
-        if (newUsd < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente. No se usa CUP para apostar en USD.' });
+        if (newUsd < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente. Por favor, recarga.' });
         newUsd -= totalUSD;
     }
 
     if (totalCUP > 0) {
         // Permitir usar bono en CUP además del saldo CUP
         const availableCupTotal = newCup + newBonus;
-        if (availableCupTotal < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente' });
+        if (availableCupTotal < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente. Por favor, recarga' });
         if (newCup >= totalCUP) {
             newCup -= totalCUP;
         } else {
