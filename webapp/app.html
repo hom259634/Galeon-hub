@@ -470,6 +470,10 @@
                     <div id="transferSection" class="hidden mt-6">
                         <h4 class="text-lg font-semibold mb-3">🔄 Transferir saldo</h4>
                         <p class="text-xs text-gray-400 mb-2">⚠️ Solo puedes transferir CUP o USD. El bono de bienvenida no es transferible.</p>
+                        <div class="text-xs text-gray-300 mb-3">
+                            <strong>CUP Mín:</strong> <span id="transferMinCup">-</span>&nbsp;&nbsp;&nbsp;&nbsp;
+                            <strong>USD Mín:</strong> <span id="transferMinUsd">-</span>
+                        </div>
                         <input type="text" id="transferTarget" placeholder="@usuario o ID de Telegram" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
                         
                         <select id="transferCurrency" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
@@ -820,12 +824,12 @@
             line = line.trim().toLowerCase();
             if (!line) return [];
 
-            const match = line.match(/^([\d\s,]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup)?$/i);
+            const match = line.match(/^([\d\s,]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup|usdt|trx|mlc)$/i);
             if (!match) return [];
 
             let numerosStr = match[1].trim();
             const montoStr = match[2];
-            const moneda = (match[3] || 'usd').toLowerCase();
+            const moneda = match[3].toLowerCase();
 
             const numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
             const montoBase = parseFloat(montoStr);
@@ -902,7 +906,7 @@
                 const usdEquivalentCup = (totalUSD * exchangeRates.rate).toFixed(2);
                 betPreview.innerHTML = `💰 Total: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD<br>${totalCUP > 0 ? `(equivale a ${cupEquivalentUsd} USD)` : ''} ${totalUSD > 0 ? `(equivale a ${usdEquivalentCup} CUP)` : ''}`;
             } else {
-                betPreview.innerHTML = '❌ Formato no válido';
+                betPreview.innerHTML = 'Formato inválido. Debe ser monto moneda (ej: 50 cup o 1 usd).';
             }
         });
 
@@ -913,7 +917,7 @@
             
             const parsed = parseBetMessage(rawText, selectedBetType);
             if (!parsed.ok) {
-                iziToast.warning({ message: 'Formato de jugada inválido' });
+                iziToast.warning({ message: 'Formato inválido. Debe ser monto moneda (ej: 50 cup o 1 usd).' });
                 return;
             }
 
@@ -1156,10 +1160,40 @@
                         depositMethodLimits.innerHTML = '';
                     }
                 });
+                // Actualizar los mínimos de transferencia (usar mínimos de depósito por moneda)
+                updateTransferMins();
             } catch (e) { 
                 console.error('loadDepositMethods', e);
                 iziToast.error({ message: 'Error al cargar métodos de depósito' });
             }
+        }
+
+        function updateTransferMins() {
+            const elCup = document.getElementById('transferMinCup');
+            const elUsd = document.getElementById('transferMinUsd');
+            let cupMin = '-';
+            let usdMin = '-';
+
+            if (depositMethods && depositMethods.length > 0) {
+                const cupMethods = depositMethods.filter(m => (m.currency || '').toUpperCase() === 'CUP');
+                if (cupMethods.length > 0) {
+                    const method = cupMethods.reduce((a, b) => (a.id > b.id ? a : b));
+                    if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
+                        cupMin = parseFloat(method.min_amount).toFixed(2);
+                    }
+                }
+
+                const usdMethods = depositMethods.filter(m => (m.currency || '').toUpperCase() === 'USD');
+                if (usdMethods.length > 0) {
+                    const method = usdMethods.reduce((a, b) => (a.id > b.id ? a : b));
+                    if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
+                        usdMin = parseFloat(method.min_amount).toFixed(2);
+                    }
+                }
+            }
+
+            if (elCup) elCup.innerText = cupMin;
+            if (elUsd) elUsd.innerText = usdMin;
         }
 
         async function loadWithdrawMethods() {
