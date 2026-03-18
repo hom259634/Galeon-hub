@@ -216,6 +216,31 @@ function clearPendingFlow(session) {
     return cleared;
 }
 
+function hasPendingFlow(session) {
+    if (!session) return false;
+    const pendingKeys = [
+        'supportReplyTo',
+        'awaitingBet', 'betType', 'lottery', 'sessionId',
+        'awaitingDepositPhoto', 'awaitingDepositAmount', 'depositMethod', 'depositPhotoBuffer',
+        'awaitingWithdrawAmount', 'withdrawMethod', 'withdrawAmount', 'withdrawCurrency',
+        'awaitingWithdrawWallet', 'withdrawWallet',
+        'awaitingWithdrawNetwork', 'withdrawNetwork',
+        'awaitingWithdrawAccount',
+        'awaitingTransferTarget', 'transferTarget', 'awaitingTransferAmount',
+        'adminAction', 'adminStep',
+        'adminTempName', 'adminTempCurrency', 'adminTempCard',
+        'editMethodId', 'editMethodType', 'editStep', 'editField',
+        'priceStep', 'priceTempMultiplier', 'priceTempMinCup',
+        'minStep', 'minTempCup', 'minTempUsd', 'maxTempCup',
+        'winningSessionId',
+        'withdrawRequest'
+    ];
+    for (const key of pendingKeys) {
+        if (Object.prototype.hasOwnProperty.call(session, key)) return true;
+    }
+    return false;
+}
+
 async function getExchangeRates() {
     const { data } = await supabase
         .from('exchange_rate')
@@ -316,6 +341,7 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
     const totalAvailableCUP = cupBalance + (usdBalance * rateUSD);
 
     if (amountCUP <= 0 || totalAvailableCUP < amountCUP) {
+        const availableInCurrency = await convertFromCUP(totalAvailableCUP, currency);
         return {
             ok: false,
             amountCUP,
@@ -324,7 +350,8 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
             usdBalance,
             rateUSD,
             cupDebit: 0,
-            usdDebit: 0
+            usdDebit: 0,
+            errorMessage: `Saldo insuficiente en ${currency}. Disponible: ${availableInCurrency.toFixed(2)} ${currency}`
         };
     }
 
@@ -361,7 +388,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency) {
                 rateUSD,
                 cupDebit: 0,
                 usdDebit: 0,
-                errorMessage: `Saldo USD insuficiente. Disponible: ${usdBalance.toFixed(2)} USD, necesitas ${parsedAmount.toFixed(2)} USD.`
+                errorMessage: `Saldo insuficiente en USD. Disponible: ${usdBalance.toFixed(2)} USD`
             };
         }
 
@@ -3072,7 +3099,8 @@ bot.on(message('text'), async (ctx) => {
 
     // 4. Si no hay ningún flujo activo, se trata como mensaje de soporte
     // Solo si el usuario no es admin (para evitar que los admins se envíen soporte a sí mismos)
-    if (!isAdmin(uid)) {
+    // Si hay un flujo pendiente en `session`, NO reenviamos a soporte (evitar colisiones entre flujos)
+    if (!isAdmin(uid) && !hasPendingFlow(session)) {
         // Reenviar a todos los admins
         for (const adminId of ADMIN_IDS) {
             try {
