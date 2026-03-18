@@ -923,11 +923,11 @@
             const maxUsd = price.max_usd;
             for (const item of parsed.items) {
                 if (maxCup !== null && item.cup > maxCup) {
-                    iziToast.error({ message: `Cada jugada en CUP no puede exceder ${maxCup} CUP.` });
+                    iziToast.error({ message: `Cada jugada en CUP no puede exceder de ${maxCup} CUP.` });
                     return;
                 }
                 if (maxUsd !== null && item.usd > maxUsd) {
-                    iziToast.error({ message: `Cada jugada en USD no puede exceder ${maxUsd} USD.` });
+                    iziToast.error({ message: `Cada jugada en USD no puede exceder de ${maxUsd} USD.` });
                     return;
                 }
             }
