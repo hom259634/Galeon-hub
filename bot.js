@@ -250,6 +250,57 @@ async function getExchangeRateMLC() {
     return rates.rate_mlc;
 }
 
+// ========== RETIRO: PLANTILLAS POR MONEDA ==========
+const withdrawalTemplates = {
+    CUP: {
+        messages: [
+            "Retiro CUP\nMínimo: {min} {currency}\n\nPor favor, ingresa tu tarjeta CUP",
+            "Retiro CUP\n\nIndica tu móvil a confirmar",
+            "Retiro CUP\nMínimo: {min} {currency}\n🇨🇺 CUP real disponible: {balance} (para el que tiene USD este debe ser el saldo sumado ya de los dos saldos)\nEscribe el monto que deseas retirar en {currency} (ej: 600 para 600 {currency})."
+        ]
+    },
+    USDT: {
+        messages: [
+            "Retirar USDT\nMínimo: {min} {currency}\n\nPor favor, ingresa tu wallet USDT",
+            "Retirar USDT\n\nIndica tu red",
+            "Retirar USDT\nMínimo: {min} {currency}\n🪙 USDT real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
+        ]
+    },
+    USD: {
+        messages: [
+            "Retiro USD\nMínimo: {min} {currency}\n\nPor favor, indica los datos para recibir USD (ej: cuenta, teléfono)",
+            "Retiro USD\n\nIndica los datos que prefieres usar para confirmar el retiro",
+            "Retiro USD\nMínimo: {min} {currency}\n💵 USD real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
+        ]
+    },
+    TRX: {
+        messages: [
+            "Retirar TRX\nMínimo: {min} {currency}\n\nPor favor, ingresa tu wallet TRX",
+            "Retirar TRX\n\nIndica tu red (ej: TRC-20)",
+            "Retirar TRX\nMínimo: {min} {currency}\n🪙 TRX real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 100 para 100 {currency})."
+        ]
+    },
+    MLC: {
+        messages: [
+            "Retiro MLC\nMínimo: {min} {currency}\n\nPor favor, indica los datos para recibir MLC (ej: cuenta, teléfono)",
+            "Retiro MLC\n\nIndica los datos que prefieres usar para confirmar el retiro",
+            "Retiro MLC\nMínimo: {min} {currency}\n💳 MLC real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 1 para 1 {currency})."
+        ]
+    }
+    // Puedes agregar más monedas siguiendo el mismo patrón
+};
+
+function getWithdrawalTemplate(currency, balance, min, currencyLabel) {
+    const tpl = withdrawalTemplates[currency];
+    if (!tpl) return null;
+    return tpl.messages.map(m => m
+        .replace(/{balance}/g, typeof balance !== 'undefined' ? String(balance) : '0.00')
+        .replace(/{min}/g, typeof min !== 'undefined' ? String(min) : String(tpl.minimum))
+        .replace(/{currency}/g, currencyLabel || currency)
+    );
+}
+
+
 async function setExchangeRateUSD(rate) {
     await supabase
         .from('exchange_rate')
@@ -1076,7 +1127,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada combinación de dos números de 2 dígitos separados por "x".\n` +
                 `<b>Formato:</b> <code>17x32 con 1 cup</code>  o  <code>17x62*2cup</code>\n\n` +
-                `Ejemplo:\n17x32 con 1 cup\n17x62*2 cup\n32x62 con 5 usd\n\n` +
+                `Ejemplo:\n17x32 con 1 cup\n17x62*2 cup\n32x62 con 0.5 usd\n\n` +
                 `💭 <b>Escribe tus parles:</b>`;
             break;
     }
@@ -1202,20 +1253,25 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
     ctx.session.awaitingWithdrawAmount = true;
 
     const user = ctx.dbUser;
-    const minWithdraw = await getMinWithdrawUSD();
+    // Obtener mínimo desde el método de retiro en la BD (sin mínimos globales)
+    const methodMin = method.min_amount !== null && method.min_amount !== undefined ? parseFloat(method.min_amount) : 0;
 
     let saldoEnMoneda = 0;
     let mensajeSaldo = '';
+    let balanceForTemplate = '0.00';
     if (method.currency === 'CUP') {
         saldoEnMoneda = parseFloat(user.cup) || 0;
         mensajeSaldo = `🇨🇺 CUP real: ${saldoEnMoneda.toFixed(2)}`;
+        balanceForTemplate = saldoEnMoneda.toFixed(2);
     } else if (method.currency === 'USD') {
         saldoEnMoneda = parseFloat(user.usd) || 0;
         mensajeSaldo = `💵 USD real: ${saldoEnMoneda.toFixed(2)}`;
+        balanceForTemplate = saldoEnMoneda.toFixed(2);
     } else {
         const cupBalance = parseFloat(user.cup) || 0;
         const equivalente = await convertFromCUP(cupBalance, method.currency);
         mensajeSaldo = `💰 Tienes ${cupBalance.toFixed(2)} CUP (equivalente a ${equivalente.toFixed(2)} ${method.currency})`;
+        balanceForTemplate = equivalente.toFixed(2);
     }
 
     let instruccionesAdicionales = '';
@@ -1227,17 +1283,30 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
             `- Asegúrate de usar la red correcta para evitar pérdidas.`;
     }
 
-    await safeEdit(ctx,
-        `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n\n` +
-        `💳 <b>Instrucciones:</b> ${method.confirm}\n\n` +
-        `${mensajeSaldo}\n\n` +
-        `⏳ <b>Mínimo de retiro aceptado:</b> ${minWithdraw} ${method.currency}.\n` +
-        (method.min_amount ? `📉 Límite mínimo: ${method.min_amount} ${method.currency}\n` : '') +
-        (method.max_amount ? `📈 Límite máximo: ${method.max_amount} ${method.currency}\n` : '') +
-        `\nPor favor, escribe el <b>monto que deseas retirar</b> en ${method.currency} (ej: <code>500</code> para 500 ${method.currency}).` +
-        instruccionesAdicionales,
-        null
-    );
+    // Intentar obtener plantilla específica para la moneda
+    const templates = getWithdrawalTemplate(method.currency, balanceForTemplate, methodMin, method.currency);
+    if (templates && templates.length >= 3) {
+        // Enviar la plantilla en tres partes (manteniendo el encabezado editable)
+        await safeEdit(ctx,
+            `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n\n` + templates[0],
+            null
+        );
+        try { await ctx.reply(templates[1], { parse_mode: 'HTML' }); } catch (e) {}
+        try { await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' }); } catch (e) {}
+    } else {
+        // Fallback al mensaje anterior si no hay plantilla
+        await safeEdit(ctx,
+            `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n\n` +
+            `💳 <b>Instrucciones:</b> ${method.confirm}\n\n` +
+            `${mensajeSaldo}\n\n` +
+            `⏳ <b>Mínimo de retiro aceptado:</b> ${methodMin} ${method.currency}.\n` +
+            (method.min_amount ? `📉 Límite mínimo: ${method.min_amount} ${method.currency}\n` : '') +
+            (method.max_amount ? `📈 Límite máximo: ${method.max_amount} ${method.currency}\n` : '') +
+            `\nPor favor, escribe el <b>monto que deseas retirar</b> en ${method.currency} (ej: <code>500</code> para 500 ${method.currency}).` +
+            instruccionesAdicionales,
+            null
+        );
+    }
 });
 
 bot.action('transfer', async (ctx) => {
@@ -2662,9 +2731,14 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        const minWithdraw = await getMinWithdrawUSD();
-        if (amount < minWithdraw) {
-            await ctx.reply(`❌ El monto mínimo de retiro aceptado es ${minWithdraw} ${currency}.`, getMainKeyboard(ctx));
+        // Usar exclusivamente el mínimo configurado en el método (sin mínimos globales ni fallbacks)
+        const methodMin = method.min_amount !== null && method.min_amount !== undefined ? parseFloat(method.min_amount) : null;
+        if (methodMin === null) {
+            await ctx.reply('❌ El método de retiro seleccionado no tiene un mínimo configurado. Contacta al administrador.', getMainKeyboard(ctx));
+            return;
+        }
+        if (amount < methodMin) {
+            await ctx.reply(`❌ Monto mínimo: ${methodMin} ${currency}`, getMainKeyboard(ctx));
             return;
         }
 
@@ -2694,8 +2768,7 @@ bot.on(message('text'), async (ctx) => {
             const rate = await getExchangeRateUSD();
             amountUSD = amount / rate;
         } else if (currency === 'USDT' || currency === 'TRX' || currency === 'MLC') {
-            // Si tienes tasas específicas para estas monedas, cámbialo aquí
-            // Por ahora, asumimos 1:1 con USD
+            // Por ahora asumimos 1:1 con USD
             amountUSD = amount;
         }
 
