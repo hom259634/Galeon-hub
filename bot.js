@@ -216,31 +216,6 @@ function clearPendingFlow(session) {
     return cleared;
 }
 
-function hasPendingFlow(session) {
-    if (!session) return false;
-    const pendingKeys = [
-        'supportReplyTo',
-        'awaitingBet', 'betType', 'lottery', 'sessionId',
-        'awaitingDepositPhoto', 'awaitingDepositAmount', 'depositMethod', 'depositPhotoBuffer',
-        'awaitingWithdrawAmount', 'withdrawMethod', 'withdrawAmount', 'withdrawCurrency',
-        'awaitingWithdrawWallet', 'withdrawWallet',
-        'awaitingWithdrawNetwork', 'withdrawNetwork',
-        'awaitingWithdrawAccount',
-        'awaitingTransferTarget', 'transferTarget', 'awaitingTransferAmount',
-        'adminAction', 'adminStep',
-        'adminTempName', 'adminTempCurrency', 'adminTempCard',
-        'editMethodId', 'editMethodType', 'editStep', 'editField',
-        'priceStep', 'priceTempMultiplier', 'priceTempMinCup',
-        'minStep', 'minTempCup', 'minTempUsd', 'maxTempCup',
-        'winningSessionId',
-        'withdrawRequest'
-    ];
-    for (const key of pendingKeys) {
-        if (Object.prototype.hasOwnProperty.call(session, key)) return true;
-    }
-    return false;
-}
-
 async function getExchangeRates() {
     const { data } = await supabase
         .from('exchange_rate')
@@ -1077,7 +1052,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `También puedes usar <b>D</b> (decena) o <b>T</b> (terminal):\n` +
                 `- <code>D2 con 5 cup</code> significa TODOS los números que empiezan con 2 (20-29). El costo se multiplica por 10.\n` +
                 `- <code>T5 con 1 cup</code> significa TODOS los números que terminan con 5 (05,15,...,95). El costo se multiplica por 10.\n\n` +
-                `Ejemplos:\n12 con 1 cup\n09 10 34 con 50 cup\nD2 con 5 cup\nT5*1cup\n34*2 cup\n\n` +
+                `Ejemplos:\n12 con 1 cup\n09 10 34 con 50 cup\nD2 con 2usd\nT5*1usd\n34*2 cup\n\n` +
                 `💭 <b>Escribe tus jugadas (una o varias líneas):</b>`;
             break;
         case 'corridos':
@@ -1085,7 +1060,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada número de 2 DÍGITOS, o varios separados.\n` +
                 `<b>Formato:</b> <code>17 con 1 cup</code>  o  <code>32 33*0.5cup</code>\n\n` +
-                `Ejemplo:\n17 con 1 cup\n32 33*0.5 cup\n62 con 10 cup\n\n` +
+                `Ejemplo:\n17 con 1 cup\n32 33*0.5 cup\n62 con 5 usd\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'centena':
@@ -1093,7 +1068,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada número de 3 DÍGITOS, o varios separados.\n` +
                 `<b>Formato:</b> <code>517 con 2 cup</code>  o  <code>019 123*1cup</code>\n\n` +
-                `Ejemplo:\n517 con 2 cup\n019 123*1 cup\n123 con 5 cup\n\n` +
+                `Ejemplo:\n517 con 2 cup\n019 123*1 cup\n123 con 5 usd\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'parle':
@@ -1101,7 +1076,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada combinación de dos números de 2 dígitos separados por "x".\n` +
                 `<b>Formato:</b> <code>17x32 con 1 cup</code>  o  <code>17x62*2cup</code>\n\n` +
-                `Ejemplo:\n17x32 con 1 cup\n17x62*2 cup\n32x62 con 5 cup\n\n` +
+                `Ejemplo:\n17x32 con 1 cup\n17x62*2 cup\n32x62 con 5 usd\n\n` +
                 `💭 <b>Escribe tus parles:</b>`;
             break;
     }
@@ -3099,8 +3074,7 @@ bot.on(message('text'), async (ctx) => {
 
     // 4. Si no hay ningún flujo activo, se trata como mensaje de soporte
     // Solo si el usuario no es admin (para evitar que los admins se envíen soporte a sí mismos)
-    // Si hay un flujo pendiente en `session`, NO reenviamos a soporte (evitar colisiones entre flujos)
-    if (!isAdmin(uid) && !hasPendingFlow(session)) {
+    if (!isAdmin(uid)) {
         // Reenviar a todos los admins
         for (const adminId of ADMIN_IDS) {
             try {
