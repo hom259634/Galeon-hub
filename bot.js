@@ -547,12 +547,12 @@ function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
     if (!line) return [];
 
-    const match = line.match(/^([\d\s,]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup)?$/i);
+    const match = line.match(/^([\d\s,]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup)$/i);
     if (!match) return [];
 
     let numerosStr = match[1].trim();
     const montoStr = match[2];
-    const moneda = (match[3] || 'usd').toLowerCase();
+    const moneda = match[3].toLowerCase();
 
     const numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
     const montoBase = parseFloat(montoStr);
@@ -1111,7 +1111,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada número de 2 DÍGITOS, o varios separados.\n` +
                 `<b>Formato:</b> <code>17 con 1 cup</code>  o  <code>32 33*0.5cup</code>\n\n` +
-                `Ejemplo:\n17 con 1 cup\n32 33*0.5 cup\n62 con 5 usd\n\n` +
+                `Ejemplo:\n17 con 1 cup\n32 33*0.5 cup\n62 con 1 usd\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'centena':
@@ -1119,7 +1119,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada número de 3 DÍGITOS, o varios separados.\n` +
                 `<b>Formato:</b> <code>517 con 2 cup</code>  o  <code>019 123*1cup</code>\n\n` +
-                `Ejemplo:\n517 con 2 cup\n019 123*1 cup\n123 con 5 usd\n\n` +
+                `Ejemplo:\n517 con 2 cup\n019 123*1 cup\n123 con 1 usd\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'parle':
@@ -1127,7 +1127,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada combinación de dos números de 2 dígitos separados por "x".\n` +
                 `<b>Formato:</b> <code>17x32 con 1 cup</code>  o  <code>17x62*2cup</code>\n\n` +
-                `Ejemplo:\n17x32 con 1 cup\n17x62*2 cup\n32x62 con 0.5 usd\n\n` +
+                `Ejemplo:\n17x32 con 1 cup\n17x62*2 cup\n32x62 con 1 usd\n\n` +
                 `💭 <b>Escribe tus parles:</b>`;
             break;
     }
@@ -3167,6 +3167,38 @@ bot.on(message('text'), async (ctx) => {
         try {
             const totalCUP = parseFloat(parsed.totalCUP || 0);
             const totalUSD = parseFloat(parsed.totalUSD || 0);
+
+            // Obtener los límites/configuración de precio para este tipo de jugada
+            const { data: price } = await supabase
+                .from('play_prices')
+                .select('payout_multiplier, min_cup, min_usd, max_cup, max_usd')
+                .eq('bet_type', betType)
+                .maybeSingle();
+
+            // Validar mínimos/máximos por item
+            for (const it of parsed.items) {
+                if (it.cup && it.cup > 0) {
+                    if (price && price.min_cup !== null && price.min_cup !== undefined && it.cup < parseFloat(price.min_cup)) {
+                        await ctx.reply(`❌ Monto por jugada inválido. Mínimo por jugada para ${betType} es ${price.min_cup} CUP.`, getMainKeyboard(ctx));
+                        return;
+                    }
+                    if (price && price.max_cup !== null && price.max_cup !== undefined && it.cup > parseFloat(price.max_cup)) {
+                        await ctx.reply(`❌ Monto por jugada inválido. Máximo por jugada para ${betType} es ${price.max_cup} CUP.`, getMainKeyboard(ctx));
+                        return;
+                    }
+                }
+                if (it.usd && it.usd > 0) {
+                    if (price && price.min_usd !== null && price.min_usd !== undefined && it.usd < parseFloat(price.min_usd)) {
+                        await ctx.reply(`❌ Monto por jugada inválido. Mínimo por jugada para ${betType} es ${price.min_usd} USD.`, getMainKeyboard(ctx));
+                        return;
+                    }
+                    if (price && price.max_usd !== null && price.max_usd !== undefined && it.usd > parseFloat(price.max_usd)) {
+                        await ctx.reply(`❌ Monto por jugada inválido. Máximo por jugada para ${betType} es ${price.max_usd} USD.`, getMainKeyboard(ctx));
+                        return;
+                    }
+                }
+            }
+
             const rate = await getExchangeRateUSD();
             const totalCUPEquivalent = totalCUP + (totalUSD * rate);
 
