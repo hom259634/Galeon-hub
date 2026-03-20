@@ -3199,25 +3199,30 @@ bot.on(message('text'), async (ctx) => {
                 }
             }
 
-            const rate = await getExchangeRateUSD();
-            const totalCUPEquivalent = totalCUP + (totalUSD * rate);
+            // Validar saldos por moneda por separado y debitar cada moneda sin combinar saldos.
+            const cupBalance = parseFloat(user.cup) || 0;
+            const usdBalance = parseFloat(user.usd) || 0;
 
-            // Validar saldo (usar saldo cruzado CUP+USD)
-            const debitPlan = await buildCrossCurrencyDebitPlan(user, totalCUPEquivalent, 'CUP');
-            if (!debitPlan.ok) {
-                await ctx.reply(`❌ ${debitPlan.errorMessage || 'Saldo insuficiente para realizar la jugada.'}`, getMainKeyboard(ctx));
+            if (totalCUP <= 0 && totalUSD <= 0) {
+                await ctx.reply('❌ No se detectó monto en CUP ni USD en la jugada.', getMainKeyboard(ctx));
                 return;
             }
 
-            // Aplicar débito al usuario
-            const updates = {};
-            if (debitPlan.cupDebit && debitPlan.cupDebit > 0) {
-                updates.cup = Math.max(0, (parseFloat(user.cup) || 0) - parseFloat(debitPlan.cupDebit));
+            if (totalCUP > 0 && cupBalance < totalCUP) {
+                await ctx.reply(`❌ Saldo insuficiente en CUP. Disponible: ${cupBalance.toFixed(2)} CUP.`, getMainKeyboard(ctx));
+                return;
             }
-            if (debitPlan.usdDebit && debitPlan.usdDebit > 0) {
-                updates.usd = Math.max(0, (parseFloat(user.usd) || 0) - parseFloat(debitPlan.usdDebit));
+
+            if (totalUSD > 0 && usdBalance < totalUSD) {
+                await ctx.reply(`❌ Saldo insuficiente en USD. Disponible: ${usdBalance.toFixed(2)} USD.`, getMainKeyboard(ctx));
+                return;
             }
-            updates.updated_at = new Date();
+
+            // Preparar objeto de actualización sólo con las monedas que cambian
+            const updates = { updated_at: new Date() };
+            if (totalCUP > 0) updates.cup = Math.max(0, cupBalance - totalCUP);
+            if (totalUSD > 0) updates.usd = Math.max(0, usdBalance - totalUSD);
+
             await supabase.from('users').update(updates).eq('telegram_id', uid);
 
             // Guardar la jugada
