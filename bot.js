@@ -2672,7 +2672,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(amountText);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: 50 cup o 1 usd).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
             return;
         }
 
@@ -3019,7 +3019,7 @@ bot.on(message('text'), async (ctx) => {
         const parsed = parseAmountWithCurrency(text);
         if (!parsed) {
             // Si el usuario pone un monto inválido, NO limpiar la sesión, solo pedir de nuevo
-            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: 50 cup o 1 usd).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: 500 cup o 10 usd).', getMainKeyboard(ctx));
             return;
         }
         const amount = parsed.amount;
@@ -3153,7 +3153,7 @@ bot.on(message('text'), async (ctx) => {
         const rawText = text;
         const parsed = parseBetMessage(rawText, betType);
         if (!parsed || !parsed.ok) {
-            await ctx.reply('❌ Formato inválido para jugadas. Ejemplo: "12 con 1 cup" o "09 10 34 con 50 cup". Intenta de nuevo.', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: 50 cup o 1 usd).', getMainKeyboard(ctx));
             return;
         }
 
