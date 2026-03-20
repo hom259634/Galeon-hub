@@ -3147,6 +3147,91 @@ bot.on(message('text'), async (ctx) => {
 
     // 4. Si no hay ningún flujo activo, se trata como mensaje de soporte
     // Solo si el usuario no es admin (para evitar que los admins se envíen soporte a sí mismos)
+    // --- Flujo: apuesta (awaitingBet) ---
+    if (session.awaitingBet) {
+        const betType = session.betType;
+        const rawText = text;
+        const parsed = parseBetMessage(rawText, betType);
+        if (!parsed || !parsed.ok) {
+            await ctx.reply('❌ Formato inválido para jugadas. Ejemplo: "12 con 1 cup" o "09 10 34 con 50 cup". Intenta de nuevo.', getMainKeyboard(ctx));
+            return;
+        }
+
+        const playSessionId = session.sessionId;
+        if (!playSessionId) {
+            await ctx.reply('❌ No se encontró la sesión de juego activa. Por favor inicia de nuevo con 🎲 Jugar.', getMainKeyboard(ctx));
+            delete session.awaitingBet;
+            return;
+        }
+
+        try {
+            const totalCUP = parseFloat(parsed.totalCUP || 0);
+            const totalUSD = parseFloat(parsed.totalUSD || 0);
+            const rate = await getExchangeRateUSD();
+            const totalCUPEquivalent = totalCUP + (totalUSD * rate);
+
+            // Validar saldo (usar saldo cruzado CUP+USD)
+            const debitPlan = await buildCrossCurrencyDebitPlan(user, totalCUPEquivalent, 'CUP');
+            if (!debitPlan.ok) {
+                await ctx.reply(`❌ ${debitPlan.errorMessage || 'Saldo insuficiente para realizar la jugada.'}`, getMainKeyboard(ctx));
+                return;
+            }
+
+            // Aplicar débito al usuario
+            const updates = {};
+            if (debitPlan.cupDebit && debitPlan.cupDebit > 0) {
+                updates.cup = Math.max(0, (parseFloat(user.cup) || 0) - parseFloat(debitPlan.cupDebit));
+            }
+            if (debitPlan.usdDebit && debitPlan.usdDebit > 0) {
+                updates.usd = Math.max(0, (parseFloat(user.usd) || 0) - parseFloat(debitPlan.usdDebit));
+            }
+            updates.updated_at = new Date();
+            await supabase.from('users').update(updates).eq('telegram_id', uid);
+
+            // Guardar la jugada
+            const { data: betInserted, error: betError } = await supabase
+                .from('bets')
+                .insert({
+                    user_id: uid,
+                    session_id: playSessionId,
+                    bet_type: betType,
+                    items: parsed.items,
+                    cost_cup: totalCUP,
+                    cost_usd: totalUSD,
+                    raw_text: rawText,
+                    lottery: session.lottery || null,
+                    placed_at: new Date()
+                })
+                .select()
+                .single();
+
+            if (betError) {
+                console.error('Error guardando jugada:', betError);
+                await ctx.reply('❌ Error al registrar la jugada. Por favor, intenta de nuevo más tarde.', getMainKeyboard(ctx));
+                return;
+            }
+
+            // Confirmación al usuario
+            let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
+                `🎰 Lotería: ${escapeHTML(session.lottery || 'N/D')}\n` +
+                `🔢 Tipo: ${escapeHTML(betType)}\n` +
+                `📋 Jugadas: ${escapeHTML(rawText)}\n` +
+                `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
+                `¡Buena suerte! 🍀`;
+
+            await ctx.reply(confirmMsg, { parse_mode: 'HTML' });
+
+            // Limpiar estado de apuesta
+            delete session.awaitingBet;
+            delete session.betType;
+            delete session.sessionId;
+            return;
+        } catch (e) {
+            console.error('Error procesando jugada:', e);
+            await ctx.reply('❌ Ocurrió un error al procesar la jugada. Intenta de nuevo.', getMainKeyboard(ctx));
+            return;
+        }
+    }
     if (!isAdmin(uid)) {
         // Reenviar a todos los admins
         for (const adminId of ADMIN_IDS) {
