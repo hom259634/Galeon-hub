@@ -139,7 +139,7 @@ function buildLastBetsText(bets) {
             `<pre>Lotería : ${lottery}\nTipo    : ${betType}\nJugada  : ${rawText}\nMonto   : ${cup} CUP / ${usd} USD\nHora    : ${date}</pre>\n`;
     });
 
-    text += '¿Quieres ver más? Puedes consultar el historial completo en la WebApp.';
+    text += '¿Quieres ver más? Puedes consultar el historial completo en la Web-App.';
     return text;
 }
 
@@ -1250,7 +1250,15 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
     }
 
     ctx.session.withdrawMethod = method;
-    ctx.session.awaitingWithdrawAmount = true;
+    // Inicializar el flujo de retiro según la moneda:
+    // - Para cripto: pedir wallet primero
+    // - Para CUP/USD/MLC: pedir datos de cuenta (tarjeta/telefono) en pasos separados
+    if (method.currency === 'USDT' || method.currency === 'TRX') {
+        ctx.session.awaitingWithdrawWallet = true;
+    } else {
+        // Primer paso para métodos no-cripto: pedir tarjeta / datos iniciales
+        ctx.session.awaitingWithdrawAccountCard = true;
+    }
 
     const user = ctx.dbUser;
     // Obtener mínimo desde el método de retiro en la BD (sin mínimos globales)
@@ -1285,14 +1293,12 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
 
     // Intentar obtener plantilla específica para la moneda
     const templates = getWithdrawalTemplate(method.currency, balanceForTemplate, methodMin, method.currency);
-    if (templates && templates.length >= 3) {
-        // Enviar la plantilla en tres partes (manteniendo el encabezado editable)
+    if (templates && templates.length >= 1) {
+        // Enviar solo el primer mensaje de la plantilla y continuar el flujo paso a paso
         await safeEdit(ctx,
             `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n\n` + templates[0],
             null
         );
-        try { await ctx.reply(templates[1], { parse_mode: 'HTML' }); } catch (e) {}
-        try { await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' }); } catch (e) {}
     } else {
         // Fallback al mensaje anterior si no hay plantilla
         await safeEdit(ctx,
@@ -2719,6 +2725,85 @@ bot.on(message('text'), async (ctx) => {
         return;
     }
 
+    // --- Flujo: retiro (pasos intermedios) ---
+    // Paso 1: tarjeta / dato inicial (awaitingWithdrawAccountCard)
+    if (session.awaitingWithdrawAccountCard) {
+        const card = text.trim();
+        if (!card) {
+            await ctx.reply('❌ El dato no puede estar vacío. Por favor, ingresa la tarjeta o dato solicitado.', getMainKeyboard(ctx));
+            return;
+        }
+        session.withdrawAccountCard = card;
+        delete session.awaitingWithdrawAccountCard;
+        session.awaitingWithdrawAccountMobile = true;
+
+        // Intentar usar plantilla para pedir el móvil si existe
+        const method = session.withdrawMethod;
+        const methodMin = method && method.min_amount !== null && method.min_amount !== undefined ? parseFloat(method.min_amount) : 0;
+        let balanceForTemplate = '0.00';
+        if (method) {
+            if (method.currency === 'CUP') {
+                const saldoEnMoneda = parseFloat(user.cup) || 0;
+                balanceForTemplate = saldoEnMoneda.toFixed(2);
+            } else if (method.currency === 'USD') {
+                const saldoEnMoneda = parseFloat(user.usd) || 0;
+                balanceForTemplate = saldoEnMoneda.toFixed(2);
+            } else {
+                const cupBalance = parseFloat(user.cup) || 0;
+                const equivalente = await convertFromCUP(cupBalance, method.currency);
+                balanceForTemplate = equivalente.toFixed(2);
+            }
+        }
+        const templates = method ? getWithdrawalTemplate(method.currency, balanceForTemplate, methodMin, method.currency) : null;
+        if (templates && templates.length >= 2) {
+            await ctx.reply(templates[1], { parse_mode: 'HTML' });
+        } else {
+            await ctx.reply('Retiro: \n\nIndica tu móvil a confirmar');
+        }
+        return;
+    }
+
+    // Paso 2: móvil / segundo dato (awaitingWithdrawAccountMobile)
+    if (session.awaitingWithdrawAccountMobile) {
+        const mobile = text.trim();
+        if (!mobile) {
+            await ctx.reply('❌ El móvil no puede estar vacío. Por favor, ingresa un número de móvil válido.', getMainKeyboard(ctx));
+            return;
+        }
+        session.withdrawAccountMobile = mobile;
+        delete session.awaitingWithdrawAccountMobile;
+        // Ahora pedir el monto
+        session.awaitingWithdrawAmount = true;
+
+        const method = session.withdrawMethod;
+        const methodMin = method && method.min_amount !== null && method.min_amount !== undefined ? parseFloat(method.min_amount) : 0;
+        let balanceForTemplate = '0.00';
+        if (method) {
+            if (method.currency === 'CUP') {
+                const saldoEnMoneda = parseFloat(user.cup) || 0;
+                balanceForTemplate = saldoEnMoneda.toFixed(2);
+            } else if (method.currency === 'USD') {
+                const saldoEnMoneda = parseFloat(user.usd) || 0;
+                balanceForTemplate = saldoEnMoneda.toFixed(2);
+            } else {
+                const cupBalance = parseFloat(user.cup) || 0;
+                const equivalente = await convertFromCUP(cupBalance, method.currency);
+                balanceForTemplate = equivalente.toFixed(2);
+            }
+        }
+        const templates = method ? getWithdrawalTemplate(method.currency, balanceForTemplate, methodMin, method.currency) : null;
+        let instruccionesAdicionales = '';
+        if (method && (method.currency === 'USDT' || method.currency === 'TRX')) {
+            instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
+        }
+        if (templates && templates.length >= 3) {
+            await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
+        } else {
+            await ctx.reply(`Escribe el monto que deseas retirar en ${method ? method.currency : ''} (ej: 600 para 600).` + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
+        }
+        return;
+    }
+
     // --- Flujo: retiro (awaitingWithdrawAmount) ---
     if (session.awaitingWithdrawAmount) {
         const amountText = text;
@@ -3209,12 +3294,12 @@ bot.on(message('text'), async (ctx) => {
             }
 
             if (totalCUP > 0 && cupBalance < totalCUP) {
-                await ctx.reply(`❌ Saldo insuficiente en CUP. Disponible: ${cupBalance.toFixed(2)} CUP.`, getMainKeyboard(ctx));
+                await ctx.reply(`❌ Saldo CUP insuficiente. Por favor, recarga.`, getMainKeyboard(ctx));
                 return;
             }
 
             if (totalUSD > 0 && usdBalance < totalUSD) {
-                await ctx.reply(`❌ Saldo insuficiente en USD. Disponible: ${usdBalance.toFixed(2)} USD.`, getMainKeyboard(ctx));
+                await ctx.reply(`❌ Saldo USD insuficiente. Por favor, recarga.`, getMainKeyboard(ctx));
                 return;
             }
 
