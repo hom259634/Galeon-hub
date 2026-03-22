@@ -547,7 +547,7 @@ function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
     if (!line) return [];
 
-    const match = line.match(/^([\d\s,]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup)$/i);
+    const match = line.match(/^([\d\s,xtd]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup|usdt|trx|mlc)$/i);
     if (!match) return [];
 
     let numerosStr = match[1].trim();
@@ -1102,16 +1102,16 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `<b>Formato:</b> <code>12 con 5 cup</code>  o  <code>09 10 34*2cup</code>\n` +
                 `También puedes usar <b>D</b> (decena) o <b>T</b> (terminal):\n` +
                 `- <code>D2 con 5 cup</code> significa TODOS los números que empiezan con 2 (20-29). El costo se multiplica por 10.\n` +
-                `- <code>T5 con 1 cup</code> significa TODOS los números que terminan con 5 (05,15,...,95). El costo se multiplica por 10.\n\n` +
-                `Ejemplos:\n12 con 1 cup\n09 10 34 con 50 cup\nD2 con 2usd\nT5*1usd\n34*2 cup\n\n` +
+                `- <code>T5 con 5 cup</code> significa TODOS los números que terminan con 5 (05,15,...,95). El costo se multiplica por 10.\n\n` +
+                `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 2usd\nT5*1usd\n34*2 cup\n\n` +
                 `💭 <b>Escribe tus jugadas (una o varias líneas):</b>`;
             break;
         case 'corridos':
             instructions = `🏃 <b>CORRIDOS</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada número de 2 DÍGITOS, o varios separados.\n` +
-                `<b>Formato:</b> <code>17 con 1 cup</code>  o  <code>32 33*0.5cup</code>\n\n` +
-                `Ejemplo:\n17 con 1 cup\n32 33*0.5 cup\n62 con 1 usd\n\n` +
+                `<b>Formato:</b> <code>17 con 5 cup</code>  o  <code>32 33*5cup</code>\n\n` +
+                `Ejemplo:\n17 con 5 cup\n32 33*5 cup\n62 con 1 usd\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'centena':
@@ -1119,15 +1119,15 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada número de 3 DÍGITOS, o varios separados.\n` +
                 `<b>Formato:</b> <code>517 con 2 cup</code>  o  <code>019 123*1cup</code>\n\n` +
-                `Ejemplo:\n517 con 2 cup\n019 123*1 cup\n123 con 1 usd\n\n` +
+                `Ejemplo:\n517 con 2 cup\n019 123*5 cup\n123 con 1 usd\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'parle':
             instructions = `🔒 <b>PARLE</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada combinación de dos números de 2 dígitos separados por "x".\n` +
-                `<b>Formato:</b> <code>17x32 con 1 cup</code>  o  <code>17x62*2cup</code>\n\n` +
-                `Ejemplo:\n17x32 con 1 cup\n17x62*2 cup\n32x62 con 1 usd\n\n` +
+                `<b>Formato:</b> <code>17x32 con 5 cup</code>  o  <code>17x62*2cup</code>\n\n` +
+                `Ejemplo:\n17x32 con 5 cup\n17x62*2 cup\n32x62 con 1 usd\n\n` +
                 `💭 <b>Escribe tus parles:</b>`;
             break;
     }
@@ -3242,7 +3242,7 @@ bot.on(message('text'), async (ctx) => {
         const rawText = text;
         const parsed = parseBetMessage(rawText, betType);
         if (!parsed || !parsed.ok) {
-            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: 50 cup o 1 usd).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Por favor, formula correctamente tu apuesta', getMainKeyboard(ctx));
             return;
         }
 
