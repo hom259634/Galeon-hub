@@ -256,7 +256,7 @@ const withdrawalTemplates = {
         messages: [
             "Retiro CUP\nMínimo: {min} {currency}\n\nPor favor, ingresa tu tarjeta CUP",
             "Retiro CUP\n\nIndica tu móvil a confirmar",
-            "Retiro CUP\nMínimo: {min} {currency}\n🇨🇺 CUP real disponible: {balance} (para el que tiene USD este debe ser el saldo sumado ya de los dos saldos)\nEscribe el monto que deseas retirar en {currency} (ej: 600 para 600 {currency})."
+            "Retiro CUP\nMínimo: {min} {currency}\n🇨🇺 CUP real disponible: {balance}\nEscribe el monto que deseas retirar en {currency} (ej: 600 para 600 {currency})."
         ]
     },
     USDT: {
@@ -1267,19 +1267,24 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
     let saldoEnMoneda = 0;
     let mensajeSaldo = '';
     let balanceForTemplate = '0.00';
-    if (method.currency === 'CUP') {
-        saldoEnMoneda = parseFloat(user.cup) || 0;
-        mensajeSaldo = `🇨🇺 CUP real: ${saldoEnMoneda.toFixed(2)}`;
-        balanceForTemplate = saldoEnMoneda.toFixed(2);
-    } else if (method.currency === 'USD') {
-        saldoEnMoneda = parseFloat(user.usd) || 0;
-        mensajeSaldo = `💵 USD real: ${saldoEnMoneda.toFixed(2)}`;
-        balanceForTemplate = saldoEnMoneda.toFixed(2);
+    // Calcular saldo real: sumar CUP + USD convertido a CUP, luego convertir al currency de la plantilla
+    const cupBalance0 = parseFloat(user.cup) || 0;
+    const usdBalance0 = parseFloat(user.usd) || 0;
+    const rateUSD0 = await getExchangeRateUSD();
+    const totalAvailableCUP0 = cupBalance0 + (usdBalance0 * rateUSD0);
+
+    if (method.currency === 'USD') {
+        // Para retiros en USD usar únicamente el saldo USD
+        balanceForTemplate = usdBalance0.toFixed(2);
+        mensajeSaldo = `💵 USD real disponible: ${usdBalance0.toFixed(2)}`;
     } else {
-        const cupBalance = parseFloat(user.cup) || 0;
-        const equivalente = await convertFromCUP(cupBalance, method.currency);
-        mensajeSaldo = `💰 Tienes ${cupBalance.toFixed(2)} CUP (equivalente a ${equivalente.toFixed(2)} ${method.currency})`;
-        balanceForTemplate = equivalente.toFixed(2);
+        const balanceConverted0 = await convertFromCUP(totalAvailableCUP0, method.currency);
+        balanceForTemplate = balanceConverted0.toFixed(2);
+        if (method.currency === 'CUP') {
+            mensajeSaldo = `🇨🇺 CUP real disponible: ${totalAvailableCUP0.toFixed(2)}`;
+        } else {
+            mensajeSaldo = `💰 Equivalente disponible: ${balanceConverted0.toFixed(2)} ${method.currency}`;
+        }
     }
 
     let instruccionesAdicionales = '';
@@ -2742,15 +2747,15 @@ bot.on(message('text'), async (ctx) => {
         const methodMin = method && method.min_amount !== null && method.min_amount !== undefined ? parseFloat(method.min_amount) : 0;
         let balanceForTemplate = '0.00';
         if (method) {
-            if (method.currency === 'CUP') {
-                const saldoEnMoneda = parseFloat(user.cup) || 0;
-                balanceForTemplate = saldoEnMoneda.toFixed(2);
-            } else if (method.currency === 'USD') {
-                const saldoEnMoneda = parseFloat(user.usd) || 0;
-                balanceForTemplate = saldoEnMoneda.toFixed(2);
+            const cupBalance = parseFloat(user.cup) || 0;
+            const usdBalance = parseFloat(user.usd) || 0;
+            const rateUSD = await getExchangeRateUSD();
+            const totalAvailableCUP = cupBalance + (usdBalance * rateUSD);
+            if (method.currency === 'USD') {
+                // Mostrar solo saldo USD para retiros en USD
+                balanceForTemplate = usdBalance.toFixed(2);
             } else {
-                const cupBalance = parseFloat(user.cup) || 0;
-                const equivalente = await convertFromCUP(cupBalance, method.currency);
+                const equivalente = await convertFromCUP(totalAvailableCUP, method.currency);
                 balanceForTemplate = equivalente.toFixed(2);
             }
         }
@@ -2779,15 +2784,14 @@ bot.on(message('text'), async (ctx) => {
         const methodMin = method && method.min_amount !== null && method.min_amount !== undefined ? parseFloat(method.min_amount) : 0;
         let balanceForTemplate = '0.00';
         if (method) {
-            if (method.currency === 'CUP') {
-                const saldoEnMoneda = parseFloat(user.cup) || 0;
-                balanceForTemplate = saldoEnMoneda.toFixed(2);
-            } else if (method.currency === 'USD') {
-                const saldoEnMoneda = parseFloat(user.usd) || 0;
-                balanceForTemplate = saldoEnMoneda.toFixed(2);
+            const cupBalance = parseFloat(user.cup) || 0;
+            const usdBalance = parseFloat(user.usd) || 0;
+            const rateUSD = await getExchangeRateUSD();
+            const totalAvailableCUP = cupBalance + (usdBalance * rateUSD);
+            if (method.currency === 'USD') {
+                balanceForTemplate = usdBalance.toFixed(2);
             } else {
-                const cupBalance = parseFloat(user.cup) || 0;
-                const equivalente = await convertFromCUP(cupBalance, method.currency);
+                const equivalente = await convertFromCUP(totalAvailableCUP, method.currency);
                 balanceForTemplate = equivalente.toFixed(2);
             }
         }
@@ -3260,25 +3264,25 @@ bot.on(message('text'), async (ctx) => {
                 .eq('bet_type', betType)
                 .maybeSingle();
 
-            // Validar mínimos/máximos por item
+            // Validar mínimos/máximos por número (por item)
             for (const it of parsed.items) {
                 if (it.cup && it.cup > 0) {
                     if (price && price.min_cup !== null && price.min_cup !== undefined && it.cup < parseFloat(price.min_cup)) {
-                        await ctx.reply(`❌ Monto por jugada inválido. Mínimo por jugada para ${betType} es ${price.min_cup} CUP.`, getMainKeyboard(ctx));
+                        await ctx.reply(`❌ Mínimo en CUP: ${parseFloat(price.min_cup).toFixed(2)}`, getMainKeyboard(ctx));
                         return;
                     }
                     if (price && price.max_cup !== null && price.max_cup !== undefined && it.cup > parseFloat(price.max_cup)) {
-                        await ctx.reply(`❌ Monto por jugada inválido. Máximo por jugada para ${betType} es ${price.max_cup} CUP.`, getMainKeyboard(ctx));
+                        await ctx.reply(`❌ Máximo en CUP: ${parseFloat(price.max_cup).toFixed(2)}`, getMainKeyboard(ctx));
                         return;
                     }
                 }
                 if (it.usd && it.usd > 0) {
                     if (price && price.min_usd !== null && price.min_usd !== undefined && it.usd < parseFloat(price.min_usd)) {
-                        await ctx.reply(`❌ Monto por jugada inválido. Mínimo por jugada para ${betType} es ${price.min_usd} USD.`, getMainKeyboard(ctx));
+                        await ctx.reply(`❌ Mínimo en USD: ${parseFloat(price.min_usd).toFixed(2)}`, getMainKeyboard(ctx));
                         return;
                     }
                     if (price && price.max_usd !== null && price.max_usd !== undefined && it.usd > parseFloat(price.max_usd)) {
-                        await ctx.reply(`❌ Monto por jugada inválido. Máximo por jugada para ${betType} es ${price.max_usd} USD.`, getMainKeyboard(ctx));
+                        await ctx.reply(`❌ Máximo en USD: ${parseFloat(price.max_usd).toFixed(2)}`, getMainKeyboard(ctx));
                         return;
                     }
                 }

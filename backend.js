@@ -1131,12 +1131,12 @@ app.post('/api/bets', async (req, res) => {
         const itUsd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
 
         if (itCup > 0) {
-            if (itCup < minCup) return res.status(400).json({ error: `Mínimo en CUP: ${minCup}` });
-            if (maxCup !== null && itCup > maxCup) return res.status(400).json({ error: `Máximo en CUP: ${maxCup}` });
+            if (itCup < minCup) return res.status(400).json({ error: `❌ Mínimo en CUP: ${parseFloat(minCup).toFixed(2)}` });
+            if (maxCup !== null && itCup > maxCup) return res.status(400).json({ error: `❌ Máximo en CUP: ${parseFloat(maxCup).toFixed(2)}` });
         }
         if (itUsd > 0) {
-            if (itUsd < minUsd) return res.status(400).json({ error: `Mínimo en USD: ${minUsd}` });
-            if (maxUsd !== null && itUsd > maxUsd) return res.status(400).json({ error: `Máximo en USD: ${maxUsd}` });
+            if (itUsd < minUsd) return res.status(400).json({ error: `❌ Mínimo en USD: ${parseFloat(minUsd).toFixed(2)}` });
+            if (maxUsd !== null && itUsd > maxUsd) return res.status(400).json({ error: `❌ Máximo en USD: ${parseFloat(maxUsd).toFixed(2)}` });
         }
     }
 
