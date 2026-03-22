@@ -921,18 +921,33 @@
                 return;
             }
 
-            // Validar límites máximos
+            // Validar mínimos/máximos por número (por item)
             const price = playPrices.find(p => p.bet_type === selectedBetType) || {};
+            const minCup = price.min_cup;
+            const minUsd = price.min_usd;
             const maxCup = price.max_cup;
             const maxUsd = price.max_usd;
             for (const item of parsed.items) {
-                if (maxCup !== null && item.cup > maxCup) {
-                    iziToast.error({ message: `Cada jugada en CUP no puede exceder de ${maxCup} CUP.` });
-                    return;
+                if (item.cup && item.cup > 0) {
+                    if (minCup !== null && minCup !== undefined && item.cup < minCup) {
+                        iziToast.error({ message: `❌ Mínimo en CUP: ${parseFloat(minCup).toFixed(2)}` });
+                        return;
+                    }
+                    if (maxCup !== null && maxCup !== undefined && item.cup > maxCup) {
+                        iziToast.error({ message: `❌ Máximo en CUP: ${parseFloat(maxCup).toFixed(2)}` });
+                        return;
+                    }
                 }
-                if (maxUsd !== null && item.usd > maxUsd) {
-                    iziToast.error({ message: `Cada jugada en USD no puede exceder de ${maxUsd} USD.` });
-                    return;
+
+                if (item.usd && item.usd > 0) {
+                    if (minUsd !== null && minUsd !== undefined && item.usd < minUsd) {
+                        iziToast.error({ message: `❌ Mínimo en USD: ${parseFloat(minUsd).toFixed(2)}` });
+                        return;
+                    }
+                    if (maxUsd !== null && maxUsd !== undefined && item.usd > maxUsd) {
+                        iziToast.error({ message: `❌ Máximo en USD: ${parseFloat(maxUsd).toFixed(2)}` });
+                        return;
+                    }
                 }
             }
 
