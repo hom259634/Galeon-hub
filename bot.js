@@ -1103,7 +1103,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `También puedes usar <b>D</b> (decena) o <b>T</b> (terminal):\n` +
                 `- <code>D2 con 5 cup</code> significa TODOS los números que empiezan con 2 (20-29). El costo se multiplica por 10.\n` +
                 `- <code>T5 con 5 cup</code> significa TODOS los números que terminan con 5 (05,15,...,95). El costo se multiplica por 10.\n\n` +
-                `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 2usd\nT5*1usd\n34*2 cup\n\n` +
+                `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 2 usd\nT5*1usd\n34*2 cup\n\n` +
                 `💭 <b>Escribe tus jugadas (una o varias líneas):</b>`;
             break;
         case 'corridos':
@@ -1127,7 +1127,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada combinación de dos números de 2 dígitos separados por "x".\n` +
                 `<b>Formato:</b> <code>17x32 con 5 cup</code>  o  <code>17x62*2cup</code>\n\n` +
-                `Ejemplo:\n17x63 con 10 cup\n91x56*10cup cup\n32x62 con 1 usd\n\n` +
+                `Ejemplo:\n17x63 con 10 cup\n91x56*10 cup\n32x62 con 1 usd\n\n` +
                 `💭 <b>Escribe tus parles:</b>`;
             break;
     }

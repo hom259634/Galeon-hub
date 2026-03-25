@@ -427,14 +427,25 @@ function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
     if (!line) return [];
 
-    const match = line.match(/^([\d\s,]+)\s*(?:con|\*)\s*([0-9.]+)\s*(cup|usd)?$/i);
+    const match = line.match(/^([\d\s,xtd]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup|usdt|trx|mlc)$/i);
     if (!match) return [];
 
     let numerosStr = match[1].trim();
     const montoStr = match[2];
-    const moneda = (match[3] || 'usd').toUpperCase();
+    const moneda = match[3].toUpperCase();
 
-    const numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
+    let numeros = [];
+    // Soportar 'parle' en formato '17x32' o '17 x 32'
+    if (betType === 'parle') {
+        const pairs = Array.from(numerosStr.matchAll(/(\d{2})\s*x\s*(\d{2})/gi));
+        if (pairs.length) {
+            numeros = pairs.map(p => `${p[1]}x${p[2]}`);
+        } else {
+            numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
+        }
+    } else {
+        numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
+    }
     const montoBase = parseFloat(montoStr);
     if (isNaN(montoBase) || montoBase <= 0) return [];
 
@@ -1138,6 +1149,15 @@ app.post('/api/bets', async (req, res) => {
             if (itUsd < minUsd) return res.status(400).json({ error: `❌ Mínimo en USD: ${parseFloat(minUsd).toFixed(2)}` });
             if (maxUsd !== null && itUsd > maxUsd) return res.status(400).json({ error: `❌ Máximo en USD: ${parseFloat(maxUsd).toFixed(2)}` });
         }
+    }
+
+    // Verificación temprana: asegurar que si la apuesta incluye CUP, el usuario
+    // tenga suficiente suma de `cup + bonus_cup` para cubrir el totalCUP.
+    const userCup = parseFloat(user.cup) || 0;
+    const userBonusCup = parseFloat(user.bonus_cup) || 0;
+    const availableCupNow = userCup + userBonusCup;
+    if (totalCUP > 0 && availableCupNow < totalCUP) {
+        return res.status(400).json({ error: 'Saldo CUP insuficiente. Por favor, recarga', debug: { userCup, userBonusCup, availableCupNow, totalCUP, parsed } });
     }
 
     // Helper para parsear floats seguros
