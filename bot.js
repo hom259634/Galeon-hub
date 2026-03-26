@@ -261,7 +261,7 @@ const withdrawalTemplates = {
     },
     USDT: {
         messages: [
-            "Retirar USDT\nMínimo: {min} {currency}\n\nPor favor, ingresa tu wallet USDT",
+            "Retirar USDT\nMínimo: {min} {currency}\n\n\nPor favor, ingresa tu wallet USDT",
             "Retirar USDT\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc. Asegúrate de usar la red correcta para evitar pérdidas)",
             "Retirar USDT\nMínimo: {min} {currency}\n🪙 USDT real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
         ]
@@ -284,15 +284,30 @@ const withdrawalTemplates = {
         messages: [
             "Retiro MLC\nMínimo: {min} MLC\n\n\nPor favor, ingresa tu tarjeta MLC",
             "Retiro MLC\n\n\nIndica tu móvil a confirmar",
-            "Retiro MLC\nMínimo: {min} MLC\n🏦 MLC real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en MLC (ej: 600 para 600 MLC)."
+            "Retiro MLC\nMínimo: {min} MLC\n🏦 MLC real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en MLC (ej: 10 para 10 MLC)."
         ]
     }
     // Puedes agregar más monedas siguiendo el mismo patrón
 };
 
 function getWithdrawalTemplate(currency, balance, min, currencyLabel) {
-    const key = String(currency || '').trim().toUpperCase();
-    const tpl = withdrawalTemplates[key];
+    const raw = String(currency || '').trim();
+    const key = raw.toUpperCase();
+    let tpl = withdrawalTemplates[key];
+
+    // If exact key not found, try tolerant matching (ignore punctuation, case, or small variants)
+    if (!tpl) {
+        const normalized = raw.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        for (const k of Object.keys(withdrawalTemplates)) {
+            const kn = k.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+            if (!kn) continue;
+            if (kn === normalized || kn === key || key.includes(kn) || kn.includes(key)) {
+                tpl = withdrawalTemplates[k];
+                break;
+            }
+        }
+    }
+
     if (!tpl || !Array.isArray(tpl.messages)) return null;
     const label = currencyLabel || key;
     return tpl.messages.map(m => (m || '')
@@ -2903,7 +2918,12 @@ bot.on(message('text'), async (ctx) => {
                                 `Red: ${escapeHTML(existingNetwork)}\n` +
                                 `Método: ${escapeHTML(method.name || '')}\n` +
                                 `ID solicitud: ${request.id}`,
-                                { parse_mode: 'HTML' }
+                                {
+                                    parse_mode: 'HTML',
+                                    reply_markup: Markup.inlineKeyboard([
+                                        [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`), Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
+                                    ]).reply_markup
+                                }
                             );
                         } catch (e) {}
                     }
@@ -2972,7 +2992,12 @@ bot.on(message('text'), async (ctx) => {
                                 `Cuenta: ${escapeHTML(accountInfo)}\n` +
                                 `Método: ${escapeHTML(method.name || '')}\n` +
                                 `ID solicitud: ${request.id}`,
-                                { parse_mode: 'HTML' }
+                                {
+                                    parse_mode: 'HTML',
+                                    reply_markup: Markup.inlineKeyboard([
+                                        [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`), Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
+                                    ]).reply_markup
+                                }
                             );
                         } catch (e) {}
                     }
@@ -3031,7 +3056,12 @@ bot.on(message('text'), async (ctx) => {
                                     `Cuenta: ${escapeHTML(accountInfo)}\n` +
                                     `Método: ${escapeHTML(method.name || '')}\n` +
                                     `ID solicitud: ${request.id}`,
-                                    { parse_mode: 'HTML' }
+                                    {
+                                        parse_mode: 'HTML',
+                                        reply_markup: Markup.inlineKeyboard([
+                                            [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`), Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
+                                        ]).reply_markup
+                                    }
                                 );
                             } catch (e) {}
                         }
@@ -3095,69 +3125,43 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('❌ La red no puede estar vacía. Por favor, ingresa la red.', getMainKeyboard(ctx));
             return;
         }
-        const wallet = session.withdrawWallet;
-        const amount = session.withdrawAmount;
-        const currency = session.withdrawCurrency;
+        // Save network in session and move to asking amount
+        session.withdrawNetwork = network;
+        delete session.awaitingWithdrawNetwork;
+        session.awaitingWithdrawAmount = true;
+
         const method = session.withdrawMethod;
-        const amountUSD = session.withdrawAmountUSD;
-
-        const accountInfo = `Wallet: ${wallet} (Red: ${network})`;
-
+        const methodMin = method && method.min_amount !== null && method.min_amount !== undefined ? parseFloat(method.min_amount) : 0;
+        // calcular saldo para plantilla
+        let balanceForTemplate = '0.00';
         try {
-            const { data: request, error } = await supabase
-                .from('withdraw_requests')
-                .insert({
-                    user_id: uid,
-                    method_id: method.id,
-                    amount: amount,
-                    currency: currency,
-                    account_info: accountInfo,
-                    status: 'pending',
-                    amount_usd: amountUSD
-                })
-                .select()
-                .single();
-
-            if (error) throw error;
-
-            for (const adminId of ADMIN_IDS) {
-                try {
-                    await bot.telegram.sendMessage(adminId,
-                        `📤 <b>Nueva solicitud de RETIRO (cripto)</b>\n` +
-                        `👤 Usuario: ${ctx.from.first_name} (${uid})\n` +
-                        `💰 Monto: ${amount} ${currency}\n` +
-                        `🏦 Método: ${escapeHTML(method.name)}\n` +
-                        `📞 Datos: ${escapeHTML(accountInfo)}\n` +
-                        `🆔 Solicitud: ${request.id}`,
-                        {
-                            parse_mode: 'HTML',
-                            reply_markup: Markup.inlineKeyboard([
-                                [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`),
-                                 Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
-                            ]).reply_markup
-                        }
-                    );
-                } catch (e) {}
+            const cupBalance = parseFloat(user.cup) || 0;
+            const usdBalance = parseFloat(user.usd) || 0;
+            const rateUSD = await getExchangeRateUSD();
+            const totalAvailableCUP = cupBalance + (usdBalance * rateUSD);
+            if (method) {
+                if (method.currency === 'USD') {
+                    balanceForTemplate = usdBalance.toFixed(2);
+                } else {
+                    const equivalente = await convertFromCUP(totalAvailableCUP, method.currency);
+                    balanceForTemplate = equivalente.toFixed(2);
+                }
             }
-            await ctx.reply(
-                `✅ <b>Solicitud de retiro enviada</b>\n` +
-                `💰 Monto: ${amount} ${currency}\n` +
-                `📞 Wallet: ${escapeHTML(wallet)}\n` +
-                `🔗 Red: ${escapeHTML(network)}\n` +
-                `⏳ Procesaremos tu solicitud a la mayor brevedad.`,
-                { parse_mode: 'HTML' }
-            );
         } catch (e) {
-            console.error(e);
-            await ctx.reply(`❌ Error al crear la solicitud: ${e.message}`, getMainKeyboard(ctx));
+            console.warn('Error calculando balance para plantilla:', e.message);
         }
 
-        delete session.withdrawWallet;
-        delete session.awaitingWithdrawNetwork;
-        delete session.withdrawMethod;
-        delete session.withdrawAmount;
-        delete session.withdrawCurrency;
-        delete session.withdrawAmountUSD;
+        const templates = method ? getWithdrawalTemplate(method.currency, balanceForTemplate, methodMin, method.currency) : null;
+        let instruccionesAdicionales = '';
+        if (method && (method.currency === 'USDT' || method.currency === 'TRX')) {
+            instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
+        }
+
+        if (templates && templates.length >= 3) {
+            await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
+        } else {
+            await ctx.reply(`Escribe el monto que deseas retirar en ${method ? method.currency : ''} (ej: 10 para 10).` + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
+        }
         return;
     }
 
