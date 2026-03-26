@@ -254,15 +254,15 @@ async function getExchangeRateMLC() {
 const withdrawalTemplates = {
     CUP: {
         messages: [
-            "Retiro CUP\nMínimo: {min} {currency}\n\nPor favor, ingresa tu tarjeta CUP",
-            "Retiro CUP\n\nIndica tu móvil a confirmar",
-            "Retiro CUP\nMínimo: {min} {currency}\n🇨🇺 CUP real disponible: {balance}\nEscribe el monto que deseas retirar en {currency} (ej: 600 para 600 {currency})."
+            "Retiro {currency}\nMínimo: {min} {currency}\n\nPor favor, ingresa tu tarjeta o dato para recibir {currency}",
+            "Retiro {currency}\n\nIndica tu móvil a confirmar",
+            "Retiro {currency}\nMínimo: {min} {currency}\n{currency} real disponible: {balance}\nEscribe el monto que deseas retirar en {currency} (ej: 600 para 600 {currency})."
         ]
     },
     USDT: {
         messages: [
             "Retirar USDT\nMínimo: {min} {currency}\n\nPor favor, ingresa tu wallet USDT",
-            "Retirar USDT\n\nIndica tu red",
+            "Retirar USDT\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc. Asegúrate de usar la red correcta para evitar pérdidas)",
             "Retirar USDT\nMínimo: {min} {currency}\n🪙 USDT real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
         ]
     },
@@ -276,15 +276,15 @@ const withdrawalTemplates = {
     TRX: {
         messages: [
             "Retirar TRX\nMínimo: {min} {currency}\n\nPor favor, ingresa tu wallet TRX",
-            "Retirar TRX\n\nIndica tu red (ej: TRC-20)",
+            "Retirar TRX\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20. Asegúrate de usar la red correcta para evitar pérdidas)",
             "Retirar TRX\nMínimo: {min} {currency}\n🪙 TRX real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 100 para 100 {currency})."
         ]
     },
     MLC: {
         messages: [
-            "Retiro MLC\nMínimo: {min} {currency}\n\nPor favor, indica los datos para recibir MLC (ej: cuenta, teléfono)",
-            "Retiro MLC\n\nIndica los datos que prefieres usar para confirmar el retiro",
-            "Retiro MLC\nMínimo: {min} {currency}\n💳 MLC real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 1 para 1 {currency})."
+            "Retiro {currency}\nMínimo: {min} {currency}\n\nPor favor, ingresa tu tarjeta o dato para recibir {currency}",
+            "Retiro {currency}\n\nIndica tu móvil a confirmar",
+            "Retiro {currency}\nMínimo: {min} {currency}\n{currency} real disponible: {balance}\nEscribe el monto que deseas retirar en {currency} (ej: 600 para 600 {currency})."
         ]
     }
     // Puedes agregar más monedas siguiendo el mismo patrón
@@ -1103,7 +1103,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `También puedes usar <b>D</b> (decena) o <b>T</b> (terminal):\n` +
                 `- <code>D2 con 5 cup</code> significa TODOS los números que empiezan con 2 (20-29). El costo se multiplica por 10.\n` +
                 `- <code>T5 con 5 cup</code> significa TODOS los números que terminan con 5 (05,15,...,95). El costo se multiplica por 10.\n\n` +
-                `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 2 usd\nT5*1usd\n34*2 cup\n\n` +
+                `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 2 usd\nT5*1 usd\n34*2 cup\n\n` +
                 `💭 <b>Escribe tus jugadas (una o varias líneas):</b>`;
             break;
         case 'corridos':
@@ -1127,7 +1127,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada combinación de dos números de 2 dígitos separados por "x".\n` +
                 `<b>Formato:</b> <code>17x32 con 5 cup</code>  o  <code>17x62*2cup</code>\n\n` +
-                `Ejemplo:\n17x63 con 10 cup\n91x56*10 cup\n32x62 con 1 usd\n\n` +
+                `Ejemplo:\n17x63 con 10 cup\n31x56 54x95 con 10 cup\n32x62 con 1 usd\n\n` +
                 `💭 <b>Escribe tus parles:</b>`;
             break;
     }
