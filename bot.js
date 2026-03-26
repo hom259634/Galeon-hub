@@ -254,9 +254,9 @@ async function getExchangeRateMLC() {
 const withdrawalTemplates = {
     CUP: {
         messages: [
-            "Retiro {currency}\nMínimo: {min} {currency}\n\nPor favor, ingresa tu tarjeta o dato para recibir {currency}",
-            "Retiro {currency}\n\nIndica tu móvil a confirmar",
-            "Retiro {currency}\nMínimo: {min} {currency}\n{currency} real disponible: {balance}\nEscribe el monto que deseas retirar en {currency} (ej: 600 para 600 {currency})."
+            "Retiro CUP\nMínimo: {min} CUP\n\n\nPor favor, ingresa tu tarjeta CUP",
+            "Retiro CUP\n\n\nIndica tu móvil a confirmar",
+            "Retiro CUP\nMínimo: {min} CUP\n🇨🇺 CUP real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en CUP (ej: 600 para 600 CUP)."
         ]
     },
     USDT: {
@@ -268,9 +268,9 @@ const withdrawalTemplates = {
     },
     USD: {
         messages: [
-            "Retiro USD\nMínimo: {min} {currency}\n\nPor favor, indica los datos para recibir USD (ej: cuenta, teléfono)",
-            "Retiro USD\n\nIndica los datos que prefieres usar para confirmar el retiro",
-            "Retiro USD\nMínimo: {min} {currency}\n💵 USD real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
+            "Retiro USD\nMínimo: {min} USD\n\n\nPor favor, ingresa tu tarjeta o dato para recibir USD",
+            "Retiro USD\n\n\nIndica tu móvil a confirmar",
+            "Retiro USD\nMínimo: {min} USD\n💵 USD real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en USD (ej: 10 para 10 USD)."
         ]
     },
     TRX: {
@@ -282,21 +282,23 @@ const withdrawalTemplates = {
     },
     MLC: {
         messages: [
-            "Retiro {currency}\nMínimo: {min} {currency}\n\nPor favor, ingresa tu tarjeta o dato para recibir {currency}",
-            "Retiro {currency}\n\nIndica tu móvil a confirmar",
-            "Retiro {currency}\nMínimo: {min} {currency}\n{currency} real disponible: {balance}\nEscribe el monto que deseas retirar en {currency} (ej: 600 para 600 {currency})."
+            "Retiro MLC\nMínimo: {min} MLC\n\n\nPor favor, ingresa tu tarjeta MLC",
+            "Retiro MLC\n\n\nIndica tu móvil a confirmar",
+            "Retiro MLC\nMínimo: {min} MLC\n💳 MLC real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en MLC (ej: 600 para 600 MLC)."
         ]
     }
     // Puedes agregar más monedas siguiendo el mismo patrón
 };
 
 function getWithdrawalTemplate(currency, balance, min, currencyLabel) {
-    const tpl = withdrawalTemplates[currency];
-    if (!tpl) return null;
-    return tpl.messages.map(m => m
+    const key = String(currency || '').trim().toUpperCase();
+    const tpl = withdrawalTemplates[key];
+    if (!tpl || !Array.isArray(tpl.messages)) return null;
+    const label = currencyLabel || key;
+    return tpl.messages.map(m => (m || '')
         .replace(/{balance}/g, typeof balance !== 'undefined' ? String(balance) : '0.00')
-        .replace(/{min}/g, typeof min !== 'undefined' ? String(min) : String(tpl.minimum))
-        .replace(/{currency}/g, currencyLabel || currency)
+        .replace(/{min}/g, typeof min !== 'undefined' ? String(min) : String(tpl.minimum || '0'))
+        .replace(/{currency}/g, label)
     );
 }
 
