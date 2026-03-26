@@ -1303,7 +1303,7 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
     if (templates && templates.length >= 1) {
         // Enviar solo el primer mensaje de la plantilla y continuar el flujo paso a paso
         await safeEdit(ctx,
-            `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n\n` + templates[0],
+            `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n` + templates[0],
             null
         );
     } else {
