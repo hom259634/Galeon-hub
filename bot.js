@@ -284,7 +284,7 @@ const withdrawalTemplates = {
         messages: [
             "Retiro MLC\nMínimo: {min} MLC\n\n\nPor favor, ingresa tu tarjeta MLC",
             "Retiro MLC\n\n\nIndica tu móvil a confirmar",
-            "Retiro MLC\nMínimo: {min} MLC\n💳 MLC real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en MLC (ej: 600 para 600 MLC)."
+            "Retiro MLC\nMínimo: {min} MLC\n🏦 MLC real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en MLC (ej: 600 para 600 MLC)."
         ]
     }
     // Puedes agregar más monedas siguiendo el mismo patrón
@@ -2741,6 +2741,7 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
         session.withdrawAccountCard = card;
+        // No persistir en la base de datos: mantener el dato en la sesión
         delete session.awaitingWithdrawAccountCard;
         session.awaitingWithdrawAccountMobile = true;
 
@@ -2778,6 +2779,7 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
         session.withdrawAccountMobile = mobile;
+        // No persistir en la base de datos: mantener el dato en la sesión
         delete session.awaitingWithdrawAccountMobile;
         // Ahora pedir el monto
         session.awaitingWithdrawAmount = true;
@@ -2869,22 +2871,200 @@ bot.on(message('text'), async (ctx) => {
 
         // Dependiendo de la moneda, pedimos los datos de la cuenta
         if (currency === 'USDT' || currency === 'TRX') {
-            session.awaitingWithdrawWallet = true; // Nuevo estado para pedir wallet
-            delete session.awaitingWithdrawAmount;
-            await ctx.reply(
-                `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
-                `Por favor, escribe tu <b>dirección de wallet</b> para recibir el retiro.\n` +
-                `(Ejemplo: TXYZ... o 0x... según la red)`,
-                { parse_mode: 'HTML' }
-            );
+            // If wallet+network already provided in session, create the withdraw immediately
+            const existingWallet = session.withdrawWallet;
+            const existingNetwork = session.withdrawNetwork;
+            if (existingWallet && existingNetwork) {
+                const accountInfo = `Wallet: ${existingWallet} (Red: ${existingNetwork})`;
+                try {
+                    const { data: request, error } = await supabase
+                        .from('withdraw_requests')
+                        .insert({
+                            user_id: uid,
+                            method_id: method.id,
+                            amount: amount,
+                            currency: currency,
+                            account_info: accountInfo,
+                            status: 'pending',
+                            amount_usd: amountUSD
+                        })
+                        .select()
+                        .single();
+
+                    if (error) throw error;
+
+                    for (const adminId of ADMIN_IDS) {
+                        try {
+                            await ctx.telegram.sendMessage(adminId,
+                                `🟨 <b>Nueva solicitud de retiro</b>\n` +
+                                `Usuario: ${escapeHTML(String(uid))}\n` +
+                                `Monto: ${amount} ${currency}\n` +
+                                `Wallet: ${escapeHTML(existingWallet)}\n` +
+                                `Red: ${escapeHTML(existingNetwork)}\n` +
+                                `Método: ${escapeHTML(method.name || '')}\n` +
+                                `ID solicitud: ${request.id}`,
+                                { parse_mode: 'HTML' }
+                            );
+                        } catch (e) {}
+                    }
+
+                    await ctx.reply(
+                        `✅ <b>Solicitud de retiro enviada</b>\n` +
+                        `💰 Monto: ${amount} ${currency}\n` +
+                        `📞 Wallet: ${escapeHTML(existingWallet)}\n` +
+                        `🔗 Red: ${escapeHTML(existingNetwork)}\n` +
+                        `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor espera a que sea aprobada.`,
+                        { parse_mode: 'HTML' }
+                    );
+
+                    // Cleanup session
+                    delete session.withdrawWallet;
+                    delete session.withdrawNetwork;
+                    delete session.withdrawMethod;
+                    delete session.withdrawAmount;
+                    delete session.withdrawCurrency;
+                    delete session.withdrawAmountUSD;
+                    delete session.awaitingWithdrawAmount;
+                } catch (e) {
+                    console.error('Error al crear solicitud de retiro cripto (auto):', e);
+                    await ctx.reply(`❌ Error al crear la solicitud: ${e.message}`, getMainKeyboard(ctx));
+                }
+            } else {
+                session.awaitingWithdrawWallet = true; // Nuevo estado para pedir wallet
+                delete session.awaitingWithdrawAmount;
+                await ctx.reply(
+                    `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
+                    `Por favor, escribe tu <b>dirección de wallet</b> para recibir el retiro.\n` +
+                    `(Ejemplo: TXYZ... o 0x... según la red)`,
+                    { parse_mode: 'HTML' }
+                );
+            }
         } else {
-            session.awaitingWithdrawAccount = true;
-            delete session.awaitingWithdrawAmount;
-            await ctx.reply(
-                `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
-                `Por favor, escribe los <b>datos de tu cuenta</b> (número de teléfono, tarjeta, etc.) para recibir el retiro.`,
-                { parse_mode: 'HTML' }
-            );
+            // Non-crypto: if account/card or mobile was already provided earlier in the flow,
+            // create the withdraw request immediately instead of asking again.
+            const existingAccountCard = session.withdrawAccountCard;
+            const existingAccountMobile = session.withdrawAccountMobile;
+            if (existingAccountCard || existingAccountMobile) {
+                const accountInfo = `${existingAccountCard ? `Tarjeta: ${existingAccountCard}` : ''}${existingAccountCard && existingAccountMobile ? ' · ' : ''}${existingAccountMobile ? `Móvil: ${existingAccountMobile}` : ''}`;
+                try {
+                    const { data: request, error } = await supabase
+                        .from('withdraw_requests')
+                        .insert({
+                            user_id: uid,
+                            method_id: method.id,
+                            amount: amount,
+                            currency: currency,
+                            account_info: accountInfo,
+                            status: 'pending',
+                            amount_usd: amountUSD
+                        })
+                        .select()
+                        .single();
+
+                    if (error) throw error;
+
+                    for (const adminId of ADMIN_IDS) {
+                        try {
+                            await ctx.telegram.sendMessage(adminId,
+                                `🟨 <b>Nueva solicitud de retiro</b>\n` +
+                                `Usuario: ${escapeHTML(String(uid))}\n` +
+                                `Monto: ${amount} ${currency}\n` +
+                                `Cuenta: ${escapeHTML(accountInfo)}\n` +
+                                `Método: ${escapeHTML(method.name || '')}\n` +
+                                `ID solicitud: ${request.id}`,
+                                { parse_mode: 'HTML' }
+                            );
+                        } catch (e) {}
+                    }
+
+                    await ctx.reply(
+                        `✅ <b>Solicitud de retiro enviada</b>\n` +
+                        `💰 Monto: ${amount} ${currency}\n` +
+                        `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor espera a que sea aprobada.`,
+                        { parse_mode: 'HTML' }
+                    );
+
+                    // Cleanup session
+                    delete session.withdrawAccountCard;
+                    delete session.withdrawAccountMobile;
+                    delete session.withdrawMethod;
+                    delete session.withdrawAmount;
+                    delete session.withdrawCurrency;
+                    delete session.withdrawAmountUSD;
+                    delete session.awaitingWithdrawAmount;
+                    delete session.awaitingWithdrawAccount;
+                } catch (e) {
+                    console.error('Error al crear solicitud de retiro (auto):', e);
+                    await ctx.reply(`❌ Error al crear la solicitud: ${e.message}`, getMainKeyboard(ctx));
+                }
+            } else {
+                // If the user already provided card/mobile earlier in the flow, use those
+                // values to create the withdraw request immediately instead of asking again.
+                const existingCard = session.withdrawAccountCard;
+                const existingMobile = session.withdrawAccountMobile;
+                if (existingCard || existingMobile) {
+                    const accountInfo = `${existingCard ? `Tarjeta: ${existingCard}` : ''}${existingCard && existingMobile ? ' · ' : ''}${existingMobile ? `Móvil: ${existingMobile}` : ''}`;
+                    try {
+                        const { data: request, error } = await supabase
+                            .from('withdraw_requests')
+                            .insert({
+                                user_id: uid,
+                                method_id: method.id,
+                                amount: amount,
+                                currency: currency,
+                                account_info: accountInfo,
+                                status: 'pending',
+                                amount_usd: amountUSD
+                            })
+                            .select()
+                            .single();
+
+                        if (error) throw error;
+
+                        // Notify admins
+                        for (const adminId of ADMIN_IDS) {
+                            try {
+                                await ctx.telegram.sendMessage(adminId,
+                                    `🟨 <b>Nueva solicitud de retiro</b>\n` +
+                                    `Usuario: ${escapeHTML(String(uid))}\n` +
+                                    `Monto: ${amount} ${currency}\n` +
+                                    `Cuenta: ${escapeHTML(accountInfo)}\n` +
+                                    `Método: ${escapeHTML(method.name || '')}\n` +
+                                    `ID solicitud: ${request.id}`,
+                                    { parse_mode: 'HTML' }
+                                );
+                            } catch (e) {}
+                        }
+
+                        await ctx.reply(
+                            `✅ <b>Solicitud de retiro enviada</b>\n` +
+                            `💰 Monto: ${amount} ${currency}\n` +
+                            `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor espera a que sea aprobada.`,
+                            { parse_mode: 'HTML' }
+                        );
+
+                        // cleanup session fields used for the withdraw flow
+                        delete session.withdrawAccountCard;
+                        delete session.withdrawAccountMobile;
+                        delete session.withdrawMethod;
+                        delete session.withdrawAmount;
+                        delete session.withdrawCurrency;
+                        delete session.withdrawAmountUSD;
+                        delete session.awaitingWithdrawAmount;
+                    } catch (e) {
+                        console.error('Error creando solicitud de retiro (auto):', e);
+                        await ctx.reply(`❌ Error al crear la solicitud: ${e.message}`, getMainKeyboard(ctx));
+                    }
+                } else {
+                    session.awaitingWithdrawAccount = true;
+                    delete session.awaitingWithdrawAmount;
+                    await ctx.reply(
+                        `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
+                        `Por favor, escribe los <b>datos de tu cuenta</b> (número de teléfono, tarjeta, etc.) para recibir el retiro.`,
+                        { parse_mode: 'HTML' }
+                    );
+                }
+            }
         }
         return;
     }
