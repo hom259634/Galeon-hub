@@ -275,7 +275,7 @@ const withdrawalTemplates = {
     },
     TRX: {
         messages: [
-            "Retirar TRX\nMínimo: {min} {currency}\n\nPor favor, ingresa tu wallet TRX",
+            "Retirar TRX\nMínimo: {min} {currency}\n\n\nPor favor, ingresa tu wallet TRX",
             "Retirar TRX\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20. Asegúrate de usar la red correcta para evitar pérdidas)",
             "Retirar TRX\nMínimo: {min} {currency}\n🪙 TRX real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 100 para 100 {currency})."
         ]
@@ -315,6 +315,14 @@ function getWithdrawalTemplate(currency, balance, min, currencyLabel) {
         .replace(/{min}/g, typeof min !== 'undefined' ? String(min) : String(tpl.minimum || '0'))
         .replace(/{currency}/g, label)
     );
+}
+
+function canonicalizeCurrency(currency) {
+    if (!currency) return '';
+    // Toma el primer token alfanumérico y retorna en mayúsculas (quita emojis/puntuación)
+    const raw = String(currency).trim();
+    const match = raw.match(/[A-Za-z0-9]+/);
+    return match ? match[0].toUpperCase() : raw.toUpperCase();
 }
 
 
@@ -1314,7 +1322,8 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
     }
 
     // Intentar obtener plantilla específica para la moneda
-    const templates = getWithdrawalTemplate(method.currency, balanceForTemplate, methodMin, method.currency);
+    const currencyCode = canonicalizeCurrency(method.currency);
+    const templates = getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency);
     if (templates && templates.length >= 1) {
         // Enviar solo el primer mensaje de la plantilla y continuar el flujo paso a paso
         await safeEdit(ctx,
@@ -2777,7 +2786,8 @@ bot.on(message('text'), async (ctx) => {
                 balanceForTemplate = equivalente.toFixed(2);
             }
         }
-        const templates = method ? getWithdrawalTemplate(method.currency, balanceForTemplate, methodMin, method.currency) : null;
+        const currencyCode = method ? canonicalizeCurrency(method.currency) : '';
+        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
         if (templates && templates.length >= 2) {
             await ctx.reply(templates[1], { parse_mode: 'HTML' });
         } else {
@@ -2814,7 +2824,8 @@ bot.on(message('text'), async (ctx) => {
                 balanceForTemplate = equivalente.toFixed(2);
             }
         }
-        const templates = method ? getWithdrawalTemplate(method.currency, balanceForTemplate, methodMin, method.currency) : null;
+        const currencyCode = method ? canonicalizeCurrency(method.currency) : '';
+        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
         let instruccionesAdicionales = '';
         if (method && (method.currency === 'USDT' || method.currency === 'TRX')) {
             instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
@@ -3151,7 +3162,8 @@ bot.on(message('text'), async (ctx) => {
             console.warn('Error calculando balance para plantilla:', e.message);
         }
 
-        const templates = method ? getWithdrawalTemplate(method.currency, balanceForTemplate, methodMin, method.currency) : null;
+        const currencyCode = method ? canonicalizeCurrency(method.currency) : '';
+        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
         let instruccionesAdicionales = '';
         if (method && (method.currency === 'USDT' || method.currency === 'TRX')) {
             instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
@@ -3474,18 +3486,23 @@ bot.on(message('text'), async (ctx) => {
                 }
             }
 
-            // Validar saldos por moneda por separado y debitar cada moneda sin combinar saldos.
+            // Validar saldos y permitir usar bono_cup junto con cup para pagar jugadas en CUP
             const cupBalance = parseFloat(user.cup) || 0;
             const usdBalance = parseFloat(user.usd) || 0;
+            const bonusBalance = parseFloat(user.bonus_cup) || 0;
 
             if (totalCUP <= 0 && totalUSD <= 0) {
                 await ctx.reply('❌ No se detectó monto en CUP ni USD en la jugada.', getMainKeyboard(ctx));
                 return;
             }
 
-            if (totalCUP > 0 && cupBalance < totalCUP) {
-                await ctx.reply(`❌ Saldo CUP insuficiente. Por favor, recarga.`, getMainKeyboard(ctx));
-                return;
+            // Para CUP permitimos combinar saldo principal + bono
+            if (totalCUP > 0) {
+                const totalAvailableCUP = cupBalance + bonusBalance;
+                if (totalAvailableCUP < totalCUP) {
+                    await ctx.reply(`❌ Saldo CUP insuficiente. Por favor, recarga.`, getMainKeyboard(ctx));
+                    return;
+                }
             }
 
             if (totalUSD > 0 && usdBalance < totalUSD) {
@@ -3495,7 +3512,17 @@ bot.on(message('text'), async (ctx) => {
 
             // Preparar objeto de actualización sólo con las monedas que cambian
             const updates = { updated_at: new Date() };
-            if (totalCUP > 0) updates.cup = Math.max(0, cupBalance - totalCUP);
+            let bonusUsed = 0;
+            if (totalCUP > 0) {
+                // Preferir debitar del saldo principal CUP y luego del bono
+                const cupDebit = Math.min(cupBalance, totalCUP);
+                const remaining = totalCUP - cupDebit;
+                bonusUsed = remaining > 0 ? remaining : 0;
+                updates.cup = Math.max(0, cupBalance - cupDebit);
+                if (bonusUsed > 0) {
+                    updates.bonus_cup = Math.max(0, bonusBalance - bonusUsed);
+                }
+            }
             if (totalUSD > 0) updates.usd = Math.max(0, usdBalance - totalUSD);
 
             await supabase.from('users').update(updates).eq('telegram_id', uid);
@@ -3530,7 +3557,9 @@ bot.on(message('text'), async (ctx) => {
                 `📋 Jugadas: ${escapeHTML(rawText)}\n` +
                 `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
                 `¡Buena suerte! 🍀`;
-
+            if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
+                confirmMsg += `\n\n🎁 Se usaron ${bonusUsed.toFixed(2)} CUP de tu bono.`;
+            }
             await ctx.reply(confirmMsg, { parse_mode: 'HTML' });
 
             // Limpiar estado de apuesta
