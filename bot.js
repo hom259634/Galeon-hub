@@ -293,20 +293,9 @@ const withdrawalTemplates = {
 function getWithdrawalTemplate(currency, balance, min, currencyLabel) {
     const raw = String(currency || '').trim();
     const key = raw.toUpperCase();
-    let tpl = withdrawalTemplates[key];
-
-    // If exact key not found, try tolerant matching (ignore punctuation, case, or small variants)
-    if (!tpl) {
-        const normalized = raw.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-        for (const k of Object.keys(withdrawalTemplates)) {
-            const kn = k.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-            if (!kn) continue;
-            if (kn === normalized || kn === key || key.includes(kn) || kn.includes(key)) {
-                tpl = withdrawalTemplates[k];
-                break;
-            }
-        }
-    }
+    // Only use exact key matches from the user's templates. Do not fall back
+    // to tolerant or partial matching to avoid using a template that isn't the user's.
+    const tpl = withdrawalTemplates[key];
 
     if (!tpl || !Array.isArray(tpl.messages)) return null;
     const label = currencyLabel || key;
@@ -2923,7 +2912,7 @@ bot.on(message('text'), async (ctx) => {
                         try {
                             await ctx.telegram.sendMessage(adminId,
                                 `🟨 <b>Nueva solicitud de retiro</b>\n` +
-                                `Usuario: ${escapeHTML(String(uid))}\n` +
+                                `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                                 `Monto: ${amount} ${currency}\n` +
                                 `Wallet: ${escapeHTML(existingWallet)}\n` +
                                 `Red: ${escapeHTML(existingNetwork)}\n` +
@@ -2996,9 +2985,9 @@ bot.on(message('text'), async (ctx) => {
 
                     for (const adminId of ADMIN_IDS) {
                         try {
-                            await ctx.telegram.sendMessage(adminId,
+                                await ctx.telegram.sendMessage(adminId,
                                 `🟨 <b>Nueva solicitud de retiro</b>\n` +
-                                `Usuario: ${escapeHTML(String(uid))}\n` +
+                                `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                                 `Monto: ${amount} ${currency}\n` +
                                 `Cuenta: ${escapeHTML(accountInfo)}\n` +
                                 `Método: ${escapeHTML(method.name || '')}\n` +
@@ -3062,7 +3051,7 @@ bot.on(message('text'), async (ctx) => {
                             try {
                                 await ctx.telegram.sendMessage(adminId,
                                     `🟨 <b>Nueva solicitud de retiro</b>\n` +
-                                    `Usuario: ${escapeHTML(String(uid))}\n` +
+                                    `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                                     `Monto: ${amount} ${currency}\n` +
                                     `Cuenta: ${escapeHTML(accountInfo)}\n` +
                                     `Método: ${escapeHTML(method.name || '')}\n` +
