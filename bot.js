@@ -204,6 +204,7 @@ function clearPendingFlow(session) {
         'minStep', 'minTempCup', 'minTempUsd', 'maxTempCup',
         'winningSessionId',
         'withdrawRequest'
+        ,'withdrawTemplateKey'
     ];
 
     let cleared = false;
@@ -1264,6 +1265,8 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
     }
 
     ctx.session.withdrawMethod = method;
+    // Guardar la clave de plantilla exacta al pulsar el botón (ej: 'CUP', 'USD', 'USDT')
+    ctx.session.withdrawTemplateKey = canonicalizeCurrency(method.currency);
     // Inicializar el flujo de retiro según la moneda:
     // - Para cripto: pedir wallet primero
     // - Para CUP/USD/MLC: pedir datos de cuenta (tarjeta/telefono) en pasos separados
@@ -1310,8 +1313,8 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
             `- Asegúrate de usar la red correcta para evitar pérdidas.`;
     }
 
-    // Intentar obtener plantilla específica para la moneda
-    const currencyCode = canonicalizeCurrency(method.currency);
+    // Intentar obtener plantilla específica para la moneda usando la clave guardada
+    const currencyCode = ctx.session.withdrawTemplateKey || canonicalizeCurrency(method.currency);
     const templates = getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency);
     if (templates && templates.length >= 1) {
         // Enviar solo el primer mensaje de la plantilla y continuar el flujo paso a paso
@@ -1320,18 +1323,16 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
             null
         );
     } else {
-        // Fallback al mensaje anterior si no hay plantilla
+        // No usar ningún texto de fallback: informar y abortar el flujo para evitar mensajes distintos
+        delete ctx.session.withdrawMethod;
+        delete ctx.session.withdrawTemplateKey;
+        delete ctx.session.awaitingWithdrawAccountCard;
+        delete ctx.session.awaitingWithdrawWallet;
         await safeEdit(ctx,
-            `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n\n` +
-            `💳 <b>Instrucciones:</b> ${method.confirm}\n\n` +
-            `${mensajeSaldo}\n\n` +
-            `⏳ <b>Mínimo de retiro aceptado:</b> ${methodMin} ${method.currency}.\n` +
-            (method.min_amount ? `📉 Límite mínimo: ${method.min_amount} ${method.currency}\n` : '') +
-            (method.max_amount ? `📈 Límite máximo: ${method.max_amount} ${method.currency}\n` : '') +
-            `\nPor favor, escribe el <b>monto que deseas retirar</b> en ${method.currency} (ej: <code>500</code> para 500 ${method.currency}).` +
-            instruccionesAdicionales,
-            null
+            `⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene una plantilla de retiro válida.\nPor favor contacta al administrador para configurar la plantilla correspondiente.`,
+            getMainKeyboard(ctx)
         );
+        return;
     }
 });
 
@@ -2775,12 +2776,18 @@ bot.on(message('text'), async (ctx) => {
                 balanceForTemplate = equivalente.toFixed(2);
             }
         }
-        const currencyCode = method ? canonicalizeCurrency(method.currency) : '';
+        const currencyCode = session.withdrawTemplateKey || (method ? canonicalizeCurrency(method.currency) : '');
         const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
         if (templates && templates.length >= 2) {
             await ctx.reply(templates[1], { parse_mode: 'HTML' });
         } else {
-            await ctx.reply('Retiro: \n\nIndica tu móvil a confirmar');
+            // No enviar un fallback: abortar flujo y pedir al usuario contactar al admin
+            delete session.withdrawAccountCard;
+            delete session.awaitingWithdrawAccountCard;
+            delete session.withdrawMethod;
+            delete session.withdrawTemplateKey;
+            await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
+            return;
         }
         return;
     }
@@ -2813,16 +2820,22 @@ bot.on(message('text'), async (ctx) => {
                 balanceForTemplate = equivalente.toFixed(2);
             }
         }
-        const currencyCode = method ? canonicalizeCurrency(method.currency) : '';
+        const currencyCode = session.withdrawTemplateKey || (method ? canonicalizeCurrency(method.currency) : '');
         const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
         let instruccionesAdicionales = '';
         if (method && (method.currency === 'USDT' || method.currency === 'TRX')) {
             instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
         }
         if (templates && templates.length >= 3) {
+            console.log('Using withdrawal template[2] for method (awaitingWithdrawAccountMobile):', { methodId: method.id, currencyCode });
             await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
         } else {
-            await ctx.reply(`Escribe el monto que deseas retirar en ${method ? method.currency : ''} (ej: 600 para 600).` + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
+            // No usar un mensaje por defecto: abortar el flujo y notificar al usuario
+            delete session.awaitingWithdrawAccountMobile;
+            delete session.withdrawAccountMobile;
+            delete session.withdrawMethod;
+            await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
+            return;
         }
         return;
     }
@@ -2941,6 +2954,7 @@ bot.on(message('text'), async (ctx) => {
                     delete session.withdrawWallet;
                     delete session.withdrawNetwork;
                     delete session.withdrawMethod;
+                    delete session.withdrawTemplateKey;
                     delete session.withdrawAmount;
                     delete session.withdrawCurrency;
                     delete session.withdrawAmountUSD;
@@ -3013,6 +3027,7 @@ bot.on(message('text'), async (ctx) => {
                     delete session.withdrawAccountCard;
                     delete session.withdrawAccountMobile;
                     delete session.withdrawMethod;
+                    delete session.withdrawTemplateKey;
                     delete session.withdrawAmount;
                     delete session.withdrawCurrency;
                     delete session.withdrawAmountUSD;
@@ -3077,6 +3092,7 @@ bot.on(message('text'), async (ctx) => {
                         delete session.withdrawAccountCard;
                         delete session.withdrawAccountMobile;
                         delete session.withdrawMethod;
+                        delete session.withdrawTemplateKey;
                         delete session.withdrawAmount;
                         delete session.withdrawCurrency;
                         delete session.withdrawAmountUSD;
@@ -3161,7 +3177,12 @@ bot.on(message('text'), async (ctx) => {
         if (templates && templates.length >= 3) {
             await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
         } else {
-            await ctx.reply(`Escribe el monto que deseas retirar en ${method ? method.currency : ''} (ej: 10 para 10).` + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
+            // No usar mensaje por defecto: cancelar flujo y notificar al usuario
+            delete session.awaitingWithdrawAmount;
+            delete session.withdrawMethod;
+            delete session.withdrawTemplateKey;
+            await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
+            return;
         }
         return;
     }
@@ -3223,6 +3244,7 @@ bot.on(message('text'), async (ctx) => {
 
         delete session.awaitingWithdrawAccount;
         delete session.withdrawMethod;
+        delete session.withdrawTemplateKey;
         delete session.withdrawAmount;
         delete session.withdrawCurrency;
         delete session.withdrawAmountUSD;
