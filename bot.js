@@ -33,9 +33,11 @@ const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
 
 // ========== HORARIO DE RETIROS (hora Cuba) ==========
-const WITHDRAW_HOURS = { start: 22, end: 23.5 };
+// Ahora habilitado 24 horas (disponible todo el día)
+const WITHDRAW_HOURS = { start: 0, end: 24 };
 
 function isWithdrawTime() {
+    // Siempre permitimos retiros en el rango completo 0-24.
     const now = moment.tz(TIMEZONE);
     const currentHour = now.hour() + now.minute() / 60;
     return currentHour >= WITHDRAW_HOURS.start && currentHour < WITHDRAW_HOURS.end;
@@ -2841,7 +2843,7 @@ bot.on(message('text'), async (ctx) => {
         if (!templates || templates.length < 3) {
             templates = buildFallbackWithdrawalTemplates(method, balanceForTemplate, methodMin, method.currency);
         }
-        await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
+        await ctx.reply(templates[2], { parse_mode: 'HTML' });
         return;
     }
 
@@ -3180,7 +3182,7 @@ bot.on(message('text'), async (ctx) => {
         }
 
         if (templates && templates.length >= 3) {
-            await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
+            await ctx.reply(templates[2], { parse_mode: 'HTML' });
         } else {
             // No usar mensaje por defecto: cancelar flujo y notificar al usuario
             delete session.awaitingWithdrawAmount;
