@@ -291,6 +291,30 @@ const withdrawalTemplates = {
     // Puedes agregar más monedas siguiendo el mismo patrón
 };
 
+// Construye plantillas por defecto con el mismo formato que las plantillas definidas
+function buildFallbackWithdrawalTemplates(method, balance, min, currencyLabel) {
+    const cur = (currencyLabel || method?.currency || '').toString().trim();
+    const label = cur || 'CUP';
+
+    // Para cripto pedir wallet primero; para no-cripto pedir tarjeta/dato primero
+    const isCrypto = ['USDT', 'TRX'].includes(canonicalizeCurrency(cur));
+
+    if (isCrypto) {
+        return [
+            `Retirar ${label}\nMínimo: ${min} ${label}\n\n\nPor favor, ingresa tu wallet ${label}`,
+            `Retirar ${label}\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc.).`,
+            `Retirar ${label}\nMínimo: ${min} ${label}\n🪙 ${label} real disponible: ${balance}\n\nEscribe el monto que deseas retirar en ${label} (ej: 10 para 10 ${label}).`
+        ];
+    }
+
+    // No-cripto (CUP, USD, MLC)
+    return [
+        `Retiro ${label}\nMínimo: ${min} ${label}\n\n\nPor favor, ingresa tu tarjeta ${label}`,
+        `Retiro ${label}\n\n\nIndica tu móvil a confirmar`,
+        `Retiro ${label}\nMínimo: ${min} ${label}\n${label === 'CUP' ? '🇨🇺 ' : ''}${label} real disponible: ${balance}\n\nEscribe el monto que deseas retirar en ${label} (ej: 600 para 600 ${label}).`
+    ];
+}
+
 function getWithdrawalTemplate(currency, balance, min, currencyLabel) {
     // Normalize the incoming currency value to a canonical token (e.g. 'usd','USD','USD-TRC20' -> 'USD')
     const key = canonicalizeCurrency(String(currency || ''));
@@ -1322,16 +1346,12 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
             null
         );
     } else {
-        // No usar ningún texto de fallback: informar y abortar el flujo para evitar mensajes distintos
-        delete ctx.session.withdrawMethod;
-        delete ctx.session.withdrawTemplateKey;
-        delete ctx.session.awaitingWithdrawAccountCard;
-        delete ctx.session.awaitingWithdrawWallet;
+        // Generar plantillas por defecto con el mismo formato y continuar
+        const fallback = buildFallbackWithdrawalTemplates(method, balanceForTemplate, methodMin, method.currency);
         await safeEdit(ctx,
-            `⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene una plantilla de retiro válida.\nPor favor contacta al administrador para configurar la plantilla correspondiente.`,
-            getMainKeyboard(ctx)
+            `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n` + fallback[0],
+            null
         );
-        return;
     }
 });
 
@@ -2776,18 +2796,11 @@ bot.on(message('text'), async (ctx) => {
             }
         }
         const currencyCode = session.withdrawTemplateKey || (method ? canonicalizeCurrency(method.currency) : '');
-        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
-        if (templates && templates.length >= 2) {
-            await ctx.reply(templates[1], { parse_mode: 'HTML' });
-        } else {
-            // No enviar un fallback: abortar flujo y pedir al usuario contactar al admin
-            delete session.withdrawAccountCard;
-            delete session.awaitingWithdrawAccountCard;
-            delete session.withdrawMethod;
-            delete session.withdrawTemplateKey;
-            await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
-            return;
+        let templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
+        if (!templates || templates.length < 2) {
+            templates = buildFallbackWithdrawalTemplates(method, balanceForTemplate, methodMin, method.currency);
         }
+        await ctx.reply(templates[1], { parse_mode: 'HTML' });
         return;
     }
 
@@ -2820,22 +2833,15 @@ bot.on(message('text'), async (ctx) => {
             }
         }
         const currencyCode = session.withdrawTemplateKey || (method ? canonicalizeCurrency(method.currency) : '');
-        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
+        let templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
         let instruccionesAdicionales = '';
         if (method && (method.currency === 'USDT' || method.currency === 'TRX')) {
             instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
         }
-        if (templates && templates.length >= 3) {
-            console.log('Using withdrawal template[2] for method (awaitingWithdrawAccountMobile):', { methodId: method.id, currencyCode });
-            await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
-        } else {
-            // No usar un mensaje por defecto: abortar el flujo y notificar al usuario
-            delete session.awaitingWithdrawAccountMobile;
-            delete session.withdrawAccountMobile;
-            delete session.withdrawMethod;
-            await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
-            return;
+        if (!templates || templates.length < 3) {
+            templates = buildFallbackWithdrawalTemplates(method, balanceForTemplate, methodMin, method.currency);
         }
+        await ctx.reply(templates[2] + (instruccionesAdicionales ? `\n\n${instruccionesAdicionales}` : ''), { parse_mode: 'HTML' });
         return;
     }
 
