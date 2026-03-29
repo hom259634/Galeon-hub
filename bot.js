@@ -292,10 +292,9 @@ const withdrawalTemplates = {
 };
 
 function getWithdrawalTemplate(currency, balance, min, currencyLabel) {
-    const raw = String(currency || '').trim();
-    const key = raw.toUpperCase();
-    // Only use exact key matches from the user's templates. Do not fall back
-    // to tolerant or partial matching to avoid using a template that isn't the user's.
+    // Normalize the incoming currency value to a canonical token (e.g. 'usd','USD','USD-TRC20' -> 'USD')
+    const key = canonicalizeCurrency(String(currency || ''));
+    // Only use exact key matches from the user's templates. Avoid fallback to other templates.
     const tpl = withdrawalTemplates[key];
 
     if (!tpl || !Array.isArray(tpl.messages)) return null;
