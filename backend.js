@@ -2175,7 +2175,7 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
         await bot.telegram.sendMessage(request.user_id,
             `✅ <b>¡Retiro aprobado!</b>\n\n` +
             `💰 Monto: ${request.amount} ${request.currency}\n` +
-            `📌 Los fondos han sido enviados a tu cuenta.`,
+            `📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
     } catch (e) {}
