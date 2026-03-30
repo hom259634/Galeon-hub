@@ -1348,12 +1348,13 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
             null
         );
     } else {
-        // Generar plantillas por defecto con el mismo formato y continuar
-        const fallback = buildFallbackWithdrawalTemplates(method, balanceForTemplate, methodMin, method.currency);
-        await safeEdit(ctx,
-            `Has elegido <b>${escapeHTML(method.name)}</b> (moneda: ${method.currency}).\n` + fallback[0],
-            null
-        );
+        // No usar fallback: cancelar flujo y notificar al usuario
+        delete ctx.session.awaitingWithdrawWallet;
+        delete ctx.session.awaitingWithdrawAccountCard;
+        delete ctx.session.withdrawMethod;
+        delete ctx.session.withdrawTemplateKey;
+        await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
+        return;
     }
 });
 
@@ -2800,7 +2801,12 @@ bot.on(message('text'), async (ctx) => {
         const currencyCode = session.withdrawTemplateKey || (method ? canonicalizeCurrency(method.currency) : '');
         let templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
         if (!templates || templates.length < 2) {
-            templates = buildFallbackWithdrawalTemplates(method, balanceForTemplate, methodMin, method.currency);
+            // No usar fallback: cancelar flujo y notificar al usuario
+            delete session.awaitingWithdrawAccountCard;
+            delete session.withdrawMethod;
+            delete session.withdrawTemplateKey;
+            await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
+            return;
         }
         await ctx.reply(templates[1], { parse_mode: 'HTML' });
         return;
@@ -2841,7 +2847,12 @@ bot.on(message('text'), async (ctx) => {
             instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
         }
         if (!templates || templates.length < 3) {
-            templates = buildFallbackWithdrawalTemplates(method, balanceForTemplate, methodMin, method.currency);
+            // No usar fallback: cancelar flujo y notificar al usuario
+            delete session.awaitingWithdrawAccountMobile;
+            delete session.withdrawMethod;
+            delete session.withdrawTemplateKey;
+            await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
+            return;
         }
         await ctx.reply(templates[2], { parse_mode: 'HTML' });
         return;
@@ -3132,12 +3143,40 @@ bot.on(message('text'), async (ctx) => {
         session.withdrawWallet = wallet;
         delete session.awaitingWithdrawWallet;
         session.awaitingWithdrawNetwork = true;
-        await ctx.reply(
-            `✅ Dirección guardada: ${escapeHTML(wallet)}\n\n` +
-            `Ahora, por favor, escribe la <b>red</b> que usarás (ej: TRC-20, BEP-20, etc.).\n` +
-            `Si el método sugiere una red (${escapeHTML(session.withdrawMethod.confirm)}), asegúrate de coincidir.`,
-            { parse_mode: 'HTML' }
-        );
+        // Usar la plantilla definida en withdrawalTemplates (índice 1 = pedir red)
+        const method = session.withdrawMethod;
+        const methodMin = method && method.min_amount !== null && method.min_amount !== undefined ? parseFloat(method.min_amount) : 0;
+        // calcular saldo para plantilla
+        let balanceForTemplate = '0.00';
+        try {
+            const cupBalance = parseFloat(user.cup) || 0;
+            const usdBalance = parseFloat(user.usd) || 0;
+            const rateUSD = await getExchangeRateUSD();
+            const totalAvailableCUP = cupBalance + (usdBalance * rateUSD);
+            if (method) {
+                if (method.currency === 'USD') {
+                    balanceForTemplate = usdBalance.toFixed(2);
+                } else {
+                    const equivalente = await convertFromCUP(totalAvailableCUP, method.currency);
+                    balanceForTemplate = equivalente.toFixed(2);
+                }
+            }
+        } catch (e) {
+            console.warn('Error calculando balance para plantilla:', e.message);
+        }
+
+        const currencyCode = method ? canonicalizeCurrency(method.currency) : '';
+        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
+        if (!templates || templates.length < 2) {
+            // No usar fallback: cancelar flujo y notificar al usuario
+            delete session.awaitingWithdrawNetwork;
+            delete session.withdrawMethod;
+            delete session.withdrawTemplateKey;
+            await ctx.reply(`⚠️ El método seleccionado (${method ? escapeHTML(method.name) : '??'} - ${method ? escapeHTML(method.currency) : '??'}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
+            return;
+        }
+
+        await ctx.reply(templates[1], { parse_mode: 'HTML' });
         return;
     }
 
