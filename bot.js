@@ -265,8 +265,8 @@ const withdrawalTemplates = {
     USDT: {
         messages: [
             "Retirar USDT\nMínimo: {min} {currency}\n\n\nPor favor, ingresa tu wallet USDT",
-            "Retirar USDT\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc. Asegúrate de usar la red correcta para evitar pérdidas)",
-            "Retirar USDT\nMínimo: {min} {currency}\n🪙 USDT real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
+            "Retirar USDT\n\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc. Asegúrate de usar la red correcta para evitar pérdidas)",
+            "Retirar USDT\nMínimo: {min} {currency}\n🪙 USDT real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
         ]
     },
     USD: {
@@ -279,8 +279,8 @@ const withdrawalTemplates = {
     TRX: {
         messages: [
             "Retirar TRX\nMínimo: {min} {currency}\n\n\nPor favor, ingresa tu wallet TRX",
-            "Retirar TRX\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20. Asegúrate de usar la red correcta para evitar pérdidas)",
-            "Retirar TRX\nMínimo: {min} {currency}\n🪙 TRX real disponible: {balance}\n\nEscribe el monto que deseas retirar en {currency} (ej: 100 para 100 {currency})."
+            "Retirar TRX\n\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20. Asegúrate de usar la red correcta para evitar pérdidas)",
+            "Retirar TRX\nMínimo: {min} {currency}\n🪙 TRX real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en {currency} (ej: 100 para 100 {currency})."
         ]
     },
     MLC: {
@@ -304,8 +304,8 @@ function buildFallbackWithdrawalTemplates(method, balance, min, currencyLabel) {
     if (isCrypto) {
         return [
             `Retirar ${label}\nMínimo: ${min} ${label}\n\n\nPor favor, ingresa tu wallet ${label}`,
-            `Retirar ${label}\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc.).`,
-            `Retirar ${label}\nMínimo: ${min} ${label}\n🪙 ${label} real disponible: ${balance}\n\nEscribe el monto que deseas retirar en ${label} (ej: 10 para 10 ${label}).`
+            `Retirar ${label}\n\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc.).`,
+            `Retirar ${label}\nMínimo: ${min} ${label}\n🪙 ${label} real disponible: ${balance}\n\n\nEscribe el monto que deseas retirar en ${label} (ej: 10 para 10 ${label}).`
         ];
     }
 
@@ -313,7 +313,7 @@ function buildFallbackWithdrawalTemplates(method, balance, min, currencyLabel) {
     return [
         `Retiro ${label}\nMínimo: ${min} ${label}\n\n\nPor favor, ingresa tu tarjeta ${label}`,
         `Retiro ${label}\n\n\nIndica tu móvil a confirmar`,
-        `Retiro ${label}\nMínimo: ${min} ${label}\n${label === 'CUP' ? '🇨🇺 ' : ''}${label} real disponible: ${balance}\n\nEscribe el monto que deseas retirar en ${label} (ej: 600 para 600 ${label}).`
+        `Retiro ${label}\nMínimo: ${min} ${label}\n${label === 'CUP' ? '🇨🇺 ' : ''}${label} real disponible: ${balance}\n\n\nEscribe el monto que deseas retirar en ${label} (ej: 600 para 600 ${label}).`
     ];
 }
 
@@ -3912,7 +3912,7 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             `✅ <b>Retiro aprobado</b>\n\n` +
             `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
             `💵 Se debitaron ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
-            `Los fondos serán enviados a la cuenta proporcionada en breve.`,
+            `En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
 
