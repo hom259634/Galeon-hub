@@ -33,8 +33,8 @@ const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
 
 // ========== HORARIO DE RETIROS (hora Cuba) ==========
-// Ahora habilitado 24 horas (disponible todo el día)
-const WITHDRAW_HOURS = { start: 0, end: 24 };
+// Disponibles diariamente de 10:00 PM a 11:30 PM (hora Cuba)
+const WITHDRAW_HOURS = { start: 20, end: 23.5 };
 
 function isWithdrawTime() {
     // Siempre permitimos retiros en el rango completo 0-24.
@@ -271,7 +271,7 @@ const withdrawalTemplates = {
     },
     USD: {
         messages: [
-            "Retiro USD\nMínimo: {min} USD\n\n\nPor favor, ingresa tu tarjeta o dato para recibir USD",
+            "Retiro USD\nMínimo: {min} USD\n\n\nPor favor, ingresa tu tarjeta USD",
             "Retiro USD\n\n\nIndica tu móvil a confirmar",
             "Retiro USD\nMínimo: {min} USD\n💵 USD real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en USD (ej: 10 para 10 USD)."
         ]
