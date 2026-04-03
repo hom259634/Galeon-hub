@@ -583,6 +583,33 @@ function parseAmountWithCurrency(text) {
     };
 }
 
+function expandDTNumbers(token, betType) {
+    const match = String(token || '').trim().toUpperCase().match(/^([DT])(\d)$/);
+    if (!match) return [];
+
+    const prefix = match[1];
+    const digit = match[2];
+
+    if (betType === 'fijo') {
+        const out = [];
+        for (let i = 0; i <= 9; i++) {
+            out.push(prefix === 'D' ? `${digit}${i}` : `${i}${digit}`);
+        }
+        return out;
+    }
+
+    if (betType === 'centena') {
+        const out = [];
+        for (let i = 0; i <= 99; i++) {
+            const twoDigits = String(i).padStart(2, '0');
+            out.push(prefix === 'D' ? `${digit}${twoDigits}` : `${twoDigits}${digit}`);
+        }
+        return out;
+    }
+
+    return [];
+}
+
 function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
     if (!line) return [];
@@ -601,18 +628,20 @@ function parseBetLine(line, betType) {
     const resultados = [];
 
     for (let numero of numeros) {
-        let montoReal = montoBase;
-        let numeroGuardado = numero;
+        const expanded = expandDTNumbers(numero, betType);
+        if (expanded.length > 0) {
+            for (const expandedNumber of expanded) {
+                resultados.push({
+                    numero: expandedNumber,
+                    usd: moneda === 'usd' ? montoBase : 0,
+                    cup: moneda === 'cup' ? montoBase : 0
+                });
+            }
+            continue;
+        }
 
         if (betType === 'fijo') {
-            if (/^\d{2}$/.test(numero)) {
-            } else if (/^[Dd](\d)$/.test(numero)) {
-                montoReal = montoBase * 10;
-                numeroGuardado = numero.toUpperCase();
-            } else if (/^[Tt](\d)$/.test(numero)) {
-                montoReal = montoBase * 10;
-                numeroGuardado = numero.toUpperCase();
-            } else {
+            if (!/^\d{2}$/.test(numero)) {
                 continue;
             }
         } else if (betType === 'corridos') {
@@ -626,9 +655,9 @@ function parseBetLine(line, betType) {
         }
 
         resultados.push({
-            numero: numeroGuardado,
-            usd: moneda === 'usd' ? montoReal : 0,
-            cup: moneda === 'cup' ? montoReal : 0
+            numero,
+            usd: moneda === 'usd' ? montoBase : 0,
+            cup: moneda === 'cup' ? montoBase : 0
         });
     }
 
@@ -1141,8 +1170,8 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `Escribe una línea por cada jugada. Puedes poner varios números separados por espacios o comas en la misma línea.\n` +
                 `<b>Formato:</b> <code>12 con 5 cup</code>  o  <code>09 10 34*2cup</code>\n` +
                 `También puedes usar <b>D</b> (decena) o <b>T</b> (terminal):\n` +
-                `- <code>D2 con 5 cup</code> significa TODOS los números que empiezan con 2 (20-29). El costo se multiplica por 10.\n` +
-                `- <code>T5 con 5 cup</code> significa TODOS los números que terminan con 5 (05,15,...,95). El costo se multiplica por 10.\n\n` +
+                `- <code>D2 con 5 cup</code> significa 20, 21, ..., 29 con <b>5 cup cada uno</b>.\n` +
+                `- <code>T5 con 5 cup</code> significa 05, 15, ..., 95 con <b>5 cup cada uno</b>.\n\n` +
                 `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 2 usd\nT5*1 usd\n34*2 cup\n\n` +
                 `💭 <b>Escribe tus jugadas (una o varias líneas):</b>`;
             break;
@@ -1158,8 +1187,11 @@ bot.action(/type_(.+)/, async (ctx) => {
             instructions = `💯 <b>CENTENA</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada número de 3 DÍGITOS, o varios separados.\n` +
-                `<b>Formato:</b> <code>517 con 2 cup</code>  o  <code>019 123*1cup</code>\n\n` +
-                `Ejemplo:\n517 con 2 cup\n019 123*5 cup\n123 con 1 usd\n\n` +
+                `<b>Formato:</b> <code>517 con 2 cup</code>  o  <code>019 123*1cup</code>\n` +
+                `También puedes usar <b>D</b> o <b>T</b>:\n` +
+                `- <code>D5 con 2 cup</code> = 500 a 599 con <b>2 cup cada una</b>.\n` +
+                `- <code>T9 con 2 cup</code> = 009, 019, ..., 999 con <b>2 cup cada una</b>.\n\n` +
+                `Ejemplo:\n517 con 2 cup\n019 123*5 cup\nD5 con 1 usd\nT9*2 cup\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'parle':

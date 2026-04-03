@@ -422,6 +422,33 @@ function parseAmountWithCurrency(text) {
     };
 }
 
+function expandDTNumbers(token, betType) {
+    const match = String(token || '').trim().toUpperCase().match(/^([DT])(\d)$/);
+    if (!match) return [];
+
+    const prefix = match[1];
+    const digit = match[2];
+
+    if (betType === 'fijo') {
+        const out = [];
+        for (let i = 0; i <= 9; i++) {
+            out.push(prefix === 'D' ? `${digit}${i}` : `${i}${digit}`);
+        }
+        return out;
+    }
+
+    if (betType === 'centena') {
+        const out = [];
+        for (let i = 0; i <= 99; i++) {
+            const twoDigits = String(i).padStart(2, '0');
+            out.push(prefix === 'D' ? `${digit}${twoDigits}` : `${twoDigits}${digit}`);
+        }
+        return out;
+    }
+
+    return [];
+}
+
 // ========== FUNCIONES DE PARSEO DE APUESTAS ==========
 function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
@@ -452,19 +479,20 @@ function parseBetLine(line, betType) {
     const resultados = [];
 
     for (let numero of numeros) {
-        let montoReal = montoBase;
-        let numeroGuardado = numero;
+        const expanded = expandDTNumbers(numero, betType);
+        if (expanded.length > 0) {
+            for (const expandedNumber of expanded) {
+                resultados.push({
+                    numero: expandedNumber,
+                    currency: moneda,
+                    amount: montoBase
+                });
+            }
+            continue;
+        }
 
         if (betType === 'fijo') {
-            if (/^\d{2}$/.test(numero)) {
-                // normal
-            } else if (/^[Dd](\d)$/.test(numero)) {
-                montoReal = montoBase * 10;
-                numeroGuardado = numero.toUpperCase();
-            } else if (/^[Tt](\d)$/.test(numero)) {
-                montoReal = montoBase * 10;
-                numeroGuardado = numero.toUpperCase();
-            } else {
+            if (!/^\d{2}$/.test(numero)) {
                 continue;
             }
         } else if (betType === 'corridos') {
@@ -478,9 +506,9 @@ function parseBetLine(line, betType) {
         }
 
         resultados.push({
-            numero: numeroGuardado,
+            numero,
             currency: moneda,
-            amount: montoReal
+            amount: montoBase
         });
     }
 
@@ -1715,7 +1743,15 @@ app.get('/api/admin/winning-numbers/:sessionId/winners', requireAdmin, async (re
                     if (corridos.includes(numero)) ganado = true;
                     break;
                 case 'centena':
-                    if (numero === centena) ganado = true;
+                    if (numero.startsWith('D')) {
+                        const digito = numero[1];
+                        if (centena.startsWith(digito)) ganado = true;
+                    } else if (numero.startsWith('T')) {
+                        const digito = numero[1];
+                        if (centena.endsWith(digito)) ganado = true;
+                    } else {
+                        if (numero === centena) ganado = true;
+                    }
                     break;
                 case 'parle':
                     if (parles.includes(numero)) ganado = true;
@@ -1843,7 +1879,15 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
                     if (corridos.includes(numero)) ganado = true;
                     break;
                 case 'centena':
-                    if (numero === centena) ganado = true;
+                    if (numero.startsWith('D')) {
+                        const digito = numero[1];
+                        if (centena.startsWith(digito)) ganado = true;
+                    } else if (numero.startsWith('T')) {
+                        const digito = numero[1];
+                        if (centena.endsWith(digito)) ganado = true;
+                    } else {
+                        if (numero === centena) ganado = true;
+                    }
                     break;
                 case 'parle':
                     if (parles.includes(numero)) ganado = true;
