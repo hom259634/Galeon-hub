@@ -820,6 +820,33 @@
             document.getElementById('betInstructions').innerHTML = instructions;
         }
 
+        function expandDTNumbers(token, betType) {
+            const match = String(token || '').trim().toUpperCase().match(/^([DT])(\d)$/);
+            if (!match) return [];
+
+            const prefix = match[1];
+            const digit = match[2];
+
+            if (betType === 'fijo') {
+                const out = [];
+                for (let i = 0; i <= 9; i++) {
+                    out.push(prefix === 'D' ? `${digit}${i}` : `${i}${digit}`);
+                }
+                return out;
+            }
+
+            if (betType === 'centena') {
+                const out = [];
+                for (let i = 0; i <= 99; i++) {
+                    const twoDigits = String(i).padStart(2, '0');
+                    out.push(prefix === 'D' ? `${digit}${twoDigits}` : `${twoDigits}${digit}`);
+                }
+                return out;
+            }
+
+            return [];
+        }
+
         function parseBetLine(line, betType) {
             line = line.trim().toLowerCase();
             if (!line) return [];
@@ -849,21 +876,20 @@
             const resultados = [];
 
             for (let numero of numeros) {
-                let montoReal = montoBase;
-                let numeroGuardado = numero;
+                const expanded = expandDTNumbers(numero, betType);
+                if (expanded.length > 0) {
+                    for (const expandedNumber of expanded) {
+                        resultados.push({
+                            numero: expandedNumber,
+                            usd: moneda === 'usd' ? montoBase : 0,
+                            cup: moneda === 'cup' ? montoBase : 0
+                        });
+                    }
+                    continue;
+                }
 
                 if (betType === 'fijo') {
-                    if (/^\d{2}$/.test(numero)) {
-                        // normal
-                    } else if (/^[Dd](\d)$/.test(numero)) {
-                        montoReal = montoBase * 10;
-                        numeroGuardado = numero.toUpperCase();
-                    } else if (/^[Tt](\d)$/.test(numero)) {
-                        montoReal = montoBase * 10;
-                        numeroGuardado = numero.toUpperCase();
-                    } else {
-                        continue;
-                    }
+                    if (!/^\d{2}$/.test(numero)) continue;
                 } else if (betType === 'corridos') {
                     if (!/^\d{2}$/.test(numero)) continue;
                 } else if (betType === 'centena') {
@@ -875,9 +901,9 @@
                 }
 
                 resultados.push({
-                    numero: numeroGuardado,
-                    usd: moneda === 'usd' ? montoReal : 0,
-                    cup: moneda === 'cup' ? montoReal : 0
+                    numero,
+                    usd: moneda === 'usd' ? montoBase : 0,
+                    cup: moneda === 'cup' ? montoBase : 0
                 });
             }
 
@@ -1165,7 +1191,7 @@
                             depositMethodInfo.innerHTML = `
                                 <p><strong>${escapeHTML(method.name)}</strong></p>
                                 <p>📱 Datos: <code>${escapeHTML(method.card)}</code></p>
-                                <p>✅ Confirmar: <code>${escapeHTML(method.confirm)}</code></p>
+                                <p>✅ Confirmar/Red: <code>${escapeHTML(method.confirm)}</code></p>
                             `;
                             depositMethodInfo.classList.remove('hidden');
                             let limitsHtml = '';
