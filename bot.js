@@ -590,19 +590,10 @@ function expandDTNumbers(token, betType) {
     const prefix = match[1];
     const digit = match[2];
 
-    if (betType === 'fijo') {
+    if (betType === 'fijo' || betType === 'corridos') {
         const out = [];
         for (let i = 0; i <= 9; i++) {
             out.push(prefix === 'D' ? `${digit}${i}` : `${i}${digit}`);
-        }
-        return out;
-    }
-
-    if (betType === 'centena') {
-        const out = [];
-        for (let i = 0; i <= 99; i++) {
-            const twoDigits = String(i).padStart(2, '0');
-            out.push(prefix === 'D' ? `${digit}${twoDigits}` : `${twoDigits}${digit}`);
         }
         return out;
     }
