@@ -161,7 +161,7 @@ function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, cred
         text += `🎁 Tu bono de bienvenida se ha movido a tu saldo principal.\n`;
     }
 
-    text += `\n¡Gracias por confiar en nosotros!`;
+    text += `\n\n¡Gracias por confiar en nosotros!`;
     return text;
 }
 
@@ -4064,7 +4064,7 @@ async function withdrawNotifications() {
             `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`,
             'HTML'
         );
-    } else if (currentHour === 23 && currentMinute === 30) {
+    } else if (currentHour === 24 && currentMinute === 20) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
             `La ventana de retiros ha finalizado. Vuelve mañana de 10:00 PM a 11:30 PM (hora Cuba).`,
