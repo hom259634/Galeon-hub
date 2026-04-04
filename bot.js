@@ -34,10 +34,9 @@ const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
 
 // ========== HORARIO DE RETIROS (hora Cuba) ==========
 // Disponibles diariamente de 10:00 PM a 11:30 PM (hora Cuba)
-const WITHDRAW_HOURS = { start: 0, end: 1};
+const WITHDRAW_HOURS = { start: 22, end: 23.5};
 
-function isWithdrawTime() {
-    // Siempre permitimos retiros en el rango completo 0-24.
+function isWithdrawTime() {  
     const now = moment.tz(TIMEZONE);
     const currentHour = now.hour() + now.minute() / 60;
     return currentHour >= WITHDRAW_HOURS.start && currentHour < WITHDRAW_HOURS.end;
@@ -205,7 +204,8 @@ function clearPendingFlow(session) {
         'priceStep', 'priceTempMultiplier', 'priceTempMinCup',
         'minStep', 'minTempCup', 'minTempUsd', 'maxTempCup',
         'winningSessionId',
-        'withdrawRequest'
+        'withdrawRequest',
+        'withdrawFlowAllowed'
         ,'withdrawTemplateKey'
     ];
 
@@ -1163,7 +1163,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `También puedes usar <b>D</b> (decena) o <b>T</b> (terminal):\n` +
                 `- <code>D2 con 5 cup</code> significa 20, 21, ..., 29 con <b>5 cup cada uno</b>.\n` +
                 `- <code>T5 con 5 cup</code> significa 05, 15, ..., 95 con <b>5 cup cada uno</b>.\n\n` +
-                `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 2 usd\nT5*1 usd\n34*2 cup\n\n` +
+                `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 5 cup\nT5*1 usd\n34*2 cup\n\n` +
                 `💭 <b>Escribe tus jugadas (una o varias líneas):</b>`;
             break;
         case 'corridos':
@@ -1171,7 +1171,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada número de 2 DÍGITOS, o varios separados.\n` +
                 `<b>Formato:</b> <code>17 con 5 cup</code>  o  <code>32 33*5cup</code>\n\n` +
-                `Ejemplo:\n17 con 5 cup\n32 33*5 cup\n62 con 1 usd\n\n` +
+                `Ejemplo:\n17 con 5 cup\n32 33*5 cup\n62 con 1 usd\n\nD5 con 1 usd\nT9*2 cup\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'centena':
@@ -1182,7 +1182,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `También puedes usar <b>D</b> o <b>T</b>:\n` +
                 `- <code>D5 con 2 cup</code> = 500 a 599 con <b>2 cup cada una</b>.\n` +
                 `- <code>T9 con 2 cup</code> = 009, 019, ..., 999 con <b>2 cup cada una</b>.\n\n` +
-                `Ejemplo:\n517 con 2 cup\n019 123*5 cup\nD5 con 1 usd\nT9*2 cup\n\n` +
+                `Ejemplo:\n517 con 2 cup\n019 123*5 cup\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'parle':
@@ -1282,6 +1282,10 @@ bot.action('withdraw', async (ctx) => {
         );
         return;
     }
+
+    // Marcar que el usuario inició el flujo de retiro dentro del horario.
+    // Esto permitirá que complete el flujo aunque el horario expire mientras interactúa.
+    if (ctx.session) ctx.session.withdrawFlowAllowed = true;
 
     const { data: methods } = await supabase
         .from('withdraw_methods')
@@ -2828,6 +2832,7 @@ bot.on(message('text'), async (ctx) => {
             delete session.awaitingWithdrawAccountCard;
             delete session.withdrawMethod;
             delete session.withdrawTemplateKey;
+            delete session.withdrawFlowAllowed;
             await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
             return;
         }
@@ -2874,6 +2879,7 @@ bot.on(message('text'), async (ctx) => {
             delete session.awaitingWithdrawAccountMobile;
             delete session.withdrawMethod;
             delete session.withdrawTemplateKey;
+            delete session.withdrawFlowAllowed;
             await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
             return;
         }
@@ -3000,6 +3006,7 @@ bot.on(message('text'), async (ctx) => {
                     delete session.withdrawCurrency;
                     delete session.withdrawAmountUSD;
                     delete session.awaitingWithdrawAmount;
+                    delete session.withdrawFlowAllowed;
                 } catch (e) {
                     console.error('Error al crear solicitud de retiro cripto (auto):', e);
                     await ctx.reply(`❌ Error al crear la solicitud: ${e.message}`, getMainKeyboard(ctx));
@@ -3074,6 +3081,7 @@ bot.on(message('text'), async (ctx) => {
                     delete session.withdrawAmountUSD;
                     delete session.awaitingWithdrawAmount;
                     delete session.awaitingWithdrawAccount;
+                    delete session.withdrawFlowAllowed;
                 } catch (e) {
                     console.error('Error al crear solicitud de retiro (auto):', e);
                     await ctx.reply(`❌ Error al crear la solicitud: ${e.message}`, getMainKeyboard(ctx));
@@ -3138,6 +3146,7 @@ bot.on(message('text'), async (ctx) => {
                         delete session.withdrawCurrency;
                         delete session.withdrawAmountUSD;
                         delete session.awaitingWithdrawAmount;
+                        delete session.withdrawFlowAllowed;
                     } catch (e) {
                         console.error('Error creando solicitud de retiro (auto):', e);
                         await ctx.reply(`❌ Error al crear la solicitud: ${e.message}`, getMainKeyboard(ctx));
@@ -3195,6 +3204,7 @@ bot.on(message('text'), async (ctx) => {
             delete session.awaitingWithdrawNetwork;
             delete session.withdrawMethod;
             delete session.withdrawTemplateKey;
+            delete session.withdrawFlowAllowed;
             await ctx.reply(`⚠️ El método seleccionado (${method ? escapeHTML(method.name) : '??'} - ${method ? escapeHTML(method.currency) : '??'}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
             return;
         }
@@ -3250,6 +3260,7 @@ bot.on(message('text'), async (ctx) => {
             delete session.awaitingWithdrawAmount;
             delete session.withdrawMethod;
             delete session.withdrawTemplateKey;
+            delete session.withdrawFlowAllowed;
             await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
             return;
         }
@@ -3317,6 +3328,7 @@ bot.on(message('text'), async (ctx) => {
         delete session.withdrawAmount;
         delete session.withdrawCurrency;
         delete session.withdrawAmountUSD;
+        delete session.withdrawFlowAllowed;
         return;
     }
 
@@ -3716,7 +3728,7 @@ bot.on(message('photo'), async (ctx) => {
                         );
                     } catch (e) {}
                 }
-                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite. ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
+                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
             } catch (e) {
                 console.error(e);
                 await ctx.reply('❌ Error al procesar la solicitud. Por favor, intenta más tarde o contacta a soporte.', getMainKeyboard(ctx));
