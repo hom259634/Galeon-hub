@@ -3728,7 +3728,7 @@ bot.on(message('photo'), async (ctx) => {
                         );
                     } catch (e) {}
                 }
-                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
+                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n\n ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
             } catch (e) {
                 console.error(e);
                 await ctx.reply('❌ Error al procesar la solicitud. Por favor, intenta más tarde o contacta a soporte.', getMainKeyboard(ctx));
