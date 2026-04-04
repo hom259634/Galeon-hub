@@ -160,7 +160,7 @@ function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, cred
         text += `🎁 Tu bono de bienvenida se ha movido a tu saldo principal.\n`;
     }
 
-    text += `\n\n\n¡Gracias por confiar en nosotros!`;
+    text += `\n\n¡Gracias por confiar en nosotros!`;
     return text;
 }
 
