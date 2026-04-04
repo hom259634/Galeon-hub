@@ -2076,7 +2076,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
             text += `🎁 Tu bono de bienvenida se ha movido a tu saldo principal.\n`;
         }
 
-        text += `\n¡Gracias por confiar en nosotros!`;
+        text += `\n\n\n¡Gracias por confiar en nosotros!`;
 
         await bot.telegram.sendMessage(request.user_id,
             text,
