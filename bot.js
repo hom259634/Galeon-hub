@@ -160,7 +160,7 @@ function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, cred
         text += `🎁 Tu bono de bienvenida se ha movido a tu saldo principal.\n`;
     }
 
-    text += `\n\n¡Gracias por confiar en nosotros!`;
+    text += `\n\n\n¡Gracias por confiar en nosotros!`;
     return text;
 }
 
@@ -966,7 +966,7 @@ bot.command('mi_dinero', async (ctx) => {
     const usdToCup = (usd * rate).toFixed(2);
 
     const text = `💰 <b>Tu saldo actual es:</b>\n\n` +
-        `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (aprox. ${cupToUsd} USD)\n` +
+        `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
         `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n` +
         `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n\n` +
         `¿Qué deseas hacer?`;
@@ -1207,7 +1207,7 @@ bot.action('my_money', async (ctx) => {
     const usdToCup = (usd * rate).toFixed(2);
 
     const text = `💰 <b>Tu saldo actual es:</b>\n\n` +
-        `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (aprox. ${cupToUsd} USD)\n` +
+        `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
         `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n` +
         `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n\n` +
         `¿Qué deseas hacer?`;
@@ -2283,7 +2283,7 @@ bot.on(message('text'), async (ctx) => {
             const usdToCup = (usd * rate).toFixed(2);
 
             const text = `💰 <b>Tu saldo actual es:</b>\n\n` +
-                `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (aprox. ${cupToUsd} USD)\n` +
+                `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
                 `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n` +
                 `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n\n` +
                 `¿Qué deseas hacer?`;
@@ -3728,7 +3728,7 @@ bot.on(message('photo'), async (ctx) => {
                         );
                     } catch (e) {}
                 }
-                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n\n ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
+                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n\n\n ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
             } catch (e) {
                 console.error(e);
                 await ctx.reply('❌ Error al procesar la solicitud. Por favor, intenta más tarde o contacta a soporte.', getMainKeyboard(ctx));
