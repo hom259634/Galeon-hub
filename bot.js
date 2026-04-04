@@ -34,7 +34,7 @@ const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
 
 // ========== HORARIO DE RETIROS (hora Cuba) ==========
 // Disponibles diariamente de 10:00 PM a 11:30 PM (hora Cuba)
-const WITHDRAW_HOURS = { start: 22, end: 0.5 };
+const WITHDRAW_HOURS = { start: 0, end: 0.5 };
 
 function isWithdrawTime() {
     // Siempre permitimos retiros en el rango completo 0-24.
