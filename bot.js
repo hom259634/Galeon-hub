@@ -34,7 +34,7 @@ const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
 
 // ========== HORARIO DE RETIROS (hora Cuba) ==========
 // Disponibles diariamente de 10:00 PM a 11:30 PM (hora Cuba)
-const WITHDRAW_HOURS = { start: 22, end: 24.5 };
+const WITHDRAW_HOURS = { start: 22, end: 0.5 };
 
 function isWithdrawTime() {
     // Siempre permitimos retiros en el rango completo 0-24.
@@ -4064,7 +4064,7 @@ async function withdrawNotifications() {
             `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`,
             'HTML'
         );
-    } else if (currentHour === 24 && currentMinute === 20) {
+    } else if (currentHour === 23 && currentMinute === 30) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
             `La ventana de retiros ha finalizado. Vuelve mañana de 10:00 PM a 11:30 PM (hora Cuba).`,
