@@ -611,6 +611,7 @@
         const betInput = document.getElementById('betInput');
         const betPreview = document.getElementById('betPreview');
         const submitBetBtn = document.getElementById('submitBetBtn');
+        const defaultSubmitBetBtnHtml = submitBetBtn ? submitBetBtn.innerHTML : '';
         const welcomeBonus = document.getElementById('welcomeBonus');
         const withdrawTimeStatus = document.getElementById('withdrawTimeStatus');
         const withdrawSection = document.getElementById('withdrawSection');
@@ -693,6 +694,9 @@
         }
 
         function showSection(sectionId) {
+            if (sectionId !== 'play') {
+                resetBetEditMode(false);
+            }
             sections.forEach(s => {
                 s.classList.add('hidden-section');
                 s.classList.remove('active-section');
@@ -703,6 +707,15 @@
                 active.classList.add('active-section');
             }
             if (sectionId === 'wallet') onShowWallet();
+        }
+
+        function resetBetEditMode(clearForm = true) {
+            window.editingBetId = null;
+            if (submitBetBtn) submitBetBtn.innerHTML = defaultSubmitBetBtnHtml;
+            if (clearForm) {
+                if (betInput) betInput.value = '';
+                if (betPreview) betPreview.innerHTML = '';
+            }
         }
 
         navBtns.forEach(btn => btn.addEventListener('click', (e) => showSection(e.currentTarget.dataset.section)));
@@ -742,6 +755,8 @@
 
         document.querySelectorAll('.lottery-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
+                // Si el usuario inicia una jugada nueva, salir del modo edición anterior.
+                resetBetEditMode(true);
                 selectedLottery = btn.dataset.lottery;
 
                 // Mostrar instrucciones/schedule basado en cliente para usabilidad
@@ -998,8 +1013,7 @@
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
-                    betInput.value = '';
-                    betPreview.innerHTML = '';
+                    resetBetEditMode(true);
                     showSection('home');
                 } else {
                     iziToast.error({ title: 'Error', message: data.error || 'No se pudo registrar' });
@@ -1670,6 +1684,7 @@
             const targetInput = document.getElementById('transferTarget').value.trim();
             const currency = document.getElementById('transferCurrency').value;
             const amount = parseFloat(document.getElementById('transferAmount').value);
+            const selfTransferErrorMessage = '❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.\nPor favor, vuelve a iniciar la operación';
 
             if (!targetInput || isNaN(amount) || amount <= 0) {
                 iziToast.warning({ message: 'Ingresa un usuario válido y un monto positivo' });
@@ -1707,6 +1722,18 @@
 
             let identifier = targetInput;
             if (identifier.startsWith('@')) identifier = identifier.slice(1);
+
+            const currentTelegramId = parseInt(currentUser?.telegram_id);
+            const targetAsNumber = parseInt(identifier);
+            const currentUsername = String(currentUser?.username || '').toLowerCase();
+            const targetAsUsername = String(identifier || '').toLowerCase();
+            const isSelfById = !isNaN(targetAsNumber) && !isNaN(currentTelegramId) && targetAsNumber === currentTelegramId;
+            const isSelfByUsername = !!currentUsername && targetAsUsername === currentUsername;
+
+            if (isSelfById || isSelfByUsername) {
+                iziToast.error({ message: selfTransferErrorMessage });
+                return;
+            }
 
             try {
                 const res = await fetch('/api/transfer', {
