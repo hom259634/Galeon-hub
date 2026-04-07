@@ -1161,7 +1161,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `También puedes usar <b>D</b> (decena) o <b>T</b> (terminal):\n` +
                 `- <code>D2 con 5 cup</code> significa 20, 21, ..., 29 con 5 cup cada uno.\n` +
                 `- <code>T5 con 5 cup</code> significa 05, 15, ..., 95 con 5 cup cada uno.\n\n` +
-                `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 5 cup\nT5*1 usd\n34*2 cup\n\n` +
+                `Ejemplos:\n12 con 5 cup\n34*2 usd\n79 10 34 con 50 cup\nD2 con 5 cup\nT5*1 usd\n\n` +
                 `💭 <b>Escribe tus jugadas (una o varias líneas):</b>`;
             break;
         case 'corridos':
