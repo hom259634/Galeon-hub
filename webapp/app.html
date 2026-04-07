@@ -1684,7 +1684,7 @@
             const targetInput = document.getElementById('transferTarget').value.trim();
             const currency = document.getElementById('transferCurrency').value;
             const amount = parseFloat(document.getElementById('transferAmount').value);
-            const selfTransferErrorMessage = '❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.\nPor favor, vuelve a iniciar la operación';
+            const selfTransferErrorMessage = '❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.';
 
             if (!targetInput || isNaN(amount) || amount <= 0) {
                 iziToast.warning({ message: 'Ingresa un usuario válido y un monto positivo' });
