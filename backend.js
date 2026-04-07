@@ -947,6 +947,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
 // --- Transferencia entre usuarios ---
 app.post('/api/transfer', async (req, res) => {
     const { from, to, amount, currency } = req.body;
+    const selfTransferErrorMessage = '❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.\nPor favor, vuelve a iniciar la operación';
     if (!from || !to || !amount || !currency || amount <= 0) {
         return res.status(400).json({ error: 'Datos inválidos' });
     }
@@ -986,7 +987,7 @@ app.post('/api/transfer', async (req, res) => {
     }
 
     if (from === to) {
-        return res.status(400).json({ error: 'No puedes transferirte a ti mismo\nPor favor, vuelve a iniciar la operación' });
+        return res.status(400).json({ error: selfTransferErrorMessage });
     }
 
     const userFrom = await getOrCreateUser(parseInt(from));
@@ -1017,6 +1018,9 @@ app.post('/api/transfer', async (req, res) => {
     }
     if (!targetUser) {
         return res.status(404).json({ error: 'Usuario destino no encontrado' });
+    }
+    if (targetUserId === parseInt(from)) {
+        return res.status(400).json({ error: selfTransferErrorMessage });
     }
 
     // Regla: USD solo se transfiere desde saldo USD.

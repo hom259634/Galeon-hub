@@ -814,10 +814,8 @@ function playLotteryKbd() {
 
 function playTypeKbd() {
     const buttons = [
-        [Markup.button.callback('🎯 Fijo', 'type_fijo')],
-        [Markup.button.callback('🏃 Corridos', 'type_corridos')],
-        [Markup.button.callback('💯 Centena', 'type_centena')],
-        [Markup.button.callback('🔒 Parle', 'type_parle')],
+        [Markup.button.callback('🎯 Fijo', 'type_fijo'), Markup.button.callback('🏃 Corridos', 'type_corridos')],
+        [Markup.button.callback('💯 Centena', 'type_centena'), Markup.button.callback('🔒 Parle', 'type_parle')],
         [Markup.button.callback('◀ Volver', 'play')]
     ];
     return Markup.inlineKeyboard(buttons);
@@ -1158,11 +1156,11 @@ bot.action(/type_(.+)/, async (ctx) => {
         case 'fijo':
             instructions = `🎯 <b>FIJO</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
-                `Escribe una línea por cada jugada. Puedes poner varios números separados por espacios o comas en la misma línea.\n` +
-                `<b>Formato:</b> <code>12 con 5 cup</code>  o  <code>09 10 34*2cup</code>\n` +
+                `Escribe una línea por cada jugada. Puedes poner varios números de 2 DÍGITOS separados por espacios o comas en la misma línea.\n` +
+                `<b>Formato:</b> <code>12 con 5 cup</code> o <code>79 10 34*20 cup</code>\n` +
                 `También puedes usar <b>D</b> (decena) o <b>T</b> (terminal):\n` +
-                `- <code>D2 con 5 cup</code> significa 20, 21, ..., 29 con <b>5 cup cada uno</b>.\n` +
-                `- <code>T5 con 5 cup</code> significa 05, 15, ..., 95 con <b>5 cup cada uno</b>.\n\n` +
+                `- <code>D2 con 5 cup</code> significa 20, 21, ..., 29 con 5 cup cada uno.\n` +
+                `- <code>T5 con 5 cup</code> significa 05, 15, ..., 95 con 5 cup cada uno.\n\n` +
                 `Ejemplos:\n12 con 5 cup\n09 10 34 con 50 cup\nD2 con 5 cup\nT5*1 usd\n34*2 cup\n\n` +
                 `💭 <b>Escribe tus jugadas (una o varias líneas):</b>`;
             break;
@@ -1170,27 +1168,27 @@ bot.action(/type_(.+)/, async (ctx) => {
             instructions = `🏃 <b>CORRIDOS</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada número de 2 DÍGITOS, o varios separados.\n` +
-                `<b>Formato:</b> <code>17 con 5 cup</code>  o  <code>32 33*5cup</code>\n\n` +
-                `Ejemplo:\n17 con 5 cup\n32 33*5 cup\n62 con 1 usd\n\nD5 con 1 usd\nT9*2 cup\n\n` +
+                `<b>Formato:</b> <code>17 con 5 cup</code> o <code>32 33*10 cup</code>\n\n` +
+                `Ejemplos:\n17 con 5 cup\n32 33*10 cup\n62 con 1 usd\n\nD5 con 1 usd\nT9*20 cup\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'centena':
             instructions = `💯 <b>CENTENA</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada número de 3 DÍGITOS, o varios separados.\n` +
-                `<b>Formato:</b> <code>517 con 2 cup</code>  o  <code>019 123*1cup</code>\n` +
+                `<b>Formato:</b> <code>517 con 8 cup</code> o <code>419 123*10 cup</code>\n` +
                 `También puedes usar <b>D</b> o <b>T</b>:\n` +
-                `- <code>D5 con 2 cup</code> = 500 a 599 con <b>2 cup cada una</b>.\n` +
-                `- <code>T9 con 2 cup</code> = 009, 019, ..., 999 con <b>2 cup cada una</b>.\n\n` +
-                `Ejemplo:\n517 con 2 cup\n019 123*5 cup\n\n` +
+                `- <code>D5 con 2 cup</code> = 500 a 599 con 2 cup cada una.\n` +
+                `- <code>T9 con 2 cup</code> = 009, 019, ..., 999 con 2 cup cada una.\n\n` +
+                `Ejemplos:\n517 con 8 cup\n419 123*10 cup\n234 con 1 usd\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'parle':
             instructions = `🔒 <b>PARLE</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
-                `Escribe una línea por cada combinación de dos números de 2 dígitos separados por "x".\n` +
-                `<b>Formato:</b> <code>17x32 con 5 cup</code>  o  <code>17x62*2cup</code>\n\n` +
-                `Ejemplo:\n17x63 con 10 cup\n31x56 54x95 con 10 cup\n32x62 con 1 usd\n\n` +
+                `Escribe una línea por cada combinación de dos números de 2 DÍGITOS, separados por "x"; o varias combinaciones separadas.\n` +
+                `<b>Formato:</b> <code>17x32 con 5 cup</code> o <code>21x93 54x95*2 cup</code>\n\n` +
+                `Ejemplos:\n17x32 con 5 cup\n21x93 54x95 con 2 cup\n32x62*0.5 usd\n\n` +
                 `💭 <b>Escribe tus parles:</b>`;
             break;
     }
