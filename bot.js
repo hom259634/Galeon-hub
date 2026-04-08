@@ -1177,9 +1177,6 @@ bot.action(/type_(.+)/, async (ctx) => {
                 priceInfo +
                 `Escribe una línea por cada número de 3 DÍGITOS, o varios separados.\n` +
                 `<b>Formato:</b> <code>517 con 8 cup</code> o <code>419 123*10 cup</code>\n` +
-                `También puedes usar <b>D</b> o <b>T</b>:\n` +
-                `- <code>D5 con 2 cup</code> = 500 a 599 con 2 cup cada una.\n` +
-                `- <code>T9 con 2 cup</code> = 009, 019, ..., 999 con 2 cup cada una.\n\n` +
                 `Ejemplos:\n517 con 8 cup\n419 123*10 cup\n234 con 1 usd\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
