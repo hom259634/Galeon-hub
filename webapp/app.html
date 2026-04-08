@@ -158,7 +158,8 @@
         .balance-container {
             display: flex;
             flex-direction: column;
-            align-items: flex-end;
+            align-items: flex-start;
+            text-align: left;
             line-height: 1.2;
         }
         .balance-main {
@@ -169,7 +170,7 @@
             font-size: 1.25rem;
             font-weight: 700;
             color: #eef2ff;
-            margin-left: 10px;
+            margin-left: 0;
         }
         .withdraw-time-status {
             font-size: 0.85rem;
@@ -311,7 +312,7 @@
         </div>
         <div class="glass-card px-3 py-2 balance-container">
             <span class="balance-main" id="quickBalance">0.00 CUP</span>
-            <span class="balance-secondary" id="quickBalanceUsd">≈ 0.00 USD</span>
+            <span class="balance-secondary" id="quickBalanceUsd">0.00 USD</span>
         </div>
     </div>
 
@@ -819,16 +820,33 @@
             let instructions = '';
             switch (selectedBetType) {
                 case 'fijo':
-                    instructions = `🎯 <b>FIJO</b> – Número de 2 dígitos. Usa "D" para decena o "T" para terminal.<br>Ej: 12 con 1 usd, D2 con 1 usd, T5*5cup<br>Varios números por línea: 10 02 78 90 87 con 10 cup`;
+                    instructions = `🎯 <b>FIJO</b> – Número de 2 dígitos.<br>
+Ej: 17 con 1 usd<br>
+32*10 cup<br>
+Varios por línea: 17 32 45 con 5 cup<br>
+Usa "D" para decena o "T" para terminal.<br>
+Ej: D2 con 1 usd<br>
+T5*5 cup<br>`;
                     break;
                 case 'corridos':
-                    instructions = `🏃 <b>CORRIDOS</b> – Número de 2 dígitos. Ej: 17 con 1 usd, 32 con 10 cup<br>Varios: 17 32 45 con 5 cup`;
+                    instructions = `🏃 <b>CORRIDOS</b> – Número de 2 dígitos.<br>
+Ej: 15 con 10 cup<br>
+28*1 usd<br>
+Varios por línea: 15 28 92 con 20 cup<br>
+D9 con 30 cup<br>
+T4*1 usd<br>`;
                     break;
                 case 'centena':
-                    instructions = `💯 <b>CENTENA</b> – Número de 3 dígitos. Ej: 517 con 1 usd, 019*10 cup<br>Varios: 517 019 123 con 1 usd`;
+                    instructions = `💯 <b>CENTENA</b> – Número de 3 dígitos.<br>
+Ej: 517 con 30 cup<br>
+239*0.5 usd<br>
+Varios por línea: 517 239 123 con 20 cup<br>`;
                     break;
                 case 'parle':
-                    instructions = `🔒 <b>PARLE</b> – Dos números de 2 dígitos separados por "x". Ej: 17x32 con 1 usd, 17x62*2 usd<br>Varios: 17x32 17x62 32x62 con 5 cup`;
+                    instructions = `🔒 <b>PARLE</b> – Dos números de 2 dígitos separados por "x".<br>
+Ej: 17x32*10 cup<br>
+17x62 con 0.5 usd<br>
+Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     break;
             }
             instructions += `<br><br>💰 <b>Pago:</b> x${multiplier}<br>📉 <b>Mín:</b> ${minCup} CUP / ${minUsd} USD<br>📈 <b>Máx:</b> ${maxCup} CUP / ${maxUsd} USD`;
