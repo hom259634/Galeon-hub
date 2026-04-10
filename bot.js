@@ -2124,76 +2124,133 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
     const rates = await getExchangeRates();
     const formattedWinning = formatWinningNumber(winningStr);
 
-    for (const bet of bets || []) {
-        const { data: userBefore } = await supabase
-            .from('users')
-            .select('usd, cup, bonus_cup')
-            .eq('telegram_id', bet.user_id)
-            .single();
+    const normalizeTwoDigits = (value) => {
+        const digits = String(value ?? '').replace(/\D/g, '');
+        if (!digits) return null;
+        return digits.slice(-2).padStart(2, '0');
+    };
 
-        let premioTotalUSD = 0;
-        let premioTotalCUP = 0;
-        const items = bet.items || [];
+    const normalizeThreeDigits = (value) => {
+        const digits = String(value ?? '').replace(/\D/g, '');
+        if (!digits) return null;
+        return digits.slice(-3).padStart(3, '0');
+    };
+
+    const normalizeParle = (value) => {
+        const normalized = String(value ?? '')
+            .toLowerCase()
+            .replace(/\s+/g, '')
+            .replace(/[-/]/g, 'x');
+        const match = normalized.match(/^(\d{1,2})x(\d{1,2})$/);
+        if (!match) return null;
+        const a = match[1].padStart(2, '0');
+        const b = match[2].padStart(2, '0');
+        return [a, b].sort().join('x');
+    };
+
+    const corridosSet = new Set(corridos.map(n => normalizeTwoDigits(n)).filter(Boolean));
+    const parlesSet = new Set(parles.map(p => normalizeParle(p)).filter(Boolean));
+
+    // Agrupar por usuario para enviar UN solo mensaje final por sesión.
+    const userResults = new Map();
+
+    for (const bet of bets || []) {
+        const userId = bet.user_id;
+        if (!userResults.has(userId)) {
+            userResults.set(userId, { premioTotalUSD: 0, premioTotalCUP: 0 });
+        }
+
+        let premioBetUSD = 0;
+        let premioBetCUP = 0;
+        const items = Array.isArray(bet.items) ? bet.items : [];
 
         for (const item of items) {
-            const numero = item.numero;
+            const numeroRaw = String(item.numero ?? '').trim();
+            const numeroUpper = numeroRaw.toUpperCase();
             const multiplicador = multiplierMap[bet.bet_type] || 0;
             let ganado = false;
 
             switch (bet.bet_type) {
                 case 'fijo':
-                    if (numero.startsWith('D')) {
-                        const digito = numero[1];
+                    if (/^D\d$/.test(numeroUpper)) {
+                        const digito = numeroUpper[1];
                         if (fijo.startsWith(digito)) ganado = true;
-                    } else if (numero.startsWith('T')) {
-                        const digito = numero[1];
+                    } else if (/^T\d$/.test(numeroUpper)) {
+                        const digito = numeroUpper[1];
                         if (fijo.endsWith(digito)) ganado = true;
                     } else {
-                        if (numero === fijo) ganado = true;
+                        const normalizedFijo = normalizeTwoDigits(numeroRaw);
+                        if (normalizedFijo && normalizedFijo === fijo) ganado = true;
                     }
                     break;
-                case 'corridos':
-                    if (corridos.includes(numero)) ganado = true;
+                case 'corridos': {
+                    const normalizedCorrido = normalizeTwoDigits(numeroRaw);
+                    if (normalizedCorrido && corridosSet.has(normalizedCorrido)) ganado = true;
                     break;
-                case 'centena':
-                    if (numero === centena) ganado = true;
+                }
+                case 'centena': {
+                    const normalizedCentena = normalizeThreeDigits(numeroRaw);
+                    if (normalizedCentena && normalizedCentena === centena) ganado = true;
                     break;
-                case 'parle':
-                    if (parles.includes(numero)) ganado = true;
+                }
+                case 'parle': {
+                    const normalizedParle = normalizeParle(numeroRaw);
+                    if (normalizedParle && parlesSet.has(normalizedParle)) ganado = true;
                     break;
+                }
             }
 
             if (ganado) {
-                premioTotalUSD += item.usd * multiplicador;
-                premioTotalCUP += item.cup * multiplicador;
+                premioBetUSD += (parseFloat(item.usd) || 0) * multiplicador;
+                premioBetCUP += (parseFloat(item.cup) || 0) * multiplicador;
             }
         }
 
+        if (premioBetUSD > 0 || premioBetCUP > 0) {
+            const current = userResults.get(userId);
+            current.premioTotalUSD += premioBetUSD;
+            current.premioTotalCUP += premioBetCUP;
+            userResults.set(userId, current);
+        }
+    }
+
+    for (const [userId, result] of userResults.entries()) {
+        const { data: userBefore } = await supabase
+            .from('users')
+            .select('usd, cup, bonus_cup')
+            .eq('telegram_id', userId)
+            .single();
+
+        const premioTotalUSD = parseFloat(result.premioTotalUSD) || 0;
+        const premioTotalCUP = parseFloat(result.premioTotalCUP) || 0;
+
         if (premioTotalUSD > 0 || premioTotalCUP > 0) {
-            let newUsd = parseFloat(userBefore.usd) + premioTotalUSD;
-            let newCup = parseFloat(userBefore.cup) + premioTotalCUP;
+            const currentUsd = parseFloat(userBefore?.usd) || 0;
+            const currentCup = parseFloat(userBefore?.cup) || 0;
+            const newUsd = currentUsd + premioTotalUSD;
+            const newCup = currentCup + premioTotalCUP;
 
             await supabase
                 .from('users')
                 .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
-                .eq('telegram_id', bet.user_id);
+                .eq('telegram_id', userId);
 
             const usdEquivalentCup = (premioTotalUSD * rates.rate).toFixed(2);
             const cupEquivalentUsd = (premioTotalCUP / rates.rate).toFixed(2);
-            await bot.telegram.sendMessage(bet.user_id,
+            await bot.telegram.sendMessage(userId,
                 `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
                 `🔢 Número ganador: <code>${formattedWinning}</code>\n` +
                 `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} - ${escapeHTML(session.time_slot)}\n` +
                 `💰 Premio: ${premioTotalCUP.toFixed(2)} CUP / ${premioTotalUSD.toFixed(2)} USD\n` +
                 (premioTotalCUP > 0 ? `   (equivale a ${cupEquivalentUsd} USD aprox.)\n` : '') +
                 (premioTotalUSD > 0 ? `   (equivale a ${usdEquivalentCup} CUP aprox.)\n` : '') +
-                `\n📊 <b>Saldo anterior:</b> ${parseFloat(userBefore.cup).toFixed(2)} CUP / ${parseFloat(userBefore.usd).toFixed(2)} USD\n` +
+                `\n📊 <b>Saldo anterior:</b> ${currentCup.toFixed(2)} CUP / ${currentUsd.toFixed(2)} USD\n` +
                 `📊 <b>Saldo actual:</b> ${newCup.toFixed(2)} CUP / ${newUsd.toFixed(2)} USD\n\n` +
                 `✅ El premio ya fue acreditado a tu saldo. ¡Sigue disfrutando!`,
                 { parse_mode: 'HTML' }
             );
         } else {
-            await bot.telegram.sendMessage(bet.user_id,
+            await bot.telegram.sendMessage(userId,
                 `🔢 <b>Números ganadores de ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} (${session.date} - ${escapeHTML(session.time_slot)})</b>\n\n` +
                 `Número: <code>${formattedWinning}</code>\n\n` +
                 `😔 Esta vez no has ganado, pero no te desanimes. ¡Sigue intentando y la suerte llegará!\n\n` +
@@ -2203,13 +2260,36 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         }
     }
 
-    await broadcastToAllUsers(
+    const participantIds = new Set(Array.from(userResults.keys()).map(id => String(id)));
+    const { data: allUsers } = await supabase
+        .from('users')
+        .select('telegram_id');
+
+    const publicWinningMessage =
         `📢 <b>NÚMERO GANADOR PUBLICADO</b>\n\n` +
         `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> - Turno <b>${escapeHTML(session.time_slot)}</b>\n` +
         `📅 Fecha: ${session.date}\n` +
         `🔢 Número: <code>${formattedWinning}</code>\n\n` +
-        `💬 Revisa tu historial para ver si has ganado. ¡Mucha suerte en las próximas jugadas!`
-    );
+        `💬 Revisa tu historial para ver si has ganado. ¡Mucha suerte en las próximas jugadas!`;
+
+    for (const u of allUsers || []) {
+        const targetId = String(u.telegram_id);
+        if (participantIds.has(targetId)) continue;
+        try {
+            await bot.telegram.sendMessage(u.telegram_id, publicWinningMessage, { parse_mode: 'HTML' });
+            await new Promise(resolve => setTimeout(resolve, 30));
+        } catch (e) {
+            const errorMessage = (e?.message || '').toLowerCase();
+            const isInactive =
+                errorMessage.includes('chat not found') ||
+                errorMessage.includes('bot was blocked by the user') ||
+                errorMessage.includes('user is deactivated') ||
+                errorMessage.includes('forbidden: bot was blocked by the user');
+            if (!isInactive) {
+                console.warn(`Error enviando número ganador público a ${u.telegram_id}:`, e.message);
+            }
+        }
+    }
 
     await ctx.reply(`✅ Números ganadores publicados y premios calculados correctamente.`);
     return true;
