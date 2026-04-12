@@ -2138,8 +2138,8 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         .select('*')
         .eq('session_id', sessionId);
 
-    const rates = await getExchangeRates();
     const formattedWinning = formatWinningNumber(winningStr);
+    const BET_TYPE_ORDER = ['fijo', 'corridos', 'centena', 'parle'];
 
     const userResults = new Map();
 
@@ -2154,14 +2154,18 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
             const beforeUsd = parseFloat(userBefore?.usd) || 0;
             const beforeCup = parseFloat(userBefore?.cup) || 0;
             userResults.set(bet.user_id, {
-                won: false,
-                totalPremioUSD: 0,
-                totalPremioCUP: 0,
-                winningBetTypes: new Set(),
                 beforeUsd,
                 beforeCup,
-                afterUsd: beforeUsd,
-                afterCup: beforeCup
+                departments: new Map()
+            });
+        }
+
+        const result = userResults.get(bet.user_id);
+        if (!result.departments.has(bet.bet_type)) {
+            result.departments.set(bet.bet_type, {
+                won: false,
+                premioUSD: 0,
+                premioCUP: 0
             });
         }
 
@@ -2204,21 +2208,11 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         }
 
         if (premioTotalUSD > 0 || premioTotalCUP > 0) {
-            let newUsd = parseFloat(userBefore.usd) + premioTotalUSD;
-            let newCup = parseFloat(userBefore.cup) + premioTotalCUP;
-
-            await supabase
-                .from('users')
-                .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
-                .eq('telegram_id', bet.user_id);
-
-            const result = userResults.get(bet.user_id);
-            result.won = true;
-            result.totalPremioUSD += premioTotalUSD;
-            result.totalPremioCUP += premioTotalCUP;
-            result.winningBetTypes.add(formatBetTypeLabel(bet.bet_type));
-            result.afterUsd = (parseFloat(result.afterUsd) || 0) + premioTotalUSD;
-            result.afterCup = (parseFloat(result.afterCup) || 0) + premioTotalCUP;
+            const deptResult = result.departments.get(bet.bet_type);
+            deptResult.won = true;
+            deptResult.premioUSD += premioTotalUSD;
+            deptResult.premioCUP += premioTotalCUP;
+            result.departments.set(bet.bet_type, deptResult);
             userResults.set(bet.user_id, result);
         }
     }
@@ -2226,32 +2220,50 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
     const winnerIds = new Set();
 
     for (const [userId, result] of userResults.entries()) {
-        if (result.won) {
+        let totalPremioUSD = 0;
+        let totalPremioCUP = 0;
+
+        for (const deptResult of result.departments.values()) {
+            totalPremioUSD += deptResult.premioUSD;
+            totalPremioCUP += deptResult.premioCUP;
+        }
+
+        if (totalPremioUSD > 0 || totalPremioCUP > 0) {
             winnerIds.add(String(userId));
-            const usdEquivalentCup = (result.totalPremioUSD * rates.rate).toFixed(2);
-            const cupEquivalentUsd = (result.totalPremioCUP / rates.rate).toFixed(2);
-            const winningTypesText = Array.from(result.winningBetTypes).join(', ') || 'N/D';
-            await bot.telegram.sendMessage(userId,
-                `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
-                `🔢 Número ganador: <code>${formattedWinning}</code>\n` +
-                `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} - ${escapeHTML(session.time_slot)}\n` +
-                `🏷️ Tipo: ${escapeHTML(winningTypesText)}\n` +
-                `💰 Premio: ${result.totalPremioCUP.toFixed(2)} CUP / ${result.totalPremioUSD.toFixed(2)} USD\n` +
-                (result.totalPremioCUP > 0 ? `   (equivale a ${cupEquivalentUsd} USD aprox.)\n` : '') +
-                (result.totalPremioUSD > 0 ? `   (equivale a ${usdEquivalentCup} CUP aprox.)\n` : '') +
-                `\n📊 <b>Saldo anterior:</b> ${result.beforeCup.toFixed(2)} CUP / ${result.beforeUsd.toFixed(2)} USD\n` +
-                `📊 <b>Saldo actual:</b> ${result.afterCup.toFixed(2)} CUP / ${result.afterUsd.toFixed(2)} USD\n\n` +
-                `✅ El premio ya fue acreditado a tu saldo. ¡Sigue disfrutando!`,
-                { parse_mode: 'HTML' }
-            );
-        } else {
-            await bot.telegram.sendMessage(userId,
-                `🔢 <b>Números ganadores de ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} (${session.date} - ${escapeHTML(session.time_slot)})</b>\n\n` +
-                `Número: <code>${formattedWinning}</code>\n\n` +
-                `😔 Esta vez no has ganado, pero no te desanimes. ¡Sigue intentando y la suerte llegará!\n\n` +
-                `🍀 ¡Mucha suerte en la próxima!`,
-                { parse_mode: 'HTML' }
-            );
+            const newUsd = result.beforeUsd + totalPremioUSD;
+            const newCup = result.beforeCup + totalPremioCUP;
+
+            await supabase
+                .from('users')
+                .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
+                .eq('telegram_id', userId);
+        }
+
+        const orderedDepartments = Array.from(result.departments.entries())
+            .sort((a, b) => BET_TYPE_ORDER.indexOf(a[0]) - BET_TYPE_ORDER.indexOf(b[0]));
+
+        for (const [betType, deptResult] of orderedDepartments) {
+            const typeLabel = escapeHTML(formatBetTypeLabel(betType));
+            if (deptResult.won) {
+                await bot.telegram.sendMessage(userId,
+                    `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
+                    `🔢 Número ganador: <code>${formattedWinning}</code>\n` +
+                    `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} - ${escapeHTML(session.time_slot)}\n` +
+                    `🏷️ Tipo: ${typeLabel}\n` +
+                    `💰 Premio: ${deptResult.premioCUP.toFixed(2)} CUP / ${deptResult.premioUSD.toFixed(2)} USD\n` +
+                    `✅ El premio ya fue acreditado a tu saldo. ¡Sigue disfrutando!`,
+                    { parse_mode: 'HTML' }
+                );
+            } else {
+                await bot.telegram.sendMessage(userId,
+                    `🔢 <b>Números ganadores de ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} (${session.date} - ${escapeHTML(session.time_slot)})</b>\n\n` +
+                    `Número: <code>${formattedWinning}</code>\n` +
+                    `🏷️ Tipo: ${typeLabel}\n\n` +
+                    `😔 No has ganado esta vez. ¡Sigue intentando!\n\n` +
+                    `🍀 ¡Mucha suerte en la próxima!`,
+                    { parse_mode: 'HTML' }
+                );
+            }
         }
     }
 
