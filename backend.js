@@ -440,6 +440,22 @@ function expandDTNumbers(token, betType) {
     return [];
 }
 
+function normalizeParleValue(value) {
+    const match = String(value || '').trim().match(/^(\d{2})\s*x\s*(\d{2})$/i);
+    if (!match) return null;
+    return [match[1], match[2]].sort().join('x');
+}
+
+function formatBetTypeLabel(betType) {
+    const labels = {
+        fijo: 'Fijo',
+        corridos: 'Corridos',
+        centena: 'Centena',
+        parle: 'Parle'
+    };
+    return labels[String(betType || '').toLowerCase()] || (betType || 'N/D');
+}
+
 // ========== FUNCIONES DE PARSEO DE APUESTAS ==========
 function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
@@ -1698,6 +1714,7 @@ app.get('/api/admin/winning-numbers/:sessionId/winners', requireAdmin, async (re
         `${corridos[0]}x${corridos[2]}`,
         `${corridos[1]}x${corridos[2]}`
     ];
+    const normalizedParles = new Set(parles.map(normalizeParleValue).filter(Boolean));
 
     const { data: multipliers } = await supabase
         .from('play_prices')
@@ -1749,7 +1766,7 @@ app.get('/api/admin/winning-numbers/:sessionId/winners', requireAdmin, async (re
                     }
                     break;
                 case 'parle':
-                    if (parles.includes(numero)) ganado = true;
+                    if (normalizedParles.has(normalizeParleValue(numero))) ganado = true;
                     break;
             }
 
@@ -1822,6 +1839,7 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
         `${corridos[0]}x${corridos[2]}`,
         `${corridos[1]}x${corridos[2]}`
     ];
+    const normalizedParles = new Set(parles.map(normalizeParleValue).filter(Boolean));
 
     const { error: insertError } = await supabase
         .from('winning_numbers')
@@ -1846,9 +1864,27 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
         .select('*')
         .eq('session_id', sessionId);
 
-    const rates = await getExchangeRates();
+    const formatted = cleanNumber.replace(/(\d{3})(\d{4})/, '$1 $2');
+    const userResults = new Map();
 
     for (const bet of bets || []) {
+        if (!userResults.has(bet.user_id)) {
+            const { data: user } = await supabase
+                .from('users')
+                .select('usd, cup')
+                .eq('telegram_id', bet.user_id)
+                .single();
+
+            userResults.set(bet.user_id, {
+                won: false,
+                totalPremioUSD: 0,
+                totalPremioCUP: 0,
+                winningBetTypes: new Set(),
+                beforeUsd: parseFloat(user?.usd) || 0,
+                beforeCup: parseFloat(user?.cup) || 0
+            });
+        }
+
         let premioTotalUSD = 0;
         let premioTotalCUP = 0;
         const items = bet.items || [];
@@ -1885,7 +1921,7 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
                     }
                     break;
                 case 'parle':
-                    if (parles.includes(numero)) ganado = true;
+                    if (normalizedParles.has(normalizeParleValue(numero))) ganado = true;
                     break;
             }
 
@@ -1896,35 +1932,40 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
         }
 
         if (premioTotalUSD > 0 || premioTotalCUP > 0) {
-            const { data: user } = await supabase
-                .from('users')
-                .select('usd, cup')
-                .eq('telegram_id', bet.user_id)
-                .single();
+            const result = userResults.get(bet.user_id);
+            result.won = true;
+            result.totalPremioUSD += premioTotalUSD;
+            result.totalPremioCUP += premioTotalCUP;
+            result.winningBetTypes.add(formatBetTypeLabel(bet.bet_type));
+            userResults.set(bet.user_id, result);
+        }
+    }
 
-            let newUsd = parseFloat(user.usd) + premioTotalUSD;
-            let newCup = parseFloat(user.cup) + premioTotalCUP;
+    for (const [userId, result] of userResults.entries()) {
+        if (result.won) {
+            const newUsd = result.beforeUsd + result.totalPremioUSD;
+            const newCup = result.beforeCup + result.totalPremioCUP;
 
             await supabase
                 .from('users')
                 .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
-                .eq('telegram_id', bet.user_id);
+                .eq('telegram_id', userId);
 
-            const formatted = cleanNumber.replace(/(\d{3})(\d{4})/, '$1 $2');
+            const winningTypesText = Array.from(result.winningBetTypes).join(', ') || 'N/D';
             try {
-                await bot.telegram.sendMessage(bet.user_id,
+                await bot.telegram.sendMessage(userId,
                     `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
                     `🔢 Número ganador: <code>${formatted}</code>\n` +
                     `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${session.lottery} - ${session.time_slot}\n` +
-                    `💰 Premio: ${premioTotalUSD > 0 ? premioTotalUSD.toFixed(2) + ' USD' : ''} ${premioTotalCUP > 0 ? premioTotalCUP.toFixed(2) + ' CUP' : ''}\n` +
+                    `🏷️ Tipo: ${winningTypesText}\n` +
+                    `💰 Premio: ${result.totalPremioUSD > 0 ? result.totalPremioUSD.toFixed(2) + ' USD' : ''} ${result.totalPremioCUP > 0 ? result.totalPremioCUP.toFixed(2) + ' CUP' : ''}\n` +
                     `✅ El premio ya fue acreditado a tu saldo.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
         } else {
-            const formatted = cleanNumber.replace(/(\d{3})(\d{4})/, '$1 $2');
             try {
-                await bot.telegram.sendMessage(bet.user_id,
+                await bot.telegram.sendMessage(userId,
                     `🔢 <b>Números ganadores de ${regionMap[session.lottery]?.emoji || '🎰'} ${session.lottery} (${session.date} - ${session.time_slot})</b>\n\n` +
                     `Número: <code>${formatted}</code>\n\n` +
                     `😔 No has ganado esta vez. ¡Sigue intentando!`,

@@ -120,6 +120,22 @@ function escapeHTML(text) {
         .replace(/'/g, '&#039;');
 }
 
+function normalizeParleValue(value) {
+    const match = String(value || '').trim().match(/^(\d{2})\s*x\s*(\d{2})$/i);
+    if (!match) return null;
+    return [match[1], match[2]].sort().join('x');
+}
+
+function formatBetTypeLabel(betType) {
+    const labels = {
+        fijo: 'Fijo',
+        corridos: 'Corridos',
+        centena: 'Centena',
+        parle: 'Parle'
+    };
+    return labels[String(betType || '').toLowerCase()] || (betType || 'N/D');
+}
+
 function buildLastBetsText(bets) {
     let text = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
 
@@ -2093,6 +2109,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         `${corridos[0]}x${corridos[2]}`,
         `${corridos[1]}x${corridos[2]}`
     ];
+    const normalizedParles = new Set(parles.map(normalizeParleValue).filter(Boolean));
 
     const { error: insertError } = await supabase
         .from('winning_numbers')
@@ -2140,6 +2157,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
                 won: false,
                 totalPremioUSD: 0,
                 totalPremioCUP: 0,
+                winningBetTypes: new Set(),
                 beforeUsd,
                 beforeCup,
                 afterUsd: beforeUsd,
@@ -2175,7 +2193,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
                     if (numero === centena) ganado = true;
                     break;
                 case 'parle':
-                    if (parles.includes(numero)) ganado = true;
+                    if (normalizedParles.has(normalizeParleValue(numero))) ganado = true;
                     break;
             }
 
@@ -2198,6 +2216,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
             result.won = true;
             result.totalPremioUSD += premioTotalUSD;
             result.totalPremioCUP += premioTotalCUP;
+            result.winningBetTypes.add(formatBetTypeLabel(bet.bet_type));
             result.afterUsd = (parseFloat(result.afterUsd) || 0) + premioTotalUSD;
             result.afterCup = (parseFloat(result.afterCup) || 0) + premioTotalCUP;
             userResults.set(bet.user_id, result);
@@ -2211,10 +2230,12 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
             winnerIds.add(String(userId));
             const usdEquivalentCup = (result.totalPremioUSD * rates.rate).toFixed(2);
             const cupEquivalentUsd = (result.totalPremioCUP / rates.rate).toFixed(2);
+            const winningTypesText = Array.from(result.winningBetTypes).join(', ') || 'N/D';
             await bot.telegram.sendMessage(userId,
                 `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
                 `🔢 Número ganador: <code>${formattedWinning}</code>\n` +
                 `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} - ${escapeHTML(session.time_slot)}\n` +
+                `🏷️ Tipo: ${escapeHTML(winningTypesText)}\n` +
                 `💰 Premio: ${result.totalPremioCUP.toFixed(2)} CUP / ${result.totalPremioUSD.toFixed(2)} USD\n` +
                 (result.totalPremioCUP > 0 ? `   (equivale a ${cupEquivalentUsd} USD aprox.)\n` : '') +
                 (result.totalPremioUSD > 0 ? `   (equivale a ${usdEquivalentCup} CUP aprox.)\n` : '') +
