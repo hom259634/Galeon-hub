@@ -783,7 +783,7 @@
                     } else {
                         activeSession = null;
                         if (activeSlot) {
-                            sessionStatus.innerHTML = `<span class="text-yellow-400">⚠️ La sección de <b>${activeSlot}</b> está cerrada. Contacta al administrador.</span>`;
+                            sessionStatus.innerHTML = `<span class="text-yellow-400">⚠️ La sesión de <b>${activeSlot}</b> está cerrada. Contacta al administrador.</span>`;
                         } else {
                             sessionStatus.innerHTML = `<span class="text-red-400">⏰ Fuera de horario para esta lotería.</span>`;
                         }
@@ -1392,7 +1392,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 html += `<div class="bg-gray-800/50 p-3 rounded-xl bet-item" onclick="showBetDetail(${b.id})">
                     <div class="flex justify-between items-center">
                         <div>
-                            <span class="font-bold">🎰 ${b.lottery} - ${b.bet_type}</span>
+                            <span class="font-bold">🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(formatBetTypeLabel(b.bet_type))}</span>
                             <p class="text-xs text-gray-400">${date}</p>
                         </div>
                         <div class="text-right">
@@ -1450,7 +1450,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             betDetailModalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-2">Detalles de la jugada</h4>
-                <p class="text-sm text-gray-300 mb-1">🎰 ${bet.lottery} - ${bet.bet_type}</p>
+                <p class="text-sm text-gray-300 mb-1">🎰 ${escapeHTML(bet.lottery)} - ${escapeHTML(formatBetTypeLabel(bet.bet_type))}</p>
                 <p class="text-xs text-gray-400 mb-3">${new Date(bet.placed_at).toLocaleString()}</p>
                 
                 <div class="mb-3">
@@ -1897,6 +1897,57 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: '✅ Números publicados. Los ganadores recibirán notificación.' });
+                    // --- Notificación automática de ganador/perdedor para el usuario actual ---
+                    try {
+                        const res2 = await fetch(`/api/admin/winning-numbers/${sessionId}/winners?userId=${currentUser.telegram_id}`);
+                        const data = await res2.json();
+                        const winningNumber = data.winning_number;
+                        let userFound = false;
+                        if (data.winners && data.winners.length > 0) {
+                            // Buscar si el usuario actual está entre los ganadores
+                            for (const w of data.winners) {
+                                if (String(w.telegram_id || w.user_id) === String(currentUser.telegram_id)) {
+                                    userFound = true;
+                                    const msg = `🎉 <b>¡FELICIDADES! Has ganado</b><br>\n\n🔢 Número ganador: <b>${winningNumber}</b><br>💰 Premio: <b>${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</b><br>✅ El premio ya fue acreditado a tu saldo.`;
+                                    iziToast.success({
+                                        title: '¡Ganador!',
+                                        message: msg,
+                                        timeout: 12000,
+                                        position: 'topRight',
+                                        icon: 'fas fa-trophy',
+                                        messageLineHeight: '1.5',
+                                        displayMode: 2,
+                                        layout: 2,
+                                        drag: false,
+                                        close: true,
+                                        pauseOnHover: true,
+                                        onOpening: function(instance, toast) { toast.querySelector('.iziToast-message').style.whiteSpace = 'pre-line'; }
+                                    });
+                                    break;
+                                }
+                            }
+                        }
+                        if (!userFound) {
+                            const msg = `🔢 <b>Número ganador: ${winningNumber}</b><br>😔 No has ganado esta vez. ¡Sigue intentando!`;
+                            iziToast.info({
+                                title: 'Resultado',
+                                message: msg,
+                                timeout: 9000,
+                                position: 'topRight',
+                                icon: 'fas fa-info-circle',
+                                messageLineHeight: '1.5',
+                                displayMode: 2,
+                                layout: 2,
+                                drag: false,
+                                close: true,
+                                pauseOnHover: true,
+                                onOpening: function(instance, toast) { toast.querySelector('.iziToast-message').style.whiteSpace = 'pre-line'; }
+                            });
+                        }
+                    } catch (e) {
+                        // No notificar si hay error, pero mostrar en consola
+                        console.warn('No se pudo obtener resultado de ganador/perdedor para notificación automática', e);
+                    }
                     renderPublishWinningView();
                 } else {
                     const err = await res.json();
@@ -2359,7 +2410,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 let html = `<h4 class="text-xl font-semibold mb-4">🎲 Pagos, Mínimos y Máximos</h4>`;
                 prices.forEach(p => {
                     html += `<div class="mb-6 bg-gray-800/50 p-4 rounded-xl">
-                        <span class="font-bold text-lg mb-2 block">${p.bet_type}</span>
+                        <span class="font-bold text-lg mb-2 block">${escapeHTML(formatBetTypeLabel(p.bet_type))}</span>
                         
                         <div class="mb-3 p-3 bg-gray-700/30 rounded-lg">
                             <p class="text-sm font-semibold text-yellow-300 mb-2">🎁 PAGO (MULTIPLICADOR)</p>
@@ -2453,7 +2504,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 witMethods.forEach(m => text += `  • ${m.name} (${m.currency}) - ${m.card} / ${m.confirm} | Mín: ${m.min_amount !== null ? m.min_amount : '-'} | Máx: ${m.max_amount !== null ? m.max_amount : '-'}\n`);
                 text += `\n🎲 <b>Pagos, Mínimos y Máximos por jugada:</b>\n`;
                 prices.forEach(p => text += 
-                    `  • ${p.bet_type}: Pago x${p.payout_multiplier || 0}  |  Mín: ${p.min_cup||0} CUP / ${p.min_usd||0} USD  |  Máx: ${p.max_cup||'∞'} CUP / ${p.max_usd||'∞'} USD\n`
+                    `  • ${formatBetTypeLabel(p.bet_type)}: Pago x${p.payout_multiplier || 0}  |  Mín: ${p.min_cup||0} CUP / ${p.min_usd||0} USD  |  Máx: ${p.max_cup||'∞'} CUP / ${p.max_usd||'∞'} USD\n`
                 );
 
                 adminViewContainer.innerHTML = `<pre class="whitespace-pre-wrap font-mono text-sm text-gray-200 bg-gray-800/50 p-4 rounded-xl">${text}</pre>`;
@@ -2659,6 +2710,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (m === '"') return '&quot;';
                 return m;
             });
+        }
+
+        function formatBetTypeLabel(betType) {
+            const labels = {
+                fijo: 'Fijo',
+                corridos: 'Corridos',
+                centena: 'Centena',
+                parle: 'Parle'
+            };
+            const key = String(betType || '').toLowerCase();
+            if (!key) return 'N/D';
+            return labels[key] || (key.charAt(0).toUpperCase() + key.slice(1));
         }
 
         function parseAmountWithCurrency(text) {
