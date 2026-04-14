@@ -1829,16 +1829,15 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
     const centena = cleanNumber.slice(0, 3);
     const cuarteta = cleanNumber.slice(3);
     const fijo = centena.slice(1);
-    const corridos = [
-        fijo,
-        cuarteta.slice(0, 2),
-        cuarteta.slice(2)
+    const corrido1 = cuarteta.slice(0, 2);
+    const corrido2 = cuarteta.slice(2);
+    // Generar todas las combinaciones posibles de parles (ambos órdenes)
+    const parlePairs = [
+        [fijo, corrido1], [corrido1, fijo],
+        [fijo, corrido2], [corrido2, fijo],
+        [corrido1, corrido2], [corrido2, corrido1]
     ];
-    const parles = [
-        `${corridos[0]}x${corridos[1]}`,
-        `${corridos[0]}x${corridos[2]}`,
-        `${corridos[1]}x${corridos[2]}`
-    ];
+    const parles = parlePairs.map(([a, b]) => `${a}x${b}`);
     const normalizedParles = new Set(parles.map(normalizeParleValue).filter(Boolean));
 
     const { error: insertError } = await supabase

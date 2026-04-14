@@ -3717,7 +3717,7 @@ bot.on(message('text'), async (ctx) => {
             // Confirmación al usuario
             let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
                 `🎰 Lotería: ${escapeHTML(session.lottery || 'N/D')}\n` +
-                `🔢 Tipo: ${escapeHTML(betType)}\n` +
+                `🔢 Tipo: ${escapeHTML(formatBetTypeLabel(betType))}\n` +
                 `📋 Jugadas: ${escapeHTML(rawText)}\n` +
                 `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
                 `¡Buena suerte! 🍀`;
