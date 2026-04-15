@@ -1389,14 +1389,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             let html = '';
             bets.forEach(b => {
                 const date = new Date(b.placed_at).toLocaleString();
-                html += `<div class="bg-gray-800/50 p-3 rounded-xl bet-item" onclick="showBetDetail(${b.id})">
+                html += `<div class="bg-gray-800/50 p-4 rounded-xl bet-item mb-3" onclick="showBetDetail(${b.id})">
                     <div class="flex justify-between items-center">
                         <div>
-                            <span class="font-bold">🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(formatBetTypeLabel(b.bet_type))}</span>
+                            <span class="font-bold text-base">🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(formatBetTypeLabel(b.bet_type))}</span>
                             <p class="text-xs text-gray-400">${date}</p>
                         </div>
                         <div class="text-right">
-                            <span class="text-cyan-300">${b.cost_cup} CUP</span>
+                            <span class="text-cyan-300 text-sm font-bold">${b.cost_cup} CUP</span>
                             <span class="text-gray-400 text-xs block">${b.cost_usd} USD</span>
                         </div>
                     </div>
