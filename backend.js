@@ -1801,6 +1801,11 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
     const fijo = centena.slice(1);
     const corrido1 = cuarteta.slice(0, 2);
     const corrido2 = cuarteta.slice(2);
+    const corridos = [
+        fijo,
+        corrido1,
+        corrido2
+    ];
     // Generar todas las combinaciones posibles de parles (ambos órdenes)
     const parlePairs = [
         [fijo, corrido1], [corrido1, fijo],
