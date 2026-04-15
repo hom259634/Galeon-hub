@@ -128,39 +128,9 @@ async function getExchangeRateMLC() {
 
 async function setExchangeRateUSD(rate) {
     await supabase
-        // Acreditar destino y migrar bono si existe (misma lógica que en el bot)
-        const targetCup = parseFloat(targetUser.cup) || 0;
-        const targetUsd = parseFloat(targetUser.usd) || 0;
-        const targetBonusCup = parseFloat(targetUser.bonus_cup) || 0;
-
-        let updatedTargetCup = targetCup;
-        let updatedTargetUsd = targetUsd;
-        let bonusMovedCup = 0;
-
-        if (currency === 'CUP') {
-            updatedTargetCup += parsedAmount;
-        } else if (currency === 'USD') {
-            updatedTargetUsd += parsedAmount;
-        } else {
-            updatedTargetCup += debitPlan.amountCUP;
-        }
-
-        if (targetBonusCup > 0) {
-            updatedTargetCup += targetBonusCup;
-            bonusMovedCup = targetBonusCup;
-        }
-
-        const targetUpdatePayload = {
-            cup: updatedTargetCup,
-            usd: updatedTargetUsd,
-            updated_at: new Date()
-        };
-        if (bonusMovedCup > 0) targetUpdatePayload.bonus_cup = 0;
-
-        await supabase
-            .from('users')
-            .update(targetUpdatePayload)
-            .eq('telegram_id', targetUserId);
+        .from('exchange_rate')
+        .update({ rate, updated_at: new Date() })
+        .eq('id', 1);
 }
 
 async function setExchangeRateMLC(rate) {

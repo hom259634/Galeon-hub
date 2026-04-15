@@ -142,7 +142,7 @@ function buildLastBetsText(bets) {
     bets.forEach((b, i) => {
         const date = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY hh:mm A');
         const lottery = escapeHTML(b.lottery || '-');
-        const betType = escapeHTML(b.bet_type || '-');
+        const betType = escapeHTML(formatBetTypeLabel(b.bet_type) || '-');
         const rawTextLines = String(b.raw_text || '')
             .split(/\r?\n/)
             .map(line => line.trim())
