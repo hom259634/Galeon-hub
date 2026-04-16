@@ -1704,7 +1704,7 @@ app.get('/api/admin/winning-numbers/:sessionId/winners', requireAdmin, async (re
         let premioTotalCUP = 0;
         const items = bet.items || [];
 
-        for (const item of items) {
+            for (const item of items) {
             const numero = item.numero;
             const multiplicador = multiplierMap[bet.bet_type] || 0;
             let ganado = false;
@@ -1741,8 +1741,10 @@ app.get('/api/admin/winning-numbers/:sessionId/winners', requireAdmin, async (re
             }
 
             if (ganado) {
-                if (item.currency === 'USD') premioTotalUSD += item.amount * multiplicador;
-                else if (item.currency === 'CUP') premioTotalCUP += item.amount * multiplicador;
+                const itemUsd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount || 0) : 0);
+                const itemCup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount || 0) : 0);
+                premioTotalUSD += (itemUsd || 0) * multiplicador;
+                premioTotalCUP += (itemCup || 0) * multiplicador;
             }
         }
 
@@ -1907,8 +1909,10 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
             }
 
             if (ganado) {
-                if (item.currency === 'USD') premioTotalUSD += item.amount * multiplicador;
-                else if (item.currency === 'CUP') premioTotalCUP += item.amount * multiplicador;
+                const itemUsd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount || 0) : 0);
+                const itemCup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount || 0) : 0);
+                premioTotalUSD += (itemUsd || 0) * multiplicador;
+                premioTotalCUP += (itemCup || 0) * multiplicador;
             }
         }
 
