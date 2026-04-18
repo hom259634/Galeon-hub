@@ -1160,13 +1160,18 @@ app.post('/api/bets', async (req, res) => {
         }
     }
 
-    // Verificación temprana: asegurar que si la apuesta incluye CUP, el usuario
-    // tenga suficiente suma de `cup + bonus_cup` para cubrir el totalCUP.
-    const userCup = parseFloat(user.cup) || 0;
-    const userBonusCup = parseFloat(user.bonus_cup) || 0;
-    const availableCupNow = userCup + userBonusCup;
-    if (totalCUP > 0 && availableCupNow < totalCUP) {
-        return res.status(400).json({ error: 'Saldo CUP insuficiente. Por favor, recarga', debug: { userCup, userBonusCup, availableCupNow, totalCUP, parsed } });
+    // Si NO se está editando (no se proporcionó betId), verificar tempranamente
+    // que el usuario tenga saldo suficiente (cup + bonus_cup) para cubrir la apuesta.
+    // En el caso de edición el flujo más abajo reembolsa primero la apuesta anterior
+    // y luego vuelve a intentar descontar, por lo que esta verificación impediría
+    // la edición legítima; por eso solo la aplicamos para nuevas apuestas.
+    if (!betId) {
+        const userCup = parseFloat(user.cup) || 0;
+        const userBonusCup = parseFloat(user.bonus_cup) || 0;
+        const availableCupNow = userCup + userBonusCup;
+        if (totalCUP > 0 && availableCupNow < totalCUP) {
+            return res.status(400).json({ error: 'Saldo CUP insuficiente. Por favor, recarga', debug: { userCup, userBonusCup, availableCupNow, totalCUP, parsed } });
+        }
     }
 
     // Helper para parsear floats seguros
