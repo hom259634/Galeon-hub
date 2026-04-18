@@ -153,7 +153,7 @@ function buildLastBetsText(bets) {
         const usd = (parseFloat(b.cost_usd) || 0).toFixed(2);
 
         text += `<b>${i + 1}.</b>\n` +
-            `<pre>Lotería : ${lottery}\nTipo    : ${betType}\nJugada  : ${rawText}\nMonto   : ${cup} CUP / ${usd} USD\nHora    : ${date}</pre>\n`;
+            `<pre>Lotería : ${lottery}\nTipo    : ${betType}\nJugada  : ${rawText}\nMonto   : ${cup} CUP / ${usd} USD\nFecha y Hora : ${date}</pre>\n`;
     });
 
     text += '¿Quieres ver más? Puedes consultar el historial completo en la Web-App.';
