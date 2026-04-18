@@ -574,9 +574,9 @@
 
 <!-- MODAL para confirmar descartar edición -->
 <div id="discardEditModal" class="modal hidden" onclick="if(event.target===this) this.classList.add('hidden')">
-    <div class="modal-content">
-         <h3 id="discardModalTitle" class="text-lg font-bold text-white mb-2">4pu3$t4$ Qva®</h3>
-         <p class="text-sm text-gray-300 mb-4">Tienes una edición en curso. ¿Deseas descartar la edición de tu apuesta?</p>
+        <div class="modal-content">
+            <h3 id="discardModalTitle" class="text-lg font-bold text-white mb-4">4pu3$t4$ Qva®</h3>
+            <p class="text-sm text-gray-300 mb-6">Tienes una edición en curso. ¿Deseas descartar la edición de tu apuesta?</p>
         <div class="flex gap-3">
             <button onclick="cancelDiscard()" class="flex-1 bg-gray-600 py-2 rounded-lg">No</button>
             <button onclick="confirmDiscard()" class="flex-1 bg-red-600 py-2 rounded-lg">Sí, descartar</button>
@@ -1160,11 +1160,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 // lo que envía el servidor.
                     if (!window.editingBetId) {
                     if (newTotalCUP > 0 && availableCup < newTotalCUP) {
-                        iziToast.error({ message: `Saldo CUP insuficiente. Por favor, recarga` });
+                        iziToast.error({ message: `❌Saldo CUP insuficiente. Por favor, recarga` });
                         return;
                     }
                     if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
-                        iziToast.error({ message: `Saldo USD insuficiente. Por favor, recarga` });
+                        iziToast.error({ message: `❌Saldo USD insuficiente. Por favor, recarga` });
                         return;
                     }
                 }
