@@ -626,7 +626,7 @@ app.post('/api/auth', async (req, res) => {
 
     const botInfo = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`)
         .then(r => r.data.result)
-        .catch(() => ({ username: '4pu3$t4$_QvaBot' }));
+        .catch(() => ({ username: '4pu3$t4$_QvaBot', first_name: '4pu3$t4$ Qva®' }));
 
     res.json({
         user,
@@ -637,6 +637,7 @@ app.post('/api/auth', async (req, res) => {
         exchangeRateUSDT: rates.rate_usdt,
         exchangeRateTRX: rates.rate_trx,
         botUsername: botInfo.username,
+        botDisplayName: botInfo.first_name || botInfo.username || '4pu3$t4$ Qva®',
         bonusCupDefault: BONUS_CUP_DEFAULT
     });
 });
