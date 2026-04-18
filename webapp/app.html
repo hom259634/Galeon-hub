@@ -575,8 +575,7 @@
 <!-- MODAL para confirmar descartar edición -->
 <div id="discardEditModal" class="modal hidden" onclick="if(event.target===this) this.classList.add('hidden')">
     <div class="modal-content">
-        <h4 class="text-xl font-bold mb-2">¿Descartar cambios?</h4>
-        <p class="text-sm text-gray-300 mb-4">Tienes una edición en curso. ¿Deseas descartar la edición de tu apuesta?</p>
+         <p class="text-sm text-gray-300 mb-4">Tienes una edición en curso. ¿Deseas descartar la edición de tu apuesta?</p>
         <div class="flex gap-3">
             <button onclick="cancelDiscard()" class="flex-1 bg-gray-600 py-2 rounded-lg">No</button>
             <button onclick="confirmDiscard()" class="flex-1 bg-red-600 py-2 rounded-lg">Sí, descartar</button>
@@ -813,6 +812,10 @@
             if (modal) modal.classList.add('hidden');
             delete window._pendingReset;
         }
+
+        // Exponer a scope global para que los botones inline onclick funcionen
+        window.confirmDiscard = confirmDiscard;
+        window.cancelDiscard = cancelDiscard;
 
         navBtns.forEach(btn => btn.addEventListener('click', (e) => {
             const target = e.currentTarget.dataset.section;
