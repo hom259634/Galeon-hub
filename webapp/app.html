@@ -294,6 +294,25 @@
         }
         .pending-item.approved { border-left-color: #10b981; }
         .pending-item.rejected { border-left-color: #ef4444; }
+        /* Corrección: asegurar que las notificaciones (iziToast) queden por encima
+           y sean opacas para evitar que se mezclen con elementos detrás */
+        .iziToast, .iziToast-wrapper, .iziToast-box {
+            z-index: 999999 !important;
+        }
+        .iziToast {
+            background: rgba(0,0,0,0.88) !important;
+            color: #ffffff !important;
+            border-radius: 12px !important;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.6) !important;
+        }
+        .iziToast .iziToast-title, .iziToast .iziToast-message {
+            color: #ffffff !important;
+        }
+        /* Tonos por tipo para mejorar contraste */
+        .iziToast-info { background: #0ea5e9 !important; }
+        .iziToast-success { background: #10b981 !important; }
+        .iziToast-warning { background: #f59e0b !important; }
+        .iziToast-error { background: #ef4444 !important; }
     </style>
 </head>
 <body class="p-4 md:p-6">
@@ -716,6 +735,8 @@
             if (clearForm) {
                 if (betInput) betInput.value = '';
                 if (betPreview) betPreview.innerHTML = '';
+                // quitar selección visual de tipo
+                document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
             }
         }
 
@@ -803,6 +824,9 @@
                     iziToast.warning({ message: 'No hay sesión activa para esta lotería' });
                     return;
                 }
+                // Marcar visualmente el botón seleccionado
+                document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
                 selectedBetType = btn.dataset.type;
                 betFormContainer.classList.remove('hidden');
                 updateBetInstructions();
@@ -973,6 +997,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         submitBetBtn.addEventListener('click', async () => {
             if (!activeSession) { iziToast.error({ message: 'No hay sesión activa' }); return; }
+            // Asegurar que tomamos el tipo actualmente seleccionado en la UI
+            selectedBetType = (document.querySelector('.type-btn.active') || {}).dataset?.type || selectedBetType;
             const rawText = betInput.value.trim();
             if (!rawText || !selectedBetType) { iziToast.warning({ message: 'Escribe tus jugadas' }); return; }
             
@@ -1013,6 +1039,35 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
 
             try {
+                // Antes de enviar, validar localmente saldo disponible.
+                const newTotalCUP = parsed.totalCUP || 0;
+                const newTotalUSD = parsed.totalUSD || 0;
+                let availableCup = parseFloat(currentUser?.cup) || 0;
+                let availableUsd = parseFloat(currentUser?.usd) || 0;
+                // Si estamos editando, sumar de vuelta el monto original de la jugada para permitir reutilizarlo
+                let deltaCup = newTotalCUP;
+                let deltaUsd = newTotalUSD;
+                if (window.editingBetId) {
+                    const original = userBets.find(b => b.id === window.editingBetId);
+                    const origCup = original ? (parseFloat(original.cost_cup) || 0) : 0;
+                    const origUsd = original ? (parseFloat(original.cost_usd) || 0) : 0;
+                    // Durante edición el usuario ya tiene el original descontado, así que puede reutilizarlo
+                    availableCup += origCup;
+                    availableUsd += origUsd;
+                    deltaCup = newTotalCUP - origCup;
+                    deltaUsd = newTotalUSD - origUsd;
+                }
+
+                // Validación local: si la diferencia es positiva y no hay suficiente saldo, bloquear antes de llamar al servidor
+                if (newTotalCUP > 0 && availableCup < newTotalCUP) {
+                    iziToast.error({ message: `Saldo insuficiente: tienes ${availableCup.toFixed(2)} CUP disponible (incluyendo jugada original).` });
+                    return;
+                }
+                if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
+                    iziToast.error({ message: `Saldo insuficiente: tienes ${availableUsd.toFixed(2)} USD disponible (incluyendo jugada original).` });
+                    return;
+                }
+
                 const res = await fetch('/api/bets', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1020,9 +1075,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         userId: currentUser.telegram_id,
                         lottery: selectedLottery,
                         betType: selectedBetType,
+                        bet_type: selectedBetType,
                         rawText,
                         sessionId: activeSession.id,
-                        betId: window.editingBetId || null
+                        betId: window.editingBetId || null,
+                        delta_cup: Math.round((deltaCup || 0) * 100) / 100,
+                        delta_usd: Math.round((deltaUsd || 0) * 100) / 100
                     })
                 });
                 const data = await res.json();
@@ -1396,8 +1454,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <p class="text-xs text-gray-400">${date}</p>
                         </div>
                         <div class="text-right">
-                            <span class="text-cyan-300 text-sm font-bold">${b.cost_cup} CUP</span>
-                            <span class="text-gray-400 text-xs block">${b.cost_usd} USD</span>
+                            <span class="text-cyan-300 text-sm font-bold">
+                                ${b.cost_cup} CUP${(b.cost_usd !== undefined && b.cost_usd !== null && parseFloat(b.cost_usd) > 0) ? ' / ' + b.cost_usd + ' USD' : ''}
+                            </span>
                         </div>
                     </div>
                 </div>`;
@@ -1972,7 +2031,19 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     } else {
                         modalContent += `<div class="space-y-2 max-h-96 overflow-y-auto">`;
                         data.winners.forEach(w => {
-                            modalContent += `<div class="bg-gray-700/50 p-3 rounded-lg"><div class="flex justify-between"><span class="font-bold">${escapeHTML(w.first_name)}</span><span class="text-cyan-300">${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</span></div><p class="text-xs text-gray-400 mt-1">${escapeHTML(w.bet_text)}</p></div>`;
+                            // Mostrar tipo de jugada si viene en la respuesta
+                            const betTypeRaw = w.bet_type || w.betType || w.type || w.play_type || '';
+                            const betTypeLabel = escapeHTML(formatBetTypeLabel(betTypeRaw));
+                            modalContent += `<div class="bg-gray-700/50 p-3 rounded-lg">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <span class="font-bold">${escapeHTML(w.first_name)}</span>
+                                        <span class="ml-2 text-xs bg-gray-800 text-gray-200 px-2 py-0.5 rounded">${betTypeLabel}</span>
+                                    </div>
+                                    <span class="text-cyan-300">${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</span>
+                                </div>
+                                <p class="text-xs text-gray-400 mt-1">${escapeHTML(w.bet_text)}</p>
+                            </div>`;
                         });
                         modalContent += `</div>`;
                     }
