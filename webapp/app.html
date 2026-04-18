@@ -1248,6 +1248,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     rate_trx: data.exchangeRateTRX || 1
                 };
                 botUsername = data.botUsername || '4pu3$t4$_QvaBot';
+                // Prefer the bot's display name (friendly) if provided by the API
+                const botDisplayName = data.botDisplayName || '';
                 bonusCupDefault = data.bonusCupDefault || 70;
                 
                 // Show actual bonus if user has it, otherwise hide welcome bonus label
@@ -1274,11 +1276,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 try {
                     const discardTitleEl = document.getElementById('discardModalTitle');
                     if (discardTitleEl) {
-                        // Mostrar una versión legible del username del bot o usar el nombre por defecto
-                        const pretty = (botUsername && botUsername.length)
-                            ? botUsername.replace(/_/g, ' ').replace(/bot$/i, '').trim()
-                            : '4pu3$t4$ Qva®';
-                        discardTitleEl.innerText = pretty;
+                        // Hardcodear el título solicitado por el producto
+                        discardTitleEl.innerText = '4pu3$t4$ Qva®';
                     }
                 } catch (e) { /* silent */ }
                 updateBalanceUI();
@@ -1571,7 +1570,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         </div>
                         <div class="text-right">
                             <span class="text-cyan-300 text-sm font-bold">
-                                ${b.cost_cup} CUP${(b.cost_usd !== undefined && b.cost_usd !== null && parseFloat(b.cost_usd) > 0) ? ' / ' + b.cost_usd + ' USD' : ''}
+                                ${b.cost_cup}&nbsp;CUP${(b.cost_usd !== undefined && b.cost_usd !== null && parseFloat(b.cost_usd) > 0) ? ' / ' + b.cost_usd + '&nbsp;USD' : ''}
                             </span>
                         </div>
                     </div>
@@ -1634,7 +1633,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 </div>
                 
                 <div class="bg-gray-700/50 p-2 rounded-lg text-right">
-                    <p>Total: <span class="text-cyan-300">${bet.cost_cup} CUP</span> / <span class="text-yellow-300">${bet.cost_usd} USD</span></p>
+                    <p>Total: <span class="text-cyan-300">${bet.cost_cup}&nbsp;CUP</span> / <span class="text-yellow-300">${bet.cost_usd}&nbsp;USD</span></p>
                 </div>
                 
                 ${actionsHtml}
