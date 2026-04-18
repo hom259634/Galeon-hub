@@ -578,8 +578,8 @@
         <h4 class="text-xl font-bold mb-2">¿Descartar cambios?</h4>
         <p class="text-sm text-gray-300 mb-4">Tienes una edición en curso. ¿Deseas descartar la edición de tu apuesta?</p>
         <div class="flex gap-3">
-            <button onclick="(function(){document.getElementById('discardEditModal').classList.add('hidden'); delete window._pendingReset; })()" class="flex-1 bg-gray-600 py-2 rounded-lg">No</button>
-            <button onclick="(function(){ document.getElementById('discardEditModal').classList.add('hidden'); const p=window._pendingReset||{clearForm:true}; delete window._pendingReset; resetBetEditMode(!!p.clearForm, true); })()" class="flex-1 bg-red-600 py-2 rounded-lg">Sí, descartar</button>
+            <button onclick="cancelDiscard()" class="flex-1 bg-gray-600 py-2 rounded-lg">No</button>
+            <button onclick="confirmDiscard()" class="flex-1 bg-red-600 py-2 rounded-lg">Sí, descartar</button>
         </div>
     </div>
 </div>
@@ -762,7 +762,66 @@
             }
         }
 
-        navBtns.forEach(btn => btn.addEventListener('click', (e) => showSection(e.currentTarget.dataset.section)));
+        // Mostrar el modal y almacenar la acción pendiente cuando el usuario intenta
+        // navegar/cambiar tipo mientras está editando una jugada.
+        function promptDiscardAndStore(actionObj, clearForm) {
+            window._pendingReset = { action: actionObj, clearForm: !!clearForm };
+            const modal = document.getElementById('discardEditModal');
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function performPendingAction(action) {
+            if (!action) return;
+            // Suprimir prompts mientras ejecutamos la acción pendiente para evitar bucles
+            window._suppressDiscardPrompt = true;
+            try {
+                switch (action.type) {
+                    case 'lotterySelect': {
+                        const btn = document.querySelector(`[data-lottery="${action.lottery}"]`);
+                        if (btn) btn.click();
+                        break;
+                    }
+                    case 'navSection': {
+                        showSection(action.section);
+                        break;
+                    }
+                    case 'typeSelect': {
+                        const btn = document.querySelector(`[data-type="${action.betType}"]`);
+                        if (btn) btn.click();
+                        break;
+                    }
+                }
+            } finally {
+                // Restaurar el comportamiento después de un breve retraso para permitir
+                // que el click/acción procese sin reactivar el prompt.
+                setTimeout(() => { window._suppressDiscardPrompt = false; }, 200);
+            }
+        }
+
+        function confirmDiscard() {
+            const p = window._pendingReset || { clearForm: true };
+            const modal = document.getElementById('discardEditModal');
+            if (modal) modal.classList.add('hidden');
+            delete window._pendingReset;
+            // Forzar reset y luego ejecutar la acción pendiente
+            resetBetEditMode(!!p.clearForm, true);
+            if (p.action) performPendingAction(p.action);
+        }
+
+        function cancelDiscard() {
+            const modal = document.getElementById('discardEditModal');
+            if (modal) modal.classList.add('hidden');
+            delete window._pendingReset;
+        }
+
+        navBtns.forEach(btn => btn.addEventListener('click', (e) => {
+            const target = e.currentTarget.dataset.section;
+            if (window.editingBetId) {
+                promptDiscardAndStore({ type: 'navSection', section: target }, false);
+                return;
+            }
+            showSection(target);
+        }));
 
         // Verificar horario de loterías
         function checkLotterySchedule(lottery) {
@@ -799,8 +858,14 @@
 
         document.querySelectorAll('.lottery-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
+                // Si hay edición activa, preguntar antes de descartar. Guardar acción pendiente.
+                if (window.editingBetId && !window._suppressDiscardPrompt) {
+                    promptDiscardAndStore({ type: 'lotterySelect', lottery: btn.dataset.lottery }, true);
+                    return;
+                }
+
                 // Si el usuario inicia una jugada nueva, salir del modo edición anterior.
-                resetBetEditMode(true);
+                resetBetEditMode(true, true);
                 selectedLottery = btn.dataset.lottery;
 
                 // Mostrar instrucciones/schedule basado en cliente para usabilidad
@@ -844,6 +909,11 @@
             btn.addEventListener('click', () => {
                 if (!activeSession) {
                     iziToast.warning({ message: 'No hay sesión activa para esta lotería' });
+                    return;
+                }
+                // Si hay edición activa, preguntar antes de descartar y cambiar tipo
+                if (window.editingBetId && !window._suppressDiscardPrompt) {
+                    promptDiscardAndStore({ type: 'typeSelect', betType: btn.dataset.type }, false);
                     return;
                 }
                 // Marcar visualmente el botón seleccionado
@@ -1080,14 +1150,19 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     deltaUsd = newTotalUSD - origUsd;
                 }
 
-                // Validación local: si la diferencia es positiva y no hay suficiente saldo, bloquear antes de llamar al servidor
-                if (newTotalCUP > 0 && availableCup < newTotalCUP) {
-                    iziToast.error({ message: `Saldo insuficiente: tienes ${availableCup.toFixed(2)} CUP disponible (incluyendo jugada original).` });
-                    return;
-                }
-                if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
-                    iziToast.error({ message: `Saldo insuficiente: tienes ${availableUsd.toFixed(2)} USD disponible (incluyendo jugada original).` });
-                    return;
+                // Validación local de saldo solo para NUEVAS apuestas. Para edición
+                // dejamos que el backend gestione el reembolso y devuelva el mensaje
+                // oficial de 'saldo insuficiente', así el cliente mostrará exactamente
+                // lo que envía el servidor.
+                if (!window.editingBetId) {
+                    if (newTotalCUP > 0 && availableCup < newTotalCUP) {
+                        iziToast.error({ message: `Saldo insuficiente: tienes ${availableCup.toFixed(2)} CUP disponible.` });
+                        return;
+                    }
+                    if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
+                        iziToast.error({ message: `Saldo insuficiente: tienes ${availableUsd.toFixed(2)} USD disponible.` });
+                        return;
+                    }
                 }
 
                 // Usar POST en todas las circunstancias y, si es edición, enviar betId en el body
