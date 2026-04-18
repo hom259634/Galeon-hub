@@ -1090,10 +1090,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     return;
                 }
 
-                // Si estamos editando, usar PUT al recurso específico para que el backend actualice correctamente
-                const isEdit = !!window.editingBetId;
-                const url = isEdit ? `/api/bets/${window.editingBetId}` : '/api/bets';
-                const method = isEdit ? 'PUT' : 'POST';
+                // Usar POST en todas las circunstancias y, si es edición, enviar betId en el body
                 const payload = {
                     userId: currentUser.telegram_id,
                     lottery: selectedLottery,
@@ -1102,13 +1099,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     rawText,
                     sessionId: activeSession.id
                 };
-                if (isEdit) {
-                    payload.delta_cup = Math.round((deltaCup || 0) * 100) / 100;
-                    payload.delta_usd = Math.round((deltaUsd || 0) * 100) / 100;
+                if (window.editingBetId) {
+                    payload.betId = window.editingBetId;
                 }
 
-                const res = await fetch(url, {
-                    method,
+                const res = await fetch('/api/bets', {
+                    method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
