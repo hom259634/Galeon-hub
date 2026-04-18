@@ -572,6 +572,18 @@
     <div class="modal-content" id="modalBody"></div>
 </div>
 
+<!-- MODAL para confirmar descartar edición -->
+<div id="discardEditModal" class="modal hidden" onclick="if(event.target===this) this.classList.add('hidden')">
+    <div class="modal-content">
+        <h4 class="text-xl font-bold mb-2">¿Descartar cambios?</h4>
+        <p class="text-sm text-gray-300 mb-4">Tienes una edición en curso. ¿Deseas descartar la edición de tu apuesta?</p>
+        <div class="flex gap-3">
+            <button onclick="(function(){document.getElementById('discardEditModal').classList.add('hidden'); delete window._pendingReset; })()" class="flex-1 bg-gray-600 py-2 rounded-lg">No</button>
+            <button onclick="(function(){ document.getElementById('discardEditModal').classList.add('hidden'); const p=window._pendingReset||{clearForm:true}; delete window._pendingReset; resetBetEditMode(!!p.clearForm, true); })()" class="flex-1 bg-red-600 py-2 rounded-lg">Sí, descartar</button>
+        </div>
+    </div>
+</div>
+
 <script>
     (function() {
         const TG = window.Telegram.WebApp;
@@ -729,7 +741,16 @@
             if (sectionId === 'wallet') onShowWallet();
         }
 
-        function resetBetEditMode(clearForm = true) {
+        function resetBetEditMode(clearForm = true, force = false) {
+            // Si hay una edición en curso y no forzamos, preguntar antes de descartar
+            if (window.editingBetId && !force) {
+                // guardar params para aplicar en caso de confirmar
+                window._pendingReset = { clearForm };
+                const modal = document.getElementById('discardEditModal');
+                if (modal) modal.classList.remove('hidden');
+                return;
+            }
+
             window.editingBetId = null;
             if (submitBetBtn) submitBetBtn.innerHTML = defaultSubmitBetBtnHtml;
             if (clearForm) {
@@ -737,6 +758,7 @@
                 if (betPreview) betPreview.innerHTML = '';
                 // quitar selección visual de tipo
                 document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+                selectedBetType = null;
             }
         }
 
@@ -1068,20 +1090,27 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     return;
                 }
 
-                const res = await fetch('/api/bets', {
-                    method: 'POST',
+                // Si estamos editando, usar PUT al recurso específico para que el backend actualice correctamente
+                const isEdit = !!window.editingBetId;
+                const url = isEdit ? `/api/bets/${window.editingBetId}` : '/api/bets';
+                const method = isEdit ? 'PUT' : 'POST';
+                const payload = {
+                    userId: currentUser.telegram_id,
+                    lottery: selectedLottery,
+                    betType: selectedBetType,
+                    bet_type: selectedBetType,
+                    rawText,
+                    sessionId: activeSession.id
+                };
+                if (isEdit) {
+                    payload.delta_cup = Math.round((deltaCup || 0) * 100) / 100;
+                    payload.delta_usd = Math.round((deltaUsd || 0) * 100) / 100;
+                }
+
+                const res = await fetch(url, {
+                    method,
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        userId: currentUser.telegram_id,
-                        lottery: selectedLottery,
-                        betType: selectedBetType,
-                        bet_type: selectedBetType,
-                        rawText,
-                        sessionId: activeSession.id,
-                        betId: window.editingBetId || null,
-                        delta_cup: Math.round((deltaCup || 0) * 100) / 100,
-                        delta_usd: Math.round((deltaUsd || 0) * 100) / 100
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const data = await res.json();
                 if (res.ok) {
@@ -1089,7 +1118,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
-                    resetBetEditMode(true);
+                    // Forzar reset sin preguntar tras guardar exitosamente
+                    resetBetEditMode(true, true);
                     showSection('home');
                 } else {
                     iziToast.error({ title: 'Error', message: data.error || 'No se pudo registrar' });
