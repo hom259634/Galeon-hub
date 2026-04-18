@@ -2101,23 +2101,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 }
                             }
                         }
-                        if (!userFound) {
-                            const msg = `🔢 <b>Número ganador: ${winningNumber}</b><br>😔 No has ganado esta vez. ¡Sigue intentando!`;
-                            iziToast.info({
-                                title: 'Resultado',
-                                message: msg,
-                                timeout: 9000,
-                                position: 'topRight',
-                                icon: 'fas fa-info-circle',
-                                messageLineHeight: '1.5',
-                                displayMode: 2,
-                                layout: 2,
-                                drag: false,
-                                close: true,
-                                pauseOnHover: true,
-                                onOpening: function(instance, toast) { toast.querySelector('.iziToast-message').style.whiteSpace = 'pre-line'; }
-                            });
-                        }
+                        // Si el usuario no ganó, no mostrar toast informativo para evitar solapamiento
+                        // (Se mantiene la notificación de éxito general 'Números publicados')
                     } catch (e) {
                         // No notificar si hay error, pero mostrar en consola
                         console.warn('No se pudo obtener resultado de ganador/perdedor para notificación automática', e);
