@@ -575,6 +575,7 @@
 <!-- MODAL para confirmar descartar edición -->
 <div id="discardEditModal" class="modal hidden" onclick="if(event.target===this) this.classList.add('hidden')">
     <div class="modal-content">
+         <h3 id="discardModalTitle" class="text-lg font-bold text-white mb-2">4pu3$t4$ Qva®</h3>
          <p class="text-sm text-gray-300 mb-4">Tienes una edición en curso. ¿Deseas descartar la edición de tu apuesta?</p>
         <div class="flex gap-3">
             <button onclick="cancelDiscard()" class="flex-1 bg-gray-600 py-2 rounded-lg">No</button>
@@ -1157,13 +1158,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 // dejamos que el backend gestione el reembolso y devuelva el mensaje
                 // oficial de 'saldo insuficiente', así el cliente mostrará exactamente
                 // lo que envía el servidor.
-                if (!window.editingBetId) {
+                    if (!window.editingBetId) {
                     if (newTotalCUP > 0 && availableCup < newTotalCUP) {
-                        iziToast.error({ message: `Saldo insuficiente: tienes ${availableCup.toFixed(2)} CUP disponible.` });
+                        iziToast.error({ message: `Saldo CUP insuficiente. Por favor, recarga` });
                         return;
                     }
                     if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
-                        iziToast.error({ message: `Saldo insuficiente: tienes ${availableUsd.toFixed(2)} USD disponible.` });
+                        iziToast.error({ message: `Saldo USD insuficiente. Por favor, recarga` });
                         return;
                     }
                 }
@@ -1269,6 +1270,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
 
                 document.getElementById('userName').innerText = currentUser.first_name || 'Jugador';
+                // Actualizar título del modal de descartar con el nombre del bot (si está disponible)
+                try {
+                    const discardTitleEl = document.getElementById('discardModalTitle');
+                    if (discardTitleEl) {
+                        // Mostrar una versión legible del username del bot o usar el nombre por defecto
+                        const pretty = (botUsername && botUsername.length)
+                            ? botUsername.replace(/_/g, ' ').replace(/bot$/i, '').trim()
+                            : '4pu3$t4$ Qva®';
+                        discardTitleEl.innerText = pretty;
+                    }
+                } catch (e) { /* silent */ }
                 updateBalanceUI();
 
                 if (isAdmin) {
