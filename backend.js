@@ -1188,40 +1188,51 @@ app.post('/api/bets', async (req, res) => {
             if (!session || session.status !== 'open') return res.status(400).json({ error: 'No se puede editar: sesión cerrada' });
         }
 
-        // Reembolsar montos anteriores
+        // Cálculo seguro: no escribir en DB hasta que validemos que la edición es posible
         const oldUsd = safe(existingBet.cost_usd);
         const oldCup = safe(existingBet.cost_cup);
+
+        // Obtener balances actuales del usuario (antes de aplicar reembolso)
         const { data: uBefore } = await supabase.from('users').select('usd,cup,bonus_cup').eq('telegram_id', userId).single();
-        let refundUsd = safe(uBefore.usd) + oldUsd;
-        let refundCup = safe(uBefore.cup) + oldCup;
+        const beforeUsd = safe(uBefore.usd);
+        const beforeCup = safe(uBefore.cup);
+        const beforeBonus = safe(uBefore.bonus_cup);
 
-        await supabase.from('users').update({ usd: refundUsd, cup: refundCup, updated_at: new Date() }).eq('telegram_id', userId);
+        // Calcular saldos hipotéticos tras reembolso (sin escribir aún)
+        const usdAfterRefund = beforeUsd + oldUsd;
+        const cupAfterRefund = beforeCup + oldCup;
+        const bonusAfterRefund = beforeBonus;
 
-        // Recargar usuario y volver a intentar descontar para nueva apuesta
-        const userAfterRefund = await getOrCreateUser(parseInt(userId));
-        let newUsd = safe(userAfterRefund.usd);
-        let newBonus = safe(userAfterRefund.bonus_cup);
-        let newCup = safe(userAfterRefund.cup);
-
+        // Validar que con el reembolso el usuario pueda cubrir la nueva apuesta
         if (totalUSD > 0) {
-            if (newUsd < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente para la edición. Por favor. racarga' });
-            newUsd -= totalUSD;
+            if (usdAfterRefund < totalUSD) return res.status(400).json({ error: 'Saldo USD insuficiente para la edición. Por favor, recarga' });
         }
 
+        // Calcular cup/fondo restante si aplicamos totalCUP
+        let finalCup = cupAfterRefund;
+        let finalBonus = bonusAfterRefund;
         if (totalCUP > 0) {
-            // Permitir usar bono en CUP además del saldo CUP
-            const availableCupTotal = newCup + newBonus;
+            const availableCupTotal = cupAfterRefund + bonusAfterRefund;
             if (availableCupTotal < totalCUP) return res.status(400).json({ error: 'Saldo CUP insuficiente para la edición. Por favor, recarga' });
-            if (newCup >= totalCUP) {
-                newCup -= totalCUP;
+
+            if (finalCup >= totalCUP) {
+                finalCup = finalCup - totalCUP;
             } else {
-                const deficit = totalCUP - newCup;
-                newBonus = Math.max(0, newBonus - deficit);
-                newCup = 0;
+                const deficit = totalCUP - finalCup;
+                finalBonus = Math.max(0, finalBonus - deficit);
+                finalCup = 0;
             }
         }
 
-        await supabase.from('users').update({ usd: newUsd, bonus_cup: newBonus, cup: newCup, updated_at: new Date() }).eq('telegram_id', userId);
+        // Calcular saldo USD final
+        const finalUsd = usdAfterRefund - totalUSD;
+
+        // Todas las validaciones pasaron: aplicar cambios en DB en una sola actualización
+        const { error: userUpdateError } = await supabase.from('users').update({ usd: finalUsd, bonus_cup: finalBonus, cup: finalCup, updated_at: new Date() }).eq('telegram_id', userId);
+        if (userUpdateError) {
+            console.error('Error aplicando actualización de saldos para edición:', userUpdateError);
+            return res.status(500).json({ error: 'Error al procesar la edición' });
+        }
 
         const { data: updatedBet, error: updateError } = await supabase.from('bets').update({ raw_text: rawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, updated_at: new Date() }).eq('id', betId).select().single();
         if (updateError) {
