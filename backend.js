@@ -1777,7 +1777,8 @@ app.get('/api/admin/winning-numbers/:sessionId/winners', requireAdmin, async (re
                 first_name: user?.first_name || 'Usuario',
                 prize_usd: premioTotalUSD,
                 prize_cup: premioTotalCUP,
-                bet_text: bet.raw_text
+                bet_text: bet.raw_text,
+                bet_type: bet.bet_type || ''
             });
         }
     }
@@ -1953,13 +1954,47 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
         }
 
         if (totalPremioUSD > 0 || totalPremioCUP > 0) {
-            const newUsd = result.beforeUsd + totalPremioUSD;
-            const newCup = result.beforeCup + totalPremioCUP;
+            // Obtener posible bono y moverlo al saldo principal al ganar
+            let bonusMoved = 0;
+            try {
+                const { data: userRec } = await supabase
+                    .from('users')
+                    .select('usd, cup, bonus_cup')
+                    .eq('telegram_id', userId)
+                    .single();
 
-            await supabase
-                .from('users')
-                .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
-                .eq('telegram_id', userId);
+                const beforeUsdVal = parseFloat(userRec?.usd) || 0;
+                const beforeCupVal = parseFloat(userRec?.cup) || 0;
+                const bonusVal = parseFloat(userRec?.bonus_cup) || 0;
+
+                let newUsd = beforeUsdVal + totalPremioUSD;
+                let newCup = beforeCupVal + totalPremioCUP;
+
+                if (bonusVal > 0) {
+                    newCup += bonusVal;
+                    bonusMoved = bonusVal;
+                }
+
+                const updatePayload = { usd: newUsd, cup: newCup, updated_at: new Date() };
+                if (bonusMoved > 0) updatePayload.bonus_cup = 0;
+
+                await supabase
+                    .from('users')
+                    .update(updatePayload)
+                    .eq('telegram_id', userId);
+
+                // Guardar para notificaciones posteriores
+                if (!globalThis.__bonusMovedByUser) globalThis.__bonusMovedByUser = new Map();
+                globalThis.__bonusMovedByUser.set(String(userId), bonusMoved);
+            } catch (e) {
+                console.warn('Error moviendo bono al acreditar premio:', e?.message || e);
+                const newUsd = result.beforeUsd + totalPremioUSD;
+                const newCup = result.beforeCup + totalPremioCUP;
+                await supabase
+                    .from('users')
+                    .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
+                    .eq('telegram_id', userId);
+            }
         }
 
         const orderedDepartments = Array.from(result.departments.entries())

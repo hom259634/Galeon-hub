@@ -2230,13 +2230,47 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
 
         if (totalPremioUSD > 0 || totalPremioCUP > 0) {
             winnerIds.add(String(userId));
-            const newUsd = result.beforeUsd + totalPremioUSD;
-            const newCup = result.beforeCup + totalPremioCUP;
 
-            await supabase
-                .from('users')
-                .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
-                .eq('telegram_id', userId);
+            // Mover bono al saldo principal cuando el usuario gana
+            let bonusMovedCup = 0;
+            try {
+                const { data: userRec } = await supabase
+                    .from('users')
+                    .select('usd, cup, bonus_cup')
+                    .eq('telegram_id', userId)
+                    .single();
+
+                const beforeUsdVal = parseFloat(userRec?.usd) || 0;
+                const beforeCupVal = parseFloat(userRec?.cup) || 0;
+                const bonusVal = parseFloat(userRec?.bonus_cup) || 0;
+
+                let newUsd = beforeUsdVal + totalPremioUSD;
+                let newCup = beforeCupVal + totalPremioCUP;
+
+                if (bonusVal > 0) {
+                    newCup += bonusVal;
+                    bonusMovedCup = bonusVal;
+                }
+
+                const updatePayload = { usd: newUsd, cup: newCup, updated_at: new Date() };
+                if (bonusMovedCup > 0) updatePayload.bonus_cup = 0;
+
+                await supabase
+                    .from('users')
+                    .update(updatePayload)
+                    .eq('telegram_id', userId);
+
+                if (!globalThis.__bonusMovedByUser) globalThis.__bonusMovedByUser = new Map();
+                globalThis.__bonusMovedByUser.set(String(userId), bonusMovedCup);
+            } catch (e) {
+                console.warn('Error moviendo bono al acreditar premio (bot):', e?.message || e);
+                const newUsd = result.beforeUsd + totalPremioUSD;
+                const newCup = result.beforeCup + totalPremioCUP;
+                await supabase
+                    .from('users')
+                    .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
+                    .eq('telegram_id', userId);
+            }
         }
 
         const orderedDepartments = Array.from(result.departments.entries())
@@ -2245,15 +2279,19 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         for (const [betType, deptResult] of orderedDepartments) {
             const typeLabel = escapeHTML(formatBetTypeLabel(betType));
             if (deptResult.won) {
-                await bot.telegram.sendMessage(userId,
-                    `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
+                let text = `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
                     `🔢 Número ganador: <code>${formattedWinning}</code>\n` +
                     `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} - ${escapeHTML(session.time_slot)}\n` +
                     `🏷️ Tipo: ${typeLabel}\n` +
                     `💰 Premio: ${deptResult.premioCUP.toFixed(2)} CUP / ${deptResult.premioUSD.toFixed(2)} USD\n` +
-                    `✅ El premio ya fue acreditado a tu saldo. ¡Sigue disfrutando!`,
-                    { parse_mode: 'HTML' }
-                );
+                    `✅ El premio ya fue acreditado a tu saldo. ¡Sigue disfrutando!`;
+
+                const bonusMovedCup = (globalThis.__bonusMovedByUser && globalThis.__bonusMovedByUser.get(String(userId))) || 0;
+                if (bonusMovedCup > 0) {
+                    text += `\n\n🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
+                }
+
+                await bot.telegram.sendMessage(userId, text, { parse_mode: 'HTML' });
             } else {
                 await bot.telegram.sendMessage(userId,
                     `🔢 <b>Números ganadores de ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} (${session.date} - ${escapeHTML(session.time_slot)})</b>\n\n` +
