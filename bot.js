@@ -3715,9 +3715,10 @@ bot.on(message('text'), async (ctx) => {
             // Preparar objeto de actualización sólo con las monedas que cambian
             const updates = { updated_at: new Date() };
             let bonusUsed = 0;
+            let cupDebit = 0;
             if (totalCUP > 0) {
                 // Preferir debitar del saldo principal CUP y luego del bono
-                const cupDebit = Math.min(cupBalance, totalCUP);
+                cupDebit = Math.min(cupBalance, totalCUP);
                 const remaining = totalCUP - cupDebit;
                 bonusUsed = remaining > 0 ? remaining : 0;
                 updates.cup = Math.max(0, cupBalance - cupDebit);
@@ -3730,6 +3731,7 @@ bot.on(message('text'), async (ctx) => {
             await supabase.from('users').update(updates).eq('telegram_id', uid);
 
             // Guardar la jugada
+            // Anadidas las nuevas variables de la apuesta
             const { data: betInserted, error: betError } = await supabase
                 .from('bets')
                 .insert({
@@ -3741,6 +3743,9 @@ bot.on(message('text'), async (ctx) => {
                     cost_usd: totalUSD,
                     raw_text: rawText,
                     lottery: session.lottery || null,
+                    cup_used: cupDebit,
+                    bonus_used_cup: bonusUsed,
+                    usd_used: totalUSD,
                     placed_at: new Date()
                 })
                 .select()

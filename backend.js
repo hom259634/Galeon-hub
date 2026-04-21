@@ -1189,20 +1189,22 @@ app.post('/api/bets', async (req, res) => {
             if (!session || session.status !== 'open') return res.status(400).json({ error: 'No se puede editar: sesión cerrada' });
         }
 
-        // Cálculo seguro: no escribir en DB hasta que validemos que la edición es posible
-        const oldUsd = safe(existingBet.cost_usd);
-        const oldCup = safe(existingBet.cost_cup);
-
         // Obtener balances actuales del usuario (antes de aplicar reembolso)
         const { data: uBefore } = await supabase.from('users').select('usd,cup,bonus_cup').eq('telegram_id', userId).single();
         const beforeUsd = safe(uBefore.usd);
         const beforeCup = safe(uBefore.cup);
         const beforeBonus = safe(uBefore.bonus_cup);
+        
+        //---------- Cambios hechos por Luis David ----------//
+        // Obtener el desglose de la apuesta original con el nuevo parametro
+        const oldBonusUsed = safe(existingBet.bonus_used_cup);
+        const oldCostCup = safe(existingBet.cost_cup);
+        const oldCostUsd = safe(existingBet.cost_usd);
 
-        // Calcular saldos hipotéticos tras reembolso (sin escribir aún)
-        const usdAfterRefund = beforeUsd + oldUsd;
-        const cupAfterRefund = beforeCup + oldCup;
-        const bonusAfterRefund = beforeBonus;
+        // Reembolsar: el bono va a bonus_cup, el resto de CUP va a cup, y USD a usd
+        const usdAfterRefund = beforeUsd + oldCostUsd;
+        const cupAfterRefund = beforeCup + (oldCostCup - oldBonusUsed);
+        const bonusAfterRefund = beforeBonus + oldBonusUsed;
 
         // Validar que con el reembolso el usuario pueda cubrir la nueva apuesta
         if (totalUSD > 0) {
@@ -1227,7 +1229,16 @@ app.post('/api/bets', async (req, res) => {
 
         // Calcular saldo USD final
         const finalUsd = usdAfterRefund - totalUSD;
-
+        
+        //---------- Cambios hechos por Luis David ---------//
+        // Calcular el desglose de la NUEVA apuesta (cuánto se debitó de cada fuente)
+        let nuevoBonusUsed = 0;
+        if (totalCUP > 0) {
+            // Se usó saldo cup real hasta donde alcanzó; el resto vino del bono
+            const cupUsadoReal = cupAfterRefund - finalCup;
+            nuevoBonusUsed = totalCUP - cupUsadoReal;
+            if (nuevoBonusUsed < 0) nuevoBonusUsed = 0;
+        }
         // Todas las validaciones pasaron: aplicar cambios en DB en una sola actualización
         const { error: userUpdateError } = await supabase.from('users').update({ usd: finalUsd, bonus_cup: finalBonus, cup: finalCup, updated_at: new Date() }).eq('telegram_id', userId);
         if (userUpdateError) {
@@ -1235,7 +1246,8 @@ app.post('/api/bets', async (req, res) => {
             return res.status(500).json({ error: 'Error al procesar la edición' });
         }
 
-        const { data: updatedBet, error: updateError } = await supabase.from('bets').update({ raw_text: rawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, updated_at: new Date() }).eq('id', betId).select().single();
+        // Anadir la referencia a las nuevas variables (cupDebited, bonusDebited, usdDebited) 
+        const { data: updatedBet, error: updateError } = await supabase.from('bets').update({ raw_text: rawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, bonus_used_cup: nuevoBonusUsed, updated_at: new Date() }).eq('id', betId).select().single();
         if (updateError) {
             console.error('Error actualizando apuesta:', updateError);
             return res.status(500).json({ error: 'Error al actualizar la apuesta' });
@@ -1268,9 +1280,21 @@ app.post('/api/bets', async (req, res) => {
         }
     }
 
+    //---------- Cambios hechos por Luis David ----------//
+    // Calcular desglose del pago
+    
+    let bonusUsed = 0;
+    if (totalCUP > 0) {
+        const cupBalance = parseFloat(user.cup) || 0;
+        const cupDebit = Math.min(cupBalance, totalCUP);
+        bonusUsed = totalCUP - cupDebit;
+    }
+
     await supabase.from('users').update({ usd: newUsd, bonus_cup: newBonus, cup: newCup, updated_at: new Date() }).eq('telegram_id', userId);
 
-    const { data: bet, error: betError } = await supabase.from('bets').insert({ user_id: parseInt(userId), lottery, session_id: sessionId || null, bet_type: betType, raw_text: rawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, placed_at: new Date() }).select().single();
+    // Anadida la nueva variable (usdUsed)
+
+    const { data: bet, error: betError } = await supabase.from('bets').insert({ user_id: parseInt(userId), lottery, session_id: sessionId || null, bet_type: betType, raw_text: rawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, bonus_used_cup: bonusUsed, placed_at: new Date() }).select().single();
     if (betError) {
         console.error('Error insertando apuesta:', betError);
         return res.status(500).json({ error: 'Error al registrar la apuesta' });
@@ -1307,24 +1331,22 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
     }
 
     const user = await getOrCreateUser(parseInt(userId));
+    
+    //---------- Cambios hechos por Luis David ----------//
+    // Eliminamos la vieja logica y calcular los nuevos parametros introducidos
+
     let newCup = parseFloat(user.cup) || 0;
     let newUsd = parseFloat(user.usd) || 0;
     let newBonus = parseFloat(user.bonus_cup) || 0;
-    let bonusMovedCup = 0;
 
-    const hasApprovedDeposit = await userHasApprovedDeposit(parseInt(userId));
-    const usdRate = hasApprovedDeposit ? 0 : await getExchangeRateUSD();
+    // Usar el desglose guardado en la apuesta
+    const bonusUsed = parseFloat(bet.bonus_used_cup) || 0;
+    const costCup = parseFloat(bet.cost_cup) || 0;
+    const costUsd = parseFloat(bet.cost_usd) || 0;
 
-    for (const item of bet.items) {
-        const amount = parseFloat(item.amount) || 0;
-        if (item.currency === 'CUP') {
-            if (hasApprovedDeposit) newCup += amount;
-            else newBonus += amount;
-        } else if (item.currency === 'USD') {
-            if (hasApprovedDeposit) newUsd += amount;
-            else newBonus += amount * usdRate;
-        }
-    }
+    newCup += (costCup - bonusUsed);
+    newBonus += bonusUsed;
+    newUsd += costUsd;
 
     await supabase
         .from('users')
