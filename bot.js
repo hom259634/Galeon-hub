@@ -3743,9 +3743,7 @@ bot.on(message('text'), async (ctx) => {
                     cost_usd: totalUSD,
                     raw_text: rawText,
                     lottery: session.lottery || null,
-                    cup_used: cupDebit,
                     bonus_used_cup: bonusUsed,
-                    usd_used: totalUSD,
                     placed_at: new Date()
                 })
                 .select()
