@@ -351,6 +351,51 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
     }
 }
 
+//---------- Cambios hechos por Luis David ----------//
+// Nueva funcion para obtener el minimo de transferencia 
+async function getMinTransferCUP() {
+    try {
+        const { data: allMethods } = await supabase
+            .from('deposit_methods')
+            .select('*')
+            .order('id', { ascending: true });
+        const cupMethods = (allMethods || []).filter(m => 
+            (m.currency || '').toUpperCase() === 'CUP'
+        );
+        if (cupMethods.length > 0) {
+            // Elegir el método más reciente (mayor id)
+            const method = cupMethods.reduce((a, b) => (a.id > b.id ? a : b));
+            if (method && method.min_amount !== null && method.min_amount !== undefined) {
+                return parseFloat(method.min_amount);
+            }
+        }
+    } catch (e) {
+        console.error('Error obteniendo mínimo de transferencia CUP:', e);
+    }
+    return 1.0
+}
+
+async function getMinTransferUSD() {
+    try {
+        const { data: allMethods } = await supabase
+            .from('deposit_methods')
+            .select('*')
+            .order('id', { ascending: true });
+        const usdMethods = (allMethods || []).filter(m => 
+            (m.currency || '').toUpperCase() === 'USD'
+        );
+        if (usdMethods.length > 0) {
+            const method = usdMethods.reduce((a, b) => (a.id > b.id ? a : b));
+            if (method && method.min_amount !== null && method.min_amount !== undefined) {
+                return parseFloat(method.min_amount);
+            }
+        }
+    } catch (e) {
+        console.error('Error obteniendo mínimo de transferencia USD:', e);
+    }
+    return 1.0
+}
+
 async function getMinDepositUSD() {
     const { data } = await supabase
         .from('app_config')
@@ -1075,7 +1120,7 @@ app.post('/api/transfer', async (req, res) => {
     try {
         const fromName = (userFrom && (userFrom.first_name || userFrom.username)) ? (userFrom.first_name || userFrom.username) : String(from);
         let message = `🔄 <b>Has recibido una transferencia</b>\n\n` +
-            `👤 De: ${escapeHtml(fromName)}\n` +
+            `👤 De: ${escapeHTML(fromName)}\n` +
             `💰 Monto: ${parsedAmount} ${currency}\n`;
         if (currency === 'USD') {
             message += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -1085,18 +1130,11 @@ app.post('/api/transfer', async (req, res) => {
         }
         message += `📊 Saldo actualizado.`;
 
-        if (bot && bot.telegram && typeof bot.telegram.sendMessage === 'function') {
-            await bot.telegram.sendMessage(targetUserId, message, { parse_mode: 'HTML' });
-        } else {
-            // Fallback: intentar llamar la API de Telegram directamente si BOT_TOKEN está disponible
-            if (BOT_TOKEN) {
-                await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                    chat_id: targetUserId,
-                    text: message,
-                    parse_mode: 'HTML'
-                }).catch(() => {});
-            }
-        }
+        await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+            chat_id: targetUserId,
+            text: message,
+            parse_mode: 'HTML'
+        });
     } catch (e) {
         console.warn('No se pudo enviar notificación de transferencia via bot:', e?.message || e);
     }
@@ -1298,6 +1336,157 @@ app.post('/api/bets', async (req, res) => {
     if (betError) {
         console.error('Error insertando apuesta:', betError);
         return res.status(500).json({ error: 'Error al registrar la apuesta' });
+    }
+
+    // ========== COMISIÓN POR REFERIDO ==========
+    if (bet && !betId) {
+        const { data: userWithRef } = await supabase
+            .from('users')
+            .select('ref_by')
+            .eq('telegram_id', userId)
+            .single();
+
+        if (userWithRef && userWithRef.ref_by) {
+            const referrerId = userWithRef.ref_by;
+            const referrerName = user.first_name || user.username || 'Usuario';
+
+            // Gastos reales (excluyendo bono)
+            const realCupAmount = totalCUP - (bet.bonus_used_cup || 0);
+            const realUsdAmount = totalUSD;
+
+            let commissionUSD = realUsdAmount * 0.05;
+            let commissionCUP = realCupAmount * 0.05;
+            let messages = [];
+            let bonusMovedCup = 0;
+
+            // Obtener estado actual del referidor
+            let { data: referrer } = await supabase
+                .from('users')
+                .select('cup, usd, bonus_cup')
+                .eq('telegram_id', referrerId)
+                .single();
+
+            let newCup = parseFloat(referrer?.cup) || 0;
+            let newUsd = parseFloat(referrer?.usd) || 0;
+            let newBonus = parseFloat(referrer?.bonus_cup) || 0;
+
+            // --- Procesar comisión en USD (si existe) ---
+            if (commissionUSD > 0) {
+                const hasMainBalance = (newCup > 0) || (newUsd > 0);
+                const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
+                let addToUsd = false;
+                let addToBonusCup = false;
+
+                if (hasMainBalance) {
+                    addToUsd = true;
+                } else if (hasOnlyBonus) {
+                    const minTransferUSD = await getMinTransferUSD();
+                    if (commissionUSD > minTransferUSD) {
+                        addToUsd = true;
+                    } else {
+                        addToBonusCup = true;
+                    }
+                } else {
+                    addToUsd = true;
+                }
+
+                if (addToUsd) {
+                    newUsd += commissionUSD;
+                    // Si el usuario solo tenía bono y ahora recibe USD, migrar el bono a cup
+                    if (hasOnlyBonus && newBonus > 0) {
+                        newCup += newBonus;
+                        bonusMovedCup = newBonus;
+                        newBonus = 0;
+                    }
+                    // Mensaje para USD (caso 3 o 5)
+                    let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionUSD.toFixed(2)} USD\n`;
+                    if (addToUsd) {
+                        msg += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+                    }
+                    if (bonusMovedCup > 0) {
+                        msg += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+                    }
+                    msg += `📊 Saldo actualizado.`;
+                    messages.push(msg);
+                } else if (addToBonusCup) {
+                    // Convertir USD a CUP usando tasa actual
+                    const rateUSD = await getExchangeRateUSD();
+                    const bonusCupAmount = commissionUSD * rateUSD;
+                    newBonus += bonusCupAmount;
+                    // Mensaje para comisión pequeña que va al bono (caso 4)
+                    let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${bonusCupAmount.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
+                    messages.push(msg);
+                }
+            }
+
+            // --- Procesar comisión en CUP (si existe) ---
+            if (commissionCUP > 0) {
+                const hasMainBalance = (newCup > 0) || (newUsd > 0);
+                const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
+                let addToCup = false;
+                let addToBonus = false;
+
+                if (hasMainBalance) {
+                    addToCup = true;
+                } else if (hasOnlyBonus) {
+                    const minTransferCUP = await getMinTransferCUP();
+                    if (commissionCUP > minTransferCUP) {
+                        addToCup = true;
+                    } else {
+                        addToBonus = true;
+                    }
+                } else {
+                    addToCup = true;
+                }
+
+                if (addToCup) {
+                    newCup += commissionCUP;
+                    // Si el usuario solo tenía bono y ahora recibe CUP, migrar el bono a cup
+                    if (hasOnlyBonus && newBonus > 0) {
+                        newCup += newBonus;
+                        bonusMovedCup = newBonus;
+                        newBonus = 0;
+                    }
+                    // Mensaje para comisión en CUP que va a saldo principal (caso 1 o 2)
+                    let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n`;
+                    if (bonusMovedCup > 0) {
+                        msg += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+                    }
+                    msg += `📊 Saldo actualizado.`;
+                    messages.push(msg);
+                } else if (addToBonus) {
+                    newBonus += commissionCUP;
+                    // Mensaje para comisión pequeña que va al bono (caso 4)
+                    let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
+                    messages.push(msg);
+                }
+            }
+
+            // Actualizar el referidor si hubo cambios
+            if (messages.length > 0) {
+                const updatePayload = { updated_at: new Date() };
+                if (newCup !== (parseFloat(referrer?.cup) || 0)) updatePayload.cup = newCup;
+                if (newUsd !== (parseFloat(referrer?.usd) || 0)) updatePayload.usd = newUsd;
+                if (newBonus !== (parseFloat(referrer?.bonus_cup) || 0)) updatePayload.bonus_cup = newBonus;
+
+                await supabase
+                    .from('users')
+                    .update(updatePayload)
+                    .eq('telegram_id', referrerId);
+
+                // Enviar una sola notificación (unimos los mensajes si hay varios)
+                const finalMessage = messages.join('\n\n');
+                try {
+                    await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                        chat_id: referrerId,
+                        text: finalMessage,
+                        parse_mode: 'HTML'
+                    });
+                } catch (e) {
+                    console.warn('No se pudo notificar al referidor:', e.message);
+                }
+            }
+        }
     }
 
     const updatedUser = await getOrCreateUser(parseInt(userId));

@@ -559,6 +559,51 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
     }
 }
 
+//---------- Cambios hechos por Luis David ----------//
+// Nueva funcion para obtener el minimo de transferencia 
+async function getMinTransferCUP() {
+    try {
+        const { data: allMethods } = await supabase
+            .from('deposit_methods')
+            .select('*')
+            .order('id', { ascending: true });
+        const cupMethods = (allMethods || []).filter(m => 
+            (m.currency || '').toUpperCase() === 'CUP'
+        );
+        if (cupMethods.length > 0) {
+            // Elegir el método más reciente (mayor id)
+            const method = cupMethods.reduce((a, b) => (a.id > b.id ? a : b));
+            if (method && method.min_amount !== null && method.min_amount !== undefined) {
+                return parseFloat(method.min_amount);
+            }
+        }
+    } catch (e) {
+        console.error('Error obteniendo mínimo de transferencia CUP:', e);
+    }
+    return 1.0
+}
+
+async function getMinTransferUSD() {
+    try {
+        const { data: allMethods } = await supabase
+            .from('deposit_methods')
+            .select('*')
+            .order('id', { ascending: true });
+        const usdMethods = (allMethods || []).filter(m => 
+            (m.currency || '').toUpperCase() === 'USD'
+        );
+        if (usdMethods.length > 0) {
+            const method = usdMethods.reduce((a, b) => (a.id > b.id ? a : b));
+            if (method && method.min_amount !== null && method.min_amount !== undefined) {
+                return parseFloat(method.min_amount);
+            }
+        }
+    } catch (e) {
+        console.error('Error obteniendo mínimo de transferencia USD:', e);
+    }
+    return 1.0
+}
+
 async function getMinDepositUSD() {
     const { data } = await supabase
         .from('app_config')
@@ -3754,6 +3799,147 @@ bot.on(message('text'), async (ctx) => {
                 await ctx.reply('❌ Error al registrar la jugada. Por favor, intenta de nuevo más tarde.', getMainKeyboard(ctx));
                 return;
             }
+            
+            //---------- Cambios hechos por Luis David -----------//
+            // ========== COMISIÓN POR REFERIDO ==========
+            if (betInserted) {
+                const { data: userWithRef } = await supabase
+                    .from('users')
+                    .select('ref_by')
+                    .eq('telegram_id', uid)
+                    .single();
+
+                if (userWithRef && userWithRef.ref_by) {
+                    const referrerId = userWithRef.ref_by;
+                    const referrerName = user.first_name || user.username || 'Usuario';
+
+                    const realCupAmount = totalCUP - (betInserted.bonus_used_cup || 0);
+                    const realUsdAmount = totalUSD;
+
+                    let commissionUSD = realUsdAmount * 0.05;
+                    let commissionCUP = realCupAmount * 0.05;
+                    let messages = [];
+                    let bonusMovedCup = 0;
+
+                    let { data: referrer } = await supabase
+                        .from('users')
+                        .select('cup, usd, bonus_cup')
+                        .eq('telegram_id', referrerId)
+                        .single();
+
+                    let newCup = parseFloat(referrer?.cup) || 0;
+                    let newUsd = parseFloat(referrer?.usd) || 0;
+                    let newBonus = parseFloat(referrer?.bonus_cup) || 0;
+
+                    // --- Comisión en USD ---
+                    if (commissionUSD > 0) {
+                        const hasMainBalance = (newCup > 0) || (newUsd > 0);
+                        const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
+                        let addToUsd = false;
+                        let addToBonusCup = false;
+
+                        if (hasMainBalance) {
+                            addToUsd = true;
+                        } else if (hasOnlyBonus) {
+                            const minTransferUSD = await getMinTransferUSD();
+                            if (commissionUSD > minTransferUSD) {
+                                addToUsd = true;
+                            } else {
+                                addToBonusCup = true;
+                            }
+                        } else {
+                            addToUsd = true;
+                        }
+
+                        if (addToUsd) {
+                            newUsd += commissionUSD;
+                            if (hasOnlyBonus && newBonus > 0) {
+                                newCup += newBonus;
+                                bonusMovedCup = newBonus;
+                                newBonus = 0;
+                            }
+                            let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionUSD.toFixed(2)} USD\n`;
+                            if (addToUsd) {
+                                msg += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+                            }
+                            if (bonusMovedCup > 0) {
+                                msg += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+                            }
+                            msg += `📊 Saldo actualizado.`;
+                            messages.push(msg);
+                        } else if (addToBonusCup) {
+                            const rateUSD = await getExchangeRateUSD();
+                            const bonusCupAmount = commissionUSD * rateUSD;
+                            newBonus += bonusCupAmount;
+                            let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${bonusCupAmount.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
+                            messages.push(msg);
+                        }
+                    }
+
+                    // --- Comisión en CUP ---
+                    if (commissionCUP > 0) {
+                        const hasMainBalance = (newCup > 0) || (newUsd > 0);
+                        const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
+                        let addToCup = false;
+                        let addToBonus = false;
+
+                        if (hasMainBalance) {
+                            addToCup = true;
+                        } else if (hasOnlyBonus) {
+                            const minTransferCUP = await getMinTransferCUP();
+                            if (commissionCUP > minTransferCUP) {
+                                addToCup = true;
+                            } else {
+                                addToBonus = true;
+                            }
+                        } else {
+                            addToCup = true;
+                        }
+
+                        if (addToCup) {
+                            newCup += commissionCUP;
+                            if (hasOnlyBonus && newBonus > 0) {
+                                newCup += newBonus;
+                                bonusMovedCup = newBonus;
+                                newBonus = 0;
+                            }
+                            let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n`;
+                            if (bonusMovedCup > 0) {
+                                msg += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+                            }
+                            msg += `📊 Saldo actualizado.`;
+                            messages.push(msg);
+                        } else if (addToBonus) {
+                            newBonus += commissionCUP;
+                            let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
+                            messages.push(msg);
+                        }
+                    }
+
+                    if (messages.length > 0) {
+                        const updatePayload = { updated_at: new Date() };
+                        if (newCup !== (parseFloat(referrer?.cup) || 0)) updatePayload.cup = newCup;
+                        if (newUsd !== (parseFloat(referrer?.usd) || 0)) updatePayload.usd = newUsd;
+                        if (newBonus !== (parseFloat(referrer?.bonus_cup) || 0)) updatePayload.bonus_cup = newBonus;
+
+                        await supabase
+                            .from('users')
+                            .update(updatePayload)
+                            .eq('telegram_id', referrerId);
+
+                        const finalMessage = messages.join('\n\n');
+                        try {
+                            await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                                chat_id: referrerId,
+                                text: finalMessage,
+                                parse_mode: 'HTML'
+                            });
+                        } catch (e) {
+                            console.warn('No se pudo notificar al referidor (bot):', e.message);
+                        }
+                    }
+                }
+            }
 
             // Confirmación al usuario
             let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
@@ -3763,7 +3949,13 @@ bot.on(message('text'), async (ctx) => {
                 `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
                 `¡Buena suerte! 🍀`;
             if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
-                confirmMsg += `\n\n🎁 Se usaron ${bonusUsed.toFixed(2)} CUP de tu bono.`;
+                // bonusBalance es el saldo de bono antes de la apuesta (definido más arriba)
+                const remainingBonus = bonusBalance - bonusUsed;
+                if (remainingBonus === 0) {
+                    confirmMsg += `\n\n🎁 Se usaron los ${bonusUsed.toFixed(2)} CUP de tu bono.`;
+                } else {
+                    confirmMsg += `\n\n🎁 Se usaron ${bonusUsed.toFixed(2)} CUP de tu bono.`;
+                }
             }
             await ctx.reply(confirmMsg, { parse_mode: 'HTML' });
 
