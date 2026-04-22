@@ -1381,7 +1381,7 @@ app.post('/api/bets', async (req, res) => {
                     addToUsd = true;
                 } else if (hasOnlyBonus) {
                     const minTransferUSD = await getMinTransferUSD();
-                    if (commissionUSD > minTransferUSD) {
+                    if (commissionUSD >= minTransferUSD) {
                         addToUsd = true;
                     } else {
                         addToBonusCup = true;
@@ -1430,7 +1430,7 @@ app.post('/api/bets', async (req, res) => {
                     addToCup = true;
                 } else if (hasOnlyBonus) {
                     const minTransferCUP = await getMinTransferCUP();
-                    if (commissionCUP > minTransferCUP) {
+                    if (commissionCUP >= minTransferCUP) {
                         addToCup = true;
                     } else {
                         addToBonus = true;

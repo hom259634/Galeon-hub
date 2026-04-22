@@ -3842,7 +3842,7 @@ bot.on(message('text'), async (ctx) => {
                             addToUsd = true;
                         } else if (hasOnlyBonus) {
                             const minTransferUSD = await getMinTransferUSD();
-                            if (commissionUSD > minTransferUSD) {
+                            if (commissionUSD >= minTransferUSD) {
                                 addToUsd = true;
                             } else {
                                 addToBonusCup = true;
@@ -3887,7 +3887,7 @@ bot.on(message('text'), async (ctx) => {
                             addToCup = true;
                         } else if (hasOnlyBonus) {
                             const minTransferCUP = await getMinTransferCUP();
-                            if (commissionCUP > minTransferCUP) {
+                            if (commissionCUP >= minTransferCUP) {
                                 addToCup = true;
                             } else {
                                 addToBonus = true;
