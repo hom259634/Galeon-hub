@@ -2547,7 +2547,111 @@ bot.on(message('text'), async (ctx) => {
             }
             return;
         } else if (text === '👥 Referidos') {
-            return bot.command('referidos')(ctx);
+            const uid = ctx.from.id;
+            const botInfo = await ctx.telegram.getMe();
+            const link = `https://t.me/${botInfo.username}?start=${uid}`;
+
+            try {
+                // Obtener lista de referidos (usuarios que tienen ref_by = uid)
+                const { data: referidos, error: refError } = await supabase
+                    .from('users')
+                    .select('telegram_id, first_name, username')
+                    .eq('ref_by', uid);
+
+                if (refError) {
+                    console.error('Error al obtener referidos:', refError);
+                    await ctx.reply('❌ Ocurrió un error al consultar tus referidos. Intenta más tarde.');
+                    return;
+                }
+
+                const totalReferidos = referidos?.length || 0;
+                let totalAportadoCUP = 0;
+                let referidosList = '';
+
+                if (totalReferidos > 0) {
+                    // Consultar comisiones generadas por referidos (datos reales ya acreditados)
+                    const { data: comisiones, error: comError } = await supabase
+                        .from('bets')
+                        .select('user_id, commission_amount, commission_currency')
+                        .eq('referrer_id', uid)
+                        .gt('commission_amount', 0);
+
+                    if (comError) {
+                        console.error('Error al obtener comisiones:', comError);
+                        // Continuamos con la lista, pero sin montos
+                    }
+
+                    // Mapa para acumular aporte por cada referido
+                    const aportePorUsuario = new Map(); // key: telegram_id, value: { totalCUP, nombre }
+
+                    // Inicializar con todos los referidos (incluso los que aún no han generado comisión)
+                    for (const ref of referidos) {
+                        const nombreMostrar = ref.username ? `@${ref.username}` : (ref.first_name || `ID ${ref.telegram_id}`);
+                        aportePorUsuario.set(ref.telegram_id, { totalCUP: 0, nombre: nombreMostrar });
+                    }
+
+                    // Procesar comisiones
+                    if (comisiones && comisiones.length > 0) {
+                        const tasaUSD = await getExchangeRateUSD();
+                        for (const com of comisiones) {
+                            const userId = com.user_id;
+                            const amount = parseFloat(com.commission_amount) || 0;
+                            const currency = com.commission_currency;
+                            let amountCUP = 0;
+                            if (currency === 'USD') {
+                                amountCUP = amount * tasaUSD;
+                            } else { // CUP
+                                amountCUP = amount;
+                            }
+                            const entry = aportePorUsuario.get(userId);
+                            if (entry) {
+                                entry.totalCUP += amountCUP;
+                            }
+                        }
+                    }
+
+                    // Convertir a array, ordenar por mayor aporte y limitar a 30
+                    const listado = Array.from(aportePorUsuario.entries())
+                        .map(([id, data]) => ({ id, nombre: data.nombre, totalCUP: data.totalCUP }))
+                        .sort((a, b) => b.totalCUP - a.totalCUP);
+
+                    const maxItems = 30;
+                    const itemsToShow = listado.slice(0, maxItems);
+                    for (const item of itemsToShow) {
+                        referidosList += `• ${escapeHTML(item.nombre)} — ${item.totalCUP.toFixed(2)} CUP\n`;
+                        totalAportadoCUP += item.totalCUP;
+                    }
+                    if (listado.length > maxItems) {
+                        referidosList += `… y ${listado.length - maxItems} más.`;
+                    }
+                }
+
+                // Construir mensaje final
+                let mensaje = `💸 <b>¡GANA DINERO EXTRA INVITANDO AMIGOS! 💰</b>\n\n` +
+                    `🎯 <b>¿Cómo funciona?</b>\n` +
+                    `1️⃣ Comparte tu enlace personal con amigos\n` +
+                    `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
+                    `3️⃣ Recibirás un porcentaje de CADA apuesta que realicen\n` +
+                    `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
+                    `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
+                    `📲 <b>Tu enlace mágico:</b> 👇\n` +
+                    `<code>${escapeHTML(link)}</code>\n\n` +
+                    `📊 <b>Tus estadísticas:</b>\n` +
+                    `👥 Referidos registrados: ${totalReferidos}\n`;
+
+                if (totalReferidos > 0) {
+                    mensaje += `💰 <b>Total aportado por tus referidos:</b> ${totalAportadoCUP.toFixed(2)} CUP\n\n`;
+                    mensaje += `📋 <b>Lista de referidos y su aporte:</b>\n${referidosList}`;
+                } else {
+                    mensaje += `\nAún no tienes referidos. Comparte tu enlace y empieza a ganar.`;
+                }
+
+                await safeEdit(ctx, mensaje, getMainKeyboard(ctx));
+            } catch (error) {
+                console.error('Error en sección Referidos:', error);
+                await ctx.reply('❌ Ocurrió un error inesperado. Por favor, intenta más tarde.');
+            }
+            return;
         } else if (text === '❓ Cómo jugar') {
             await safeEdit(ctx,
                 '📩 <b>¿Necesitas ayuda?</b>\n\n' +
