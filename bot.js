@@ -1053,18 +1053,64 @@ bot.command('mis_jugadas', async (ctx) => {
     }
 });
 
+//---------- Cambios hechos por Luis David ----------//
+
 bot.command('referidos', async (ctx) => {
     const uid = ctx.from.id;
-    const { count } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .eq('ref_by', uid);
-
     const botInfo = await ctx.telegram.getMe();
     const link = `https://t.me/${botInfo.username}?start=${uid}`;
 
-    await safeEdit(ctx,
-        `💸 <b>¡GANA DINERO EXTRA INVITANDO AMIGOS! 💰</b>\n\n` +
+    // Obtener lista de referidos (usuarios que tienen ref_by = uid)
+    const { data: referidos, error: refError } = await supabase
+        .from('users')
+        .select('telegram_id, first_name, username')
+        .eq('ref_by', uid);
+
+    if (refError) {
+        console.error('Error al obtener referidos:', refError);
+        await ctx.reply('❌ Ocurrió un error al consultar tus referidos. Intenta más tarde.');
+        return;
+    }
+
+    const totalReferidos = referidos?.length || 0;
+    let totalAportado = 0;
+    let referidosList = '';
+
+    if (totalReferidos > 0) {
+        // Para cada referido, calcular el total de comisiones que ha generado
+        for (const ref of referidos) {
+            // Obtener todas las apuestas de este referido
+            const { data: apuestas, error: apuestasError } = await supabase
+                .from('bets')
+                .select('cost_cup, cost_usd')
+                .eq('user_id', ref.telegram_id);
+
+            if (apuestasError) {
+                console.error(`Error al obtener apuestas de ${ref.telegram_id}:`, apuestasError);
+                continue;
+            }
+
+            let aporteCUP = 0;
+            if (apuestas && apuestas.length > 0) {
+                // Sumar el 5% de cada apuesta en CUP y USD (convertido)
+                for (const apuesta of apuestas) {
+                    const cupPart = (parseFloat(apuesta.cost_cup) || 0) * 0.05;
+                    const usdPart = (parseFloat(apuesta.cost_usd) || 0) * 0.05;
+                    // Convertir la parte en USD a CUP usando la tasa actual
+                    const tasaUSD = await getExchangeRateUSD();
+                    aporteCUP += cupPart + (usdPart * tasaUSD);
+                }
+            }
+
+            totalAportado += aporteCUP;
+
+            const nombreMostrar = ref.username ? `@${ref.username}` : (ref.first_name || `ID ${ref.telegram_id}`);
+            referidosList += `• ${nombreMostrar} — ${aporteCUP.toFixed(2)} CUP\n`;
+        }
+    }
+
+    // Construir mensaje final
+    let mensaje = `💸 <b>¡GANA DINERO EXTRA INVITANDO AMIGOS! 💰</b>\n\n` +
         `🎯 <b>¿Cómo funciona?</b>\n` +
         `1️⃣ Comparte tu enlace personal con amigos\n` +
         `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
@@ -1074,10 +1120,16 @@ bot.command('referidos', async (ctx) => {
         `📲 <b>Tu enlace mágico:</b> 👇\n` +
         `<code>${escapeHTML(link)}</code>\n\n` +
         `📊 <b>Tus estadísticas:</b>\n` +
-        `👥 Referidos registrados: ${count || 0}\n\n` +
-        `¡Comparte y empieza a ganar hoy mismo!`,
-        getMainKeyboard(ctx)
-    );
+        `👥 Referidos registrados: ${totalReferidos}\n`;
+
+    if (totalReferidos > 0) {
+        mensaje += `💰 <b>Total aportado por tus referidos:</b> ${totalAportado.toFixed(2)} CUP\n\n`;
+        mensaje += `📋 <b>Lista de referidos y su aporte:</b>\n${referidosList}`;
+    } else {
+        mensaje += `\nAún no tienes referidos. Comparte tu enlace y empieza a ganar.`;
+    }
+
+    await safeEdit(ctx, mensaje, getMainKeyboard(ctx));
 });
 
 bot.command('ayuda', async (ctx) => {
@@ -3813,7 +3865,7 @@ bot.on(message('text'), async (ctx) => {
                     const referrerId = userWithRef.ref_by;
                     const referrerName = user.first_name || user.username || 'Usuario';
 
-                    const realCupAmount = totalCUP - (betInserted.bonus_used_cup || 0);
+                    const realCupAmount = totalCUP;
                     const realUsdAmount = totalUSD;
 
                     let commissionUSD = realUsdAmount * 0.05;
@@ -3916,6 +3968,35 @@ bot.on(message('text'), async (ctx) => {
                         }
                     }
 
+                    // Guardar información de la comisión en la apuesta (si se generó alguna)
+                    if (messages.length > 0) {
+                        let commissionAmount = 0;
+                        let commissionCurrency = '';
+                        let destination = '';
+
+                        if (commissionCUP > 0) {
+                            commissionAmount = commissionCUP;
+                            commissionCurrency = 'CUP';
+                            destination = addToCup ? 'cup' : (addToBonus ? 'bonus_cup' : '');
+                        } else if (commissionUSD > 0) {
+                            commissionAmount = commissionUSD;
+                            commissionCurrency = 'USD';
+                            destination = addToUsd ? 'usd' : (addToBonusCup ? 'bonus_cup' : '');
+                        }
+
+                        if (commissionAmount > 0 && destination) {
+                            await supabase
+                                .from('bets')
+                                .update({
+                                    referrer_id: referrerId,
+                                    commission_amount: commissionAmount,
+                                    commission_currency: commissionCurrency,
+                                    commission_destination: destination
+                                })
+                                .eq('id', betInserted.id);
+                        }
+                    }
+
                     if (messages.length > 0) {
                         const updatePayload = { updated_at: new Date() };
                         if (newCup !== (parseFloat(referrer?.cup) || 0)) updatePayload.cup = newCup;
@@ -3936,6 +4017,57 @@ bot.on(message('text'), async (ctx) => {
                             });
                         } catch (e) {
                             console.warn('No se pudo notificar al referidor (bot):', e.message);
+                        }
+                    }
+
+                    // Guardar información de la comisión en la apuesta (si se generó alguna)
+                    if (messages.length > 0 && commissionCUP + commissionUSD > 0) {
+                        // Determinar el destino final de la comisión (cup, usd o bonus_cup)
+                        let destination = null;
+                        let totalCommissionCUP = 0;
+                        // Si se acreditó algo en cup (por comisión en CUP o por conversión de USD)
+                        if (addToCup && commissionCUP > 0) {
+                            destination = 'cup';
+                            totalCommissionCUP += commissionCUP;
+                        }
+                        if (addToUsd && commissionUSD > 0) {
+                            // La comisión en USD se acredita en usd, pero para revertir necesitamos saber el monto en USD
+                            // Guardaremos el monto en USD y la moneda 'USD'
+                            destination = 'usd';
+                            totalCommissionCUP = commissionUSD; // pero esto es USD, no CUP. Mejor guardar por separado.
+                            // Para simplificar, guardamos el monto en USD y la moneda 'USD'.
+                            await supabase
+                                .from('bets')
+                                .update({
+                                    referrer_id: referrerId,
+                                    commission_amount: commissionUSD,
+                                    commission_currency: 'USD',
+                                    commission_destination: 'usd'
+                                })
+                                .eq('id', betInserted.id);
+                        }
+                        if (addToBonus && commissionCUP > 0) {
+                            destination = 'bonus_cup';
+                            totalCommissionCUP += commissionCUP;
+                        }
+                        if (addToBonusCup && commissionUSD > 0) {
+                            // La comisión pequeña en USD se convirtió a CUP y fue a bonus_cup
+                            const rateUSD = await getExchangeRateUSD();
+                            const bonusCupAmount = commissionUSD * rateUSD;
+                            destination = 'bonus_cup';
+                            totalCommissionCUP += bonusCupAmount;
+                        }
+                        // Si el destino es cup o bonus_cup, guardamos en CUP
+                        if (destination && (destination === 'cup' || destination === 'bonus_cup')) {
+                            await supabase
+                                .from('bets')
+                                .update({
+                                    referrer_id: referrerId,
+                                    commission_amount: totalCommissionCUP,
+                                    commission_currency: 'CUP',
+                                    commission_destination: destination
+                                })
+                                .eq('id', betInserted.id);
                         }
                     }
                 }
