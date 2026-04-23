@@ -1049,9 +1049,9 @@ bot.command('mi_dinero', async (ctx) => {
         `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
         `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
         if (bonusCup > 0) {
-        `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
+        text += `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
         }
-        `\n¿Qué deseas hacer?`;
+        text += `\n¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
 });
 
@@ -1371,9 +1371,9 @@ bot.action('my_money', async (ctx) => {
         `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
         `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
         if (bonusCup > 0) {
-        `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
+        text += `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
         }
-        `\n¿Qué deseas hacer?`;
+        text += `\n¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
 });
 
@@ -2548,9 +2548,9 @@ bot.on(message('text'), async (ctx) => {
                 `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
                 `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
                 if (bonusCup > 0) {
-                `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
+                text += `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
                 }
-                `\n¿Qué deseas hacer?`;
+                text += `\n¿Qué deseas hacer?`;
             await safeEdit(ctx, text, myMoneyKbd());
             return;
         } else if (text === '📋 Mis jugadas') {
