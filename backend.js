@@ -1291,9 +1291,10 @@ app.post('/api/bets', async (req, res) => {
 
                 // Notificar al referidor sobre la edición
                 try {
+                    const userName = user.first_name || user.username || `ID ${userId}`;
                     await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                         chat_id: oldReferrerId,
-                        text: `ℹ️ Tu referido ha editado el monto de una apuesta. Tu saldo actual ha cambiado. Por favor, consulta.`,
+                        text: `ℹ️ Tu referido ${escapeHTML(userName)} ha editado el monto de una apuesta. Tu saldo actual ha cambiado. Por favor, consulta.`,
                         parse_mode: 'HTML'
                     });
                 } catch (e) {}
@@ -1348,7 +1349,9 @@ app.post('/api/bets', async (req, res) => {
             .eq('telegram_id', userId)
             .single();
 
-        if (userWithRef && userWithRef.ref_by) {
+        const shouldCalculateNewCommission = oldCommissionReverted || !existingBet.referrer_id;
+
+        if (shouldCalculateNewCommission && userWithRef && userWithRef.ref_by) {
             const newReferrerId = userWithRef.ref_by;
             const realCupAmount = totalCUP;
             const realUsdAmount = totalUSD;
@@ -1694,6 +1697,83 @@ app.post('/api/bets', async (req, res) => {
         }
     }
 
+    // ========== GUARDAR DATOS DE COMISIÓN EN LA APUESTA ==========
+    if (userWithRef && userWithRef.ref_by && (commissionUSD > 0 || commissionCUP > 0)) {
+        let finalCommissionAmount = 0;
+        let finalCommissionCurrency = 'CUP';
+        let finalDestination = 'cup';
+
+        // Determinar el destino final según lo que realmente se acreditó
+        if (commissionUSD > 0) {
+            const hasMainBalance = (newCup > 0) || (newUsd > 0);
+            const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
+            let addToUsd = false;
+            let addToBonusCup = false;
+
+            if (hasMainBalance) {
+                addToUsd = true;
+            } else if (hasOnlyBonus) {
+                const minTransferUSD = await getMinTransferUSD();
+                if (commissionUSD >= minTransferUSD) {
+                    addToUsd = true;
+                } else {
+                    addToBonusCup = true;
+                }
+            } else {
+                addToUsd = true;
+            }
+
+            if (addToUsd) {
+                finalCommissionAmount = commissionUSD;
+                finalCommissionCurrency = 'USD';
+                finalDestination = 'usd';
+            } else if (addToBonusCup) {
+                const rateUSD = await getExchangeRateUSD();
+                finalCommissionAmount = commissionUSD * rateUSD;
+                finalCommissionCurrency = 'CUP';
+                finalDestination = 'bonus_cup';
+            }
+        } else if (commissionCUP > 0) {
+            const hasMainBalance = (newCup > 0) || (newUsd > 0);
+            const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
+            let addToCup = false;
+            let addToBonus = false;
+
+            if (hasMainBalance) {
+                addToCup = true;
+            } else if (hasOnlyBonus) {
+                const minTransferCUP = await getMinTransferCUP();
+                if (commissionCUP >= minTransferCUP) {
+                    addToCup = true;
+                } else {
+                    addToBonus = true;
+                }
+            } else {
+                addToCup = true;
+            }
+
+            if (addToCup) {
+                finalCommissionAmount = commissionCUP;
+                finalCommissionCurrency = 'CUP';
+                finalDestination = 'cup';
+            } else if (addToBonus) {
+                finalCommissionAmount = commissionCUP;
+                finalCommissionCurrency = 'CUP';
+                finalDestination = 'bonus_cup';
+            }
+        }
+
+        await supabase
+            .from('bets')
+            .update({
+                referrer_id: referrerId,
+                commission_amount: finalCommissionAmount,
+                commission_currency: finalCommissionCurrency,
+                commission_destination: finalDestination
+            })
+            .eq('id', bet.id);
+    }
+
     const updatedUser = await getOrCreateUser(parseInt(userId));
     res.json({ success: true, bet, updatedUser });
 });
@@ -1762,9 +1842,10 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
 
             // Notificar al referidor
             try {
+                const userName = user.first_name || user.username || `ID ${userId}`;
                 await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     chat_id: referrerId,
-                    text: `⚠️ Tu referido ha removido una apuesta. Ha sido restado de tu saldo actual el 5% del monto retirado en la apuesta removida.`,
+                    text: `⚠️ Tu referido ${escapeHTML(userName)} ha removido una apuesta. Ha sido restado de tu saldo actual el 5% del monto retirado en la apuesta removida.`,
                     parse_mode: 'HTML'
                 });
             } catch (e) {}
