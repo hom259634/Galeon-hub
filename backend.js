@@ -342,6 +342,27 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
         } catch (e) {
             console.error('Error migrando bono por saldo existente:', e);
         }
+        
+        // Migrar bono automáticamente si alcanza el mínimo de depósito en CUP
+        try {
+            const cupAmt2 = parseFloat(user.cup) || 0;
+            const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
+            if (bonusAmt2 > 0) {
+                const minDepCUP = await getMinTransferCUP();
+                if (bonusAmt2 >= minDepCUP) {
+                    const newCup2 = cupAmt2 + bonusAmt2;
+                    await supabase.from('users').update({
+                        cup: newCup2,
+                        bonus_cup: 0,
+                        updated_at: new Date()
+                    }).eq('telegram_id', telegramId);
+                    user.cup = newCup2;
+                    user.bonus_cup = 0;
+                }
+            }
+        } catch (e) {
+            console.error('Error migrando bono por umbral mínimo:', e);
+        }
 
         if (user && typeof user === 'object') {
             user.__isNewUser = isNewUser;
@@ -1853,6 +1874,88 @@ app.get('/api/user/:userId/referrals/count', async (req, res) => {
         .select('*', { count: 'exact', head: true })
         .eq('ref_by', userId);
     res.json({ count: count || 0 });
+});
+
+//---------- Cambios hechos por Luis David ----------//
+// --- Estadísticas completas de referidos (para la web) ---
+app.get('/api/user/:userId/referrals', async (req, res) => {
+    const { userId } = req.params;
+    const refUserId = parseInt(userId);
+    if (isNaN(refUserId)) return res.status(400).json({ error: 'ID de usuario inválido' });
+
+    try {
+        // 1. Obtener lista de referidos
+        const { data: referidos, error: refError } = await supabase
+            .from('users')
+            .select('telegram_id, first_name, username')
+            .eq('ref_by', refUserId);
+
+        if (refError) {
+            console.error('Error fetching referrals:', refError);
+            return res.status(500).json({ error: 'Error al consultar referidos' });
+        }
+
+        const totalReferidos = referidos?.length || 0;
+        let totalAportadoCUP = 0;
+        let referredList = [];
+
+        if (totalReferidos > 0) {
+            // 2. Obtener comisiones generadas por referidos
+            const { data: comisiones, error: comError } = await supabase
+                .from('bets')
+                .select('user_id, commission_amount, commission_currency')
+                .eq('referrer_id', refUserId)
+                .gt('commission_amount', 0);
+
+            if (comError) {
+                console.error('Error fetching commissions:', comError);
+                // Continuamos sin datos de comisiones
+            }
+
+            const aportePorUsuario = new Map();
+            // Inicializar con todos los referidos
+            for (const ref of referidos) {
+                const nombre = ref.username ? `@${ref.username}` : (ref.first_name || `ID ${ref.telegram_id}`);
+                aportePorUsuario.set(ref.telegram_id, { telegram_id: ref.telegram_id, name: nombre, totalCUP: 0 });
+            }
+
+            // Procesar comisiones
+            if (comisiones && comisiones.length > 0) {
+                const tasaUSD = await getExchangeRateUSD();
+                for (const com of comisiones) {
+                    const userIdRef = com.user_id;
+                    const amount = parseFloat(com.commission_amount) || 0;
+                    const currency = com.commission_currency;
+                    let amountCUP = 0;
+                    if (currency === 'USD') {
+                        amountCUP = amount * tasaUSD;
+                    } else { // CUP
+                        amountCUP = amount;
+                    }
+                    const entry = aportePorUsuario.get(userIdRef);
+                    if (entry) {
+                        entry.totalCUP += amountCUP;
+                    }
+                }
+            }
+
+            // Convertir a array y ordenar por mayor aporte
+            const listado = Array.from(aportePorUsuario.values())
+                .sort((a, b) => b.totalCUP - a.totalCUP);
+
+            totalAportadoCUP = listado.reduce((sum, u) => sum + u.totalCUP, 0);
+            referredList = listado;
+        }
+
+        res.json({
+            referralCount: totalReferidos,
+            totalEarnedCUP: totalAportadoCUP,
+            referredUsers: referredList
+        });
+    } catch (error) {
+        console.error('Error obteniendo estadísticas de referidos:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 
 // ========== ENDPOINTS DE ADMIN ==========

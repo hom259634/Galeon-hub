@@ -521,6 +521,27 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
             } catch (e) {
                 console.error('Error migrando bono por saldo existente (bot):', e);
             }
+
+            // Migrar bono automáticamente si alcanza el mínimo de depósito en CUP
+            try {
+                const cupAmt2 = parseFloat(user.cup) || 0;
+                const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
+                if (bonusAmt2 > 0) {
+                    const minDepCUP = await getMinTransferCUP();
+                    if (bonusAmt2 >= minDepCUP) {
+                        const newCup2 = cupAmt2 + bonusAmt2;
+                        await supabase.from('users').update({
+                            cup: newCup2,
+                            bonus_cup: 0,
+                            updated_at: new Date()
+                        }).eq('telegram_id', telegramId);
+                        user.cup = newCup2;
+                        user.bonus_cup = 0;
+                    }
+                }
+            } catch (e) {
+                console.error('Error migrando bono por umbral mínimo (bot):', e);
+            }
             return user;
         }
 
@@ -1024,11 +1045,13 @@ bot.command('mi_dinero', async (ctx) => {
     const cupToUsd = (cup / rate).toFixed(2);
     const usdToCup = (usd * rate).toFixed(2);
 
-    const text = `💰 <b>Tu saldo actual es:</b>\n\n` +
+    let text = `💰 <b>Tu saldo actual es:</b>\n\n` +
         `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
-        `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n` +
-        `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n\n` +
-        `¿Qué deseas hacer?`;
+        `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
+        if (bonusCup > 0) {
+        `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
+        }
+        `\n¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
 });
 
@@ -1127,7 +1150,7 @@ bot.command('referidos', async (ctx) => {
             const maxItems = 30;
             const itemsToShow = listado.slice(0, maxItems);
             for (const item of itemsToShow) {
-                referidosList += `• ${escapeHTML(item.nombre)} — ${item.totalCUP.toFixed(2)} CUP\n`;
+                referidosList += `• ${escapeHTML(item.nombre)} 👉 ${item.totalCUP.toFixed(2)} CUP\n`;
                 totalAportadoCUP += item.totalCUP;
             }
             if (listado.length > maxItems) {
@@ -1140,7 +1163,7 @@ bot.command('referidos', async (ctx) => {
             `🎯 <b>¿Cómo funciona?</b>\n` +
             `1️⃣ Comparte tu enlace personal con amigos\n` +
             `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-            `3️⃣ Recibirás un porcentaje de CADA apuesta que realicen\n` +
+            `3️⃣ Recibirás un 5 % del monto de CADA apuesta que realicen\n` +
             `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
             `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
             `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -1344,11 +1367,13 @@ bot.action('my_money', async (ctx) => {
     const cupToUsd = (cup / rate).toFixed(2);
     const usdToCup = (usd * rate).toFixed(2);
 
-    const text = `💰 <b>Tu saldo actual es:</b>\n\n` +
+    let text = `💰 <b>Tu saldo actual es:</b>\n\n` +
         `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
-        `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n` +
-        `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n\n` +
-        `¿Qué deseas hacer?`;
+        `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
+        if (bonusCup > 0) {
+        `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
+        }
+        `\n¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
 });
 
@@ -1603,7 +1628,7 @@ bot.action('referrals', async (ctx) => {
         `🎯 <b>¿Cómo funciona?</b>\n` +
         `1️⃣ Comparte tu enlace personal con amigos\n` +
         `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-        `3️⃣ Recibirás un porcentaje de CADA apuesta que realicen\n` +
+        `3️⃣Recibirás un 5 % del monto de CADA apuesta que realicen\n` +
         `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
         `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
         `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -2519,11 +2544,13 @@ bot.on(message('text'), async (ctx) => {
             const cupToUsd = (cup / rate).toFixed(2);
             const usdToCup = (usd * rate).toFixed(2);
 
-            const text = `💰 <b>Tu saldo actual es:</b>\n\n` +
+            let text = `💰 <b>Tu saldo actual es:</b>\n\n` +
                 `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
-                `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n` +
-                `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n\n` +
-                `¿Qué deseas hacer?`;
+                `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
+                if (bonusCup > 0) {
+                `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
+                }
+                `\n¿Qué deseas hacer?`;
             await safeEdit(ctx, text, myMoneyKbd());
             return;
         } else if (text === '📋 Mis jugadas') {
@@ -2618,7 +2645,7 @@ bot.on(message('text'), async (ctx) => {
                     const maxItems = 30;
                     const itemsToShow = listado.slice(0, maxItems);
                     for (const item of itemsToShow) {
-                        referidosList += `• ${escapeHTML(item.nombre)} — ${item.totalCUP.toFixed(2)} CUP\n`;
+                        referidosList += `• ${escapeHTML(item.nombre)} 👉 ${item.totalCUP.toFixed(2)} CUP\n`;
                         totalAportadoCUP += item.totalCUP;
                     }
                     if (listado.length > maxItems) {
@@ -2631,7 +2658,7 @@ bot.on(message('text'), async (ctx) => {
                     `🎯 <b>¿Cómo funciona?</b>\n` +
                     `1️⃣ Comparte tu enlace personal con amigos\n` +
                     `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-                    `3️⃣ Recibirás un porcentaje de CADA apuesta que realicen\n` +
+                    `3️⃣ Recibirás un 5 % del monto de CADA apuesta que realicen\n` +
                     `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
                     `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
                     `📲 <b>Tu enlace mágico:</b> 👇\n` +
