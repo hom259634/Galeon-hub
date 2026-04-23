@@ -2547,31 +2547,7 @@ bot.on(message('text'), async (ctx) => {
             }
             return;
         } else if (text === '👥 Referidos') {
-            const uid = ctx.from.id;
-            const { count } = await supabase
-                .from('users')
-                .select('*', { count: 'exact', head: true })
-                .eq('ref_by', uid);
-
-            const botInfo = await ctx.telegram.getMe();
-            const link = `https://t.me/${botInfo.username}?start=${uid}`;
-
-            await safeEdit(ctx,
-                `💸 <b>¡GANA DINERO EXTRA INVITANDO AMIGOS! 💰</b>\n\n` +
-                `🎯 <b>¿Cómo funciona?</b>\n` +
-                `1️⃣ Comparte tu enlace personal con amigos\n` +
-                `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-                `3️⃣ Recibirás un porcentaje de CADA apuesta que realicen\n` +
-                `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
-                `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
-                `📲 <b>Tu enlace mágico:</b> 👇\n` +
-                `<code>${escapeHTML(link)}</code>\n\n` +
-                `📊 <b>Tus estadísticas:</b>\n` +
-                `👥 Referidos registrados: ${count || 0}\n\n` +
-                `¡Comparte y empieza a ganar hoy mismo!`,
-                getMainKeyboard(ctx)
-            );
-            return;
+            return bot.command('referidos')(ctx);
         } else if (text === '❓ Cómo jugar') {
             await safeEdit(ctx,
                 '📩 <b>¿Necesitas ayuda?</b>\n\n' +
