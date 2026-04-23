@@ -1558,7 +1558,6 @@ app.post('/api/bets', async (req, res) => {
             const referrerId = userWithRef.ref_by;
             const referrerName = user.first_name || user.username || 'Usuario';
 
-            // Gastos reales (excluyendo bono)
             const realCupAmount = totalCUP;
             const realUsdAmount = totalUSD;
 
@@ -1567,7 +1566,6 @@ app.post('/api/bets', async (req, res) => {
             let messages = [];
             let bonusMovedCup = 0;
 
-            // Obtener estado actual del referidor
             let { data: referrer } = await supabase
                 .from('users')
                 .select('cup, usd, bonus_cup')
@@ -1578,7 +1576,11 @@ app.post('/api/bets', async (req, res) => {
             let newUsd = parseFloat(referrer?.usd) || 0;
             let newBonus = parseFloat(referrer?.bonus_cup) || 0;
 
-            // --- Procesar comisión en USD (si existe) ---
+            let finalCommissionAmount = 0;
+            let finalCommissionCurrency = 'CUP';
+            let finalDestination = 'cup';
+
+            // --- USD ---
             if (commissionUSD > 0) {
                 const hasMainBalance = (newCup > 0) || (newUsd > 0);
                 const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
@@ -1600,13 +1602,11 @@ app.post('/api/bets', async (req, res) => {
 
                 if (addToUsd) {
                     newUsd += commissionUSD;
-                    // Si el usuario solo tenía bono y ahora recibe USD, migrar el bono a cup
                     if (hasOnlyBonus && newBonus > 0) {
                         newCup += newBonus;
                         bonusMovedCup = newBonus;
                         newBonus = 0;
                     }
-                    // Mensaje para USD (caso 3 o 5)
                     let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionUSD.toFixed(2)} USD\n`;
                     if (addToUsd) {
                         msg += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -1616,18 +1616,24 @@ app.post('/api/bets', async (req, res) => {
                     }
                     msg += `📊 Saldo actualizado.`;
                     messages.push(msg);
+
+                    finalCommissionAmount = commissionUSD;
+                    finalCommissionCurrency = 'USD';
+                    finalDestination = 'usd';
                 } else if (addToBonusCup) {
-                    // Convertir USD a CUP usando tasa actual
                     const rateUSD = await getExchangeRateUSD();
                     const bonusCupAmount = commissionUSD * rateUSD;
                     newBonus += bonusCupAmount;
-                    // Mensaje para comisión pequeña que va al bono (caso 4)
                     let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${bonusCupAmount.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
                     messages.push(msg);
+
+                    finalCommissionAmount = bonusCupAmount;
+                    finalCommissionCurrency = 'CUP';
+                    finalDestination = 'bonus_cup';
                 }
             }
 
-            // --- Procesar comisión en CUP (si existe) ---
+            // --- CUP ---
             if (commissionCUP > 0) {
                 const hasMainBalance = (newCup > 0) || (newUsd > 0);
                 const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
@@ -1649,28 +1655,33 @@ app.post('/api/bets', async (req, res) => {
 
                 if (addToCup) {
                     newCup += commissionCUP;
-                    // Si el usuario solo tenía bono y ahora recibe CUP, migrar el bono a cup
                     if (hasOnlyBonus && newBonus > 0) {
                         newCup += newBonus;
                         bonusMovedCup = newBonus;
                         newBonus = 0;
                     }
-                    // Mensaje para comisión en CUP que va a saldo principal (caso 1 o 2)
                     let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n`;
                     if (bonusMovedCup > 0) {
                         msg += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
                     }
                     msg += `📊 Saldo actualizado.`;
                     messages.push(msg);
+
+                    finalCommissionAmount = commissionCUP;
+                    finalCommissionCurrency = 'CUP';
+                    finalDestination = 'cup';
                 } else if (addToBonus) {
                     newBonus += commissionCUP;
-                    // Mensaje para comisión pequeña que va al bono (caso 4)
                     let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
                     messages.push(msg);
+
+                    finalCommissionAmount = commissionCUP;
+                    finalCommissionCurrency = 'CUP';
+                    finalDestination = 'bonus_cup';
                 }
             }
 
-            // Actualizar el referidor si hubo cambios
+            // Actualizar referidor
             if (messages.length > 0) {
                 const updatePayload = { updated_at: new Date() };
                 if (newCup !== (parseFloat(referrer?.cup) || 0)) updatePayload.cup = newCup;
@@ -1682,7 +1693,6 @@ app.post('/api/bets', async (req, res) => {
                     .update(updatePayload)
                     .eq('telegram_id', referrerId);
 
-                // Enviar una sola notificación (unimos los mensajes si hay varios)
                 const finalMessage = messages.join('\n\n');
                 try {
                     await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
@@ -1694,86 +1704,26 @@ app.post('/api/bets', async (req, res) => {
                     console.warn('No se pudo notificar al referidor:', e.message);
                 }
             }
+
+            // ========== GUARDAR DATOS DE COMISIÓN EN LA APUESTA ==========
+            if (commissionUSD > 0 || commissionCUP > 0) {
+                try {
+                    await supabase
+                        .from('bets')
+                        .update({
+                            referrer_id: referrerId,
+                            commission_amount: finalCommissionAmount,
+                            commission_currency: finalCommissionCurrency,
+                            commission_destination: finalDestination
+                        })
+                        .eq('id', bet.id);
+                    console.log(`✅ Comisión guardada en bet ${bet.id}: ${finalCommissionAmount} ${finalCommissionCurrency} -> ${finalDestination}`);
+                } catch (error) {
+                    console.error('❌ Error al guardar comisión en bet:', error);
+                }
+            }
         }
     }
-
-    // ========== GUARDAR DATOS DE COMISIÓN EN LA APUESTA ==========
-    if (userWithRef && userWithRef.ref_by && (commissionUSD > 0 || commissionCUP > 0)) {
-        let finalCommissionAmount = 0;
-        let finalCommissionCurrency = 'CUP';
-        let finalDestination = 'cup';
-
-        // Determinar el destino final según lo que realmente se acreditó
-        if (commissionUSD > 0) {
-            const hasMainBalance = (newCup > 0) || (newUsd > 0);
-            const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
-            let addToUsd = false;
-            let addToBonusCup = false;
-
-            if (hasMainBalance) {
-                addToUsd = true;
-            } else if (hasOnlyBonus) {
-                const minTransferUSD = await getMinTransferUSD();
-                if (commissionUSD >= minTransferUSD) {
-                    addToUsd = true;
-                } else {
-                    addToBonusCup = true;
-                }
-            } else {
-                addToUsd = true;
-            }
-
-            if (addToUsd) {
-                finalCommissionAmount = commissionUSD;
-                finalCommissionCurrency = 'USD';
-                finalDestination = 'usd';
-            } else if (addToBonusCup) {
-                const rateUSD = await getExchangeRateUSD();
-                finalCommissionAmount = commissionUSD * rateUSD;
-                finalCommissionCurrency = 'CUP';
-                finalDestination = 'bonus_cup';
-            }
-        } else if (commissionCUP > 0) {
-            const hasMainBalance = (newCup > 0) || (newUsd > 0);
-            const hasOnlyBonus = (newBonus > 0) && !hasMainBalance;
-            let addToCup = false;
-            let addToBonus = false;
-
-            if (hasMainBalance) {
-                addToCup = true;
-            } else if (hasOnlyBonus) {
-                const minTransferCUP = await getMinTransferCUP();
-                if (commissionCUP >= minTransferCUP) {
-                    addToCup = true;
-                } else {
-                    addToBonus = true;
-                }
-            } else {
-                addToCup = true;
-            }
-
-            if (addToCup) {
-                finalCommissionAmount = commissionCUP;
-                finalCommissionCurrency = 'CUP';
-                finalDestination = 'cup';
-            } else if (addToBonus) {
-                finalCommissionAmount = commissionCUP;
-                finalCommissionCurrency = 'CUP';
-                finalDestination = 'bonus_cup';
-            }
-        }
-
-        await supabase
-            .from('bets')
-            .update({
-                referrer_id: referrerId,
-                commission_amount: finalCommissionAmount,
-                commission_currency: finalCommissionCurrency,
-                commission_destination: finalDestination
-            })
-            .eq('id', bet.id);
-    }
-
     const updatedUser = await getOrCreateUser(parseInt(userId));
     res.json({ success: true, bet, updatedUser });
 });
