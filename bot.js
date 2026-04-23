@@ -4060,8 +4060,21 @@ bot.on(message('text'), async (ctx) => {
                             const rateUSD = await getExchangeRateUSD();
                             const bonusCupAmount = commissionUSD * rateUSD;
                             newBonus += bonusCupAmount;
+
+                        const minTransferCUP = await getMinTransferCUP();
+                        let bonusMovedMsg = '';
+                        if (newBonus >= minTransferCUP) {
+                            bonusMovedCup = newBonus;
+                            newCup += newBonus;
+                            newBonus = 0;
+                            bonusMovedMsg = `\n🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
+                        }
                             let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${bonusCupAmount.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
                             messages.push(msg);
+
+                            finalCommissionAmount = bonusCupAmount;
+                            finalCommissionCurrency = 'CUP';
+                            finalDestination = 'bonus_cup';
                         }
                     }
 
@@ -4100,8 +4113,21 @@ bot.on(message('text'), async (ctx) => {
                             messages.push(msg);
                         } else if (addToBonus) {
                             newBonus += commissionCUP;
+
+                            const minTransferCUP = await getMinTransferCUP();
+                            let bonusMovedMsg = '';
+                            if (newBonus >= minTransferCUP) {
+                                bonusMovedCup = newBonus;
+                                newCup += newBonus;
+                                newBonus = 0;
+                                bonusMovedMsg = `\n🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
+                            }
                             let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
                             messages.push(msg);
+
+                            finalCommissionAmount = commissionCUP;
+                            finalCommissionCurrency = 'CUP';
+                            finalDestination = 'bonus_cup';
                         }
                     }
 
