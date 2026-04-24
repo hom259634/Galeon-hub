@@ -2104,7 +2104,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             for (const w of data.winners) {
                                 if (String(w.telegram_id || w.user_id) === String(currentUser.telegram_id)) {
                                     userFound = true;
-                                    const msg = `🎉 <b>¡FELICIDADES! Has ganado</b><br>\n\n🔢 Número ganador: <b>${winningNumber}</b><br>💰 Premio: <b>${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</b><br>✅ El premio ya fue acreditado a tu saldo.`;
+                                    const bonusMovedMsg = (w.bonus_moved && w.bonus_moved > 0) ? `<br>🎁 Tu bono de bienvenida de <b>${w.bonus_moved.toFixed(2)} CUP</b> se ha movido a tu saldo principal.` : '';
+                                    const msg = `🎉 <b>¡FELICIDADES! Has ganado</b><br>\n\n🔢 Número ganador: <b>${winningNumber}</b><br>💰 Premio: <b>${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</b><br>✅ El premio ya fue acreditado a tu saldo.${bonusMovedMsg}`;
                                     iziToast.success({
                                         title: '¡Ganador!',
                                         message: msg,
