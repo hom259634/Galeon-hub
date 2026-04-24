@@ -2385,11 +2385,13 @@ app.get('/api/admin/winning-numbers/:sessionId/winners', requireAdmin, async (re
                 .eq('telegram_id', bet.user_id)
                 .single();
 
+            const bonusMoved = (globalThis.__bonusMovedByUser && globalThis.__bonusMovedByUser.get(String(bet.user_id))) || 0;
             winners.push({
                 user_id: bet.user_id,
                 first_name: user?.first_name || 'Usuario',
                 prize_usd: premioTotalUSD,
                 prize_cup: premioTotalCUP,
+                bonus_moved: bonusMoved,
                 bet_text: bet.raw_text,
                 bet_type: bet.bet_type || ''
             });
@@ -2617,13 +2619,14 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
             const typeLabel = formatBetTypeLabel(betType);
             try {
                 if (deptResult.won) {
+                    const bonusMovedMsg = bonusMoved > 0 ? `\n🎁 Tu bono de bienvenida de ${bonusMoved.toFixed(2)} CUP se ha movido a tu saldo principal.` : '';
                     await bot.telegram.sendMessage(userId,
                         `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
                         `🔢 Número ganador: <code>${formatted}</code>\n` +
                         `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${session.lottery} - ${session.time_slot}\n` +
                         `🏷️ Tipo: ${typeLabel}\n` +
                         `💰 Premio: ${deptResult.premioUSD > 0 ? deptResult.premioUSD.toFixed(2) + ' USD' : ''} ${deptResult.premioCUP > 0 ? deptResult.premioCUP.toFixed(2) + ' CUP' : ''}\n` +
-                        `✅ El premio ya fue acreditado a tu saldo.`,
+                        `✅ El premio ya fue acreditado a tu saldo.${bonusMovedMsg}`,
                         { parse_mode: 'HTML' }
                     );
                 } else {
