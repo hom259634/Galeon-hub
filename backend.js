@@ -1641,10 +1641,8 @@ app.post('/api/bets', async (req, res) => {
                     finalCommissionAmount = commissionUSD;
                     finalCommissionCurrency = 'USD';
                     finalDestination = 'usd';
-                } else if (addToBonusCup) {
-                    const rateUSD = await getExchangeRateUSD();
-                    const bonusCupAmount = commissionUSD * rateUSD;
-                    newBonus += bonusCupAmount;
+               } else if (addToBonus) {
+                    newBonus += commissionCUP;
 
                     const minTransferCUP = await getMinTransferCUP();
                     let bonusMovedMsg = '';
@@ -1654,12 +1652,13 @@ app.post('/api/bets', async (req, res) => {
                         newBonus = 0;
                         bonusMovedMsg = `\n🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
                     }
-                    let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${bonusCupAmount.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
+
+                    let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.${bonusMovedMsg}\n📊 Saldo actualizado.`;
                     messages.push(msg);
 
-                    finalCommissionAmount = bonusCupAmount;
+                    finalCommissionAmount = commissionCUP;
                     finalCommissionCurrency = 'CUP';
-                    finalDestination = bonusMovedMsg ? 'cup' : 'bonus_cup'
+                    finalDestination = bonusMovedMsg ? 'cup' : 'bonus_cup';
                 }
             }
 
@@ -2619,6 +2618,7 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
             const typeLabel = formatBetTypeLabel(betType);
             try {
                 if (deptResult.won) {
+                    const bonusMoved = (globalThis.__bonusMovedByUser && globalThis.__bonusMovedByUser.get(String(userId))) || 0;
                     const bonusMovedMsg = bonusMoved > 0 ? `\n🎁 Tu bono de bienvenida de ${bonusMoved.toFixed(2)} CUP se ha movido a tu saldo principal.` : '';
                     await bot.telegram.sendMessage(userId,
                         `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +

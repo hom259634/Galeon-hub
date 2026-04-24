@@ -2431,6 +2431,8 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         for (const [betType, deptResult] of orderedDepartments) {
             const typeLabel = escapeHTML(formatBetTypeLabel(betType));
             if (deptResult.won) {
+                const bonusMovedCup = (globalThis.__bonusMovedByUser && globalThis.__bonusMovedByUser.get(String(userId))) || 0;
+
                 let text = `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
                     `🔢 Número ganador: <code>${formattedWinning}</code>\n` +
                     `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} - ${escapeHTML(session.time_slot)}\n` +
@@ -2438,7 +2440,6 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
                     `💰 Premio: ${deptResult.premioCUP.toFixed(2)} CUP / ${deptResult.premioUSD.toFixed(2)} USD\n` +
                     `✅ El premio ya fue acreditado a tu saldo. ¡Sigue disfrutando!`;
 
-                const bonusMovedCup = (globalThis.__bonusMovedByUser && globalThis.__bonusMovedByUser.get(String(userId))) || 0;
                 if (bonusMovedCup > 0) {
                     text += `\n\n🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
                 }
@@ -4056,25 +4057,26 @@ bot.on(message('text'), async (ctx) => {
                             }
                             msg += `📊 Saldo actualizado.`;
                             messages.push(msg);
-                        } else if (addToBonusCup) {
+                       } else if (addToBonusCup) {
                             const rateUSD = await getExchangeRateUSD();
                             const bonusCupAmount = commissionUSD * rateUSD;
                             newBonus += bonusCupAmount;
 
-                        const minTransferCUP = await getMinTransferCUP();
-                        let bonusMovedMsg = '';
-                        if (newBonus >= minTransferCUP) {
-                            bonusMovedCup = newBonus;
-                            newCup += newBonus;
-                            newBonus = 0;
-                            bonusMovedMsg = `\n🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
-                        }
-                            let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${bonusCupAmount.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
+                            const minTransferCUP = await getMinTransferCUP();
+                            let bonusMovedMsg = '';
+                            if (newBonus >= minTransferCUP) {
+                                bonusMovedCup = newBonus;
+                                newCup += newBonus;
+                                newBonus = 0;
+                                bonusMovedMsg = `\n🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
+                            }
+
+                            let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${bonusCupAmount.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.${bonusMovedMsg}\n📊 Saldo actualizado.`;
                             messages.push(msg);
 
                             finalCommissionAmount = bonusCupAmount;
                             finalCommissionCurrency = 'CUP';
-                            finalDestination = 'bonus_cup';
+                            finalDestination = bonusMovedMsg ? 'cup' : 'bonus_cup';
                         }
                     }
 
@@ -4111,7 +4113,7 @@ bot.on(message('text'), async (ctx) => {
                             }
                             msg += `📊 Saldo actualizado.`;
                             messages.push(msg);
-                        } else if (addToBonus) {
+                       } else if (addToBonus) {
                             newBonus += commissionCUP;
 
                             const minTransferCUP = await getMinTransferCUP();
@@ -4122,12 +4124,13 @@ bot.on(message('text'), async (ctx) => {
                                 newBonus = 0;
                                 bonusMovedMsg = `\n🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
                             }
-                            let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n📊 Saldo actualizado.`;
+
+                            let msg = `🔄 Has recibido una referencia\n\n👤 De: ${escapeHTML(referrerName)}\n💰 Monto: ${commissionCUP.toFixed(2)} CUP\n🎁 La referencia ha sido añadida a tu bono de bienvenida actual.${bonusMovedMsg}\n📊 Saldo actualizado.`;
                             messages.push(msg);
 
                             finalCommissionAmount = commissionCUP;
                             finalCommissionCurrency = 'CUP';
-                            finalDestination = 'bonus_cup';
+                            finalDestination = bonusMovedMsg ? 'cup' : 'bonus_cup';
                         }
                     }
 
