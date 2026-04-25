@@ -556,6 +556,7 @@
                         <button data-admin-view="viewData" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-eye mr-1"></i> Ver Datos</button>
                         <button data-admin-view="setReferralRate" class="admin-nav-btn bg-orange-400/80 p-3 rounded-xl hover:bg-orange-500"><i class="fas fa-percent mr-1"></i> % Referidos</button>
                         <button data-admin-view="pendingRequests" class="admin-nav-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700"><i class="fas fa-clock mr-1"></i> Solicitudes Pendientes</button>
+                        <button data-admin-view="setBonus" class="admin-nav-btn bg-indigo-400/80 p-3 rounded-xl hover:bg-indigo-500"><i class="fas fa-gift mr-1"></i> Bono Inicial</button>
                     </div>
                     <div id="adminViewContainer" class="mt-4"></div>
                 </div>
@@ -2534,6 +2535,39 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
         };
 
+        async function renderSetBonusView() {
+            try {
+                // Obtener el valor actual desde el endpoint que ya tienes (o podemos usar /api/admin/config)
+                const res = await fetch(`/api/admin/config?userId=${currentUser.telegram_id}`);
+                if (!res.ok) throw new Error('Error al obtener bono');
+                const config = await res.json();
+                const currentBonus = config.bonusCupDefault || 70;
+                adminViewContainer.innerHTML = `
+                    <h4 class="text-xl font-semibold mb-4">🎁 Bono de bienvenida para nuevos usuarios</h4>
+                    <p class="mb-2">Valor actual: <span class="text-cyan-300 font-bold">${currentBonus} CUP</span></p>
+                    <input type="number" id="newBonusValue" value="${currentBonus}" step="0.01" min="0" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-indigo-500 mb-3">
+                    <button id="saveBonusBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar</button>
+                `;
+                document.getElementById('saveBonusBtn').addEventListener('click', async () => {
+                    const value = parseFloat(document.getElementById('newBonusValue').value);
+                    if (isNaN(value) || value < 0) {
+                        iziToast.warning({ message: 'Valor inválido' });
+                        return;
+                    }
+                    await fetch('/api/admin/config', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bonusCupDefault: value, userId: currentUser.telegram_id })
+                    });
+                    iziToast.success({ message: 'Bono de bienvenida actualizado' });
+                    renderSetBonusView();
+                });
+            } catch (e) {
+                console.error(e);
+                adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar el bono.</p>';
+            }
+        }
+
         function renderSetRateView() {
             adminViewContainer.innerHTML = `
                 <h4 class="text-xl font-semibold mb-4">💰 Configurar Tasas de Cambio</h4>
@@ -2923,6 +2957,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 else if (view === 'setPrices') renderSetPricesView();
                 else if (view === 'viewData') renderViewDataView();
                 else if (view === 'pendingRequests') renderPendingRequestsView();
+                else if (view === 'setBonus') renderSetBonusView();
             });
         });
 
