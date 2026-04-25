@@ -325,7 +325,7 @@
                 <i class="fas fa-dice text-white text-2xl"></i>
             </div>
             <div>
-                <h1 class="text-2xl font-bold text-white drop-shadow-lg">4pu3$t4$_Qva</h1>
+                <h1 class="text-2xl font-bold text-white drop-shadow-lg" id="botDisplayName">4pu3$t4$_Qva</h1>
                 <p class="text-xs text-gray-300" id="userName">Cargando...</p>
             </div>
         </div>
@@ -372,7 +372,7 @@
                         <div class="bg-white/20 p-4 rounded-2xl backdrop-blur-sm">
                             <i class="fas fa-percent text-3xl text-green-300 mb-2"></i>
                             <p class="font-bold">Comisión referidos</p>
-                            <p class="text-sm text-gray-300">5% de por vida</p>
+                            <p class="text-sm text-gray-300" id="homeReferralRate">5 % de por vida</p>
                         </div>
                     </div>
                 </div>
@@ -674,6 +674,14 @@
                 if (p.type === 'minute') minute = parseInt(p.value, 10);
             }
             return { hour, minute, totalHours: hour + minute/60 };
+        }
+
+        function formatReferralPercent(rate) {
+            const percent = rate * 100;
+            // Si es entero, lo mostramos sin decimales
+            if (Number.isInteger(percent)) return percent.toString();
+            // Si no, redondeamos a 2 decimales y eliminamos ceros sobrantes
+            return parseFloat(percent.toFixed(2)).toString();
         }
 
         function getCurrentCubaDate() {
@@ -1215,9 +1223,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const res = await fetch('/api/referral-rate');
                 if (res.ok) {
                     const data = await res.json();
-                    const percent = (data.rate * 100).toFixed(2);
+                    const percent = formatReferralPercent(data.rate);
                     const el = document.getElementById('referralRateText');
                     if (el) el.innerText = `${percent}% de cada apuesta de tus referidos`;
+                    const homeEl = document.getElementById('homeReferralRate');
+                    if (homeEl) homeEl.innerText = `${percent}% de por vida`;
                 }
             } catch (e) {
                 // Si falla, dejamos el texto que ya tiene (puede ser "5% de cada apuesta..." como fallback)
@@ -1269,6 +1279,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 botUsername = data.botUsername || '4pu3$t4$_QvaBot';
                 // Prefer the bot's display name (friendly) if provided by the API
                 const botDisplayName = data.botDisplayName || '';
+                document.title = '🎰 ' + (botDisplayName || '4pu3$t4$_Qva') + ' · Tu Casa de Apuestas';
+                // Actualizar el nombre del bot en la cabecera
+                const botNameEl = document.getElementById('botDisplayName');
+                if (botNameEl) botNameEl.innerText = botDisplayName || '4pu3$t4$_Qva';
                 bonusCupDefault = data.bonusCupDefault || 70;
                 
                 // Show actual bonus if user has it, otherwise hide welcome bonus label
@@ -1292,11 +1306,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 document.getElementById('userName').innerText = currentUser.first_name || 'Jugador';
                 // Actualizar título del modal de descartar con el nombre del bot (si está disponible)
-                try {
+               try {
                     const discardTitleEl = document.getElementById('discardModalTitle');
                     if (discardTitleEl) {
-                        // Hardcodear el título solicitado por el producto
-                        discardTitleEl.innerText = '4pu3$t4$ Qva®';
+                        discardTitleEl.innerText = (botDisplayName || '4pu3$t4$_Qva') + '®';
                     }
                 } catch (e) { /* silent */ }
                 updateBalanceUI();
@@ -2651,7 +2664,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const res = await fetch(`/api/admin/referral-rate?userId=${currentUser.telegram_id}`);
                 if (!res.ok) throw new Error('Error al obtener tasa');
                 const data = await res.json();
-                const currentPercent = (data.rate * 100).toFixed(2);
+                const currentPercent = formatReferralPercent(data.rate);
                 adminViewContainer.innerHTML = `
                     <h4 class="text-xl font-semibold mb-4">📈 Porcentaje de comisión por referidos</h4>
                     <p class="mb-2">Valor actual: <span class="text-cyan-300 font-bold">${currentPercent}%</span></p>
@@ -2665,13 +2678,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         return;
                     }
                     const rate = percent / 100;
-                    await fetch('/api/admin/referral-rate', {
+                    const res = await fetch('/api/admin/referral-rate', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ rate, userId: currentUser.telegram_id })
                     });
-                    iziToast.success({ message: 'Comisión actualizada' });
-                    renderSetReferralRateView();
+                    if (res.ok)
+                    {
+                        iziToast.success({ message: 'Comisión actualizada' });
+                        await updateReferralRateText();
+                        renderSetReferralRateView();
+                    }
                 });
             } catch (e) {
                 console.error(e);
