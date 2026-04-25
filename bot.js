@@ -49,14 +49,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 // ========== INICIALIZAR BOT ==========
 const bot = new Telegraf(BOT_TOKEN);
 let botInfo = { username: 'bot', first_name: 'Bot' };
-(async () => {
-    try {
-        botInfo = await bot.telegram.getMe();
-        console.log('Bot info:', botInfo);
-    } catch (e) {
-        console.error('Error obteniendo info del bot:', e);
-    }
-})();
 
 // ========== CONFIGURAR COMANDOS DEL MENÚ LATERAL ==========
 const MENU_COMMANDS = [
