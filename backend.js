@@ -15,7 +15,16 @@ const cors = require('cors');
 const moment = require('moment-timezone');
 
 // ========== IMPORTAR BOT DE TELEGRAM ==========
-let bot; // will be loaded asynchronously via dynamic import to avoid ESM TLA errors
+let bot; 
+let botInfo = { username: 'bot', first_name: 'Bot' };
+(async () => {
+    try {
+        botInfo = await bot.telegram.getMe();
+        console.log('Bot info:', botInfo);
+    } catch (e) {
+        console.error('Error obteniendo info del bot:', e);
+    }
+})();// will be loaded asynchronously via dynamic import to avoid ESM TLA errors
 
 // ========== CONFIGURACIÓN DESDE .ENV ==========
 const PORT = process.env.PORT || 3000;
@@ -65,7 +74,16 @@ async function getReferralCommissionRate() {
         .select('value')
         .eq('key', 'referral_commission_rate')
         .single();
-    return data ? parseFloat(data.value) : 0.05;
+    return data ? parseFloat(data.value) : 0;
+}
+
+async function getBonusCupDefault() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'bonus_cup_default')
+        .single();
+    return data ? parseFloat(data.value) : BONUS_CUP_DEFAULT;
 }
 
 function escapeHTML(text) {
@@ -711,7 +729,7 @@ app.post('/api/auth', async (req, res) => {
 
     const botInfo = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`)
         .then(r => r.data.result)
-        .catch(() => ({ username: '4pu3$t4$_QvaBot', first_name: '4pu3$t4$ Qva®' }));
+        .catch(() => ({ username: 'bot', first_name: 'Bot' }));
 
     res.json({
         user,
@@ -3045,7 +3063,7 @@ setInterval(async () => {
 
 // ========== INICIAR SERVIDOR Y BOT ==========
 app.listen(PORT, () => {
-    console.log(`🚀 Backend de 4pu3$t4$_Qva corriendo en http://localhost:${PORT}`);
+    console.log(`🚀 Backend corriendo en http://localhost:${PORT}`);
     console.log(`📡 WebApp servida en ${WEBAPP_URL}`);
     console.log(`🤖 Iniciando bot de Telegram...`);
 });
@@ -3075,6 +3093,10 @@ try {
                         .then(() => {
                             botStarted = true;
                             launchInProgress = false;
+                            bot.telegram.getMe().then(info => {
+                                botInfo = info;
+                                console.log('Bot info actualizada:', botInfo);
+                            }).catch(e => console.error('Error actualizando botInfo:', e));
                             console.log('🤖 Bot de Telegram iniciado correctamente (polling, webhook desactivado)');
                         })
                         .catch(err => {

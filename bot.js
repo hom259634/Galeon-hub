@@ -48,6 +48,15 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // ========== INICIALIZAR BOT ==========
 const bot = new Telegraf(BOT_TOKEN);
+let botInfo = { username: 'bot', first_name: 'Bot' };
+(async () => {
+    try {
+        botInfo = await bot.telegram.getMe();
+        console.log('Bot info:', botInfo);
+    } catch (e) {
+        console.error('Error obteniendo info del bot:', e);
+    }
+})();
 
 // ========== CONFIGURAR COMANDOS DEL MENÚ LATERAL ==========
 const MENU_COMMANDS = [
@@ -119,6 +128,14 @@ function escapeHTML(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+function formatReferralPercent(rate) {
+    const percent = rate * 100;
+    // Si es entero, lo mostramos sin decimales
+    if (Number.isInteger(percent)) return percent.toString();
+    // Si no, redondeamos a 2 decimales y eliminamos ceros sobrantes
+    return parseFloat(percent.toFixed(2)).toString();
 }
 
 function normalizeParleValue(value) {
@@ -632,7 +649,7 @@ async function getReferralCommissionRate() {
         .select('value')
         .eq('key', 'referral_commission_rate')
         .single();
-    return data ? parseFloat(data.value) : 0.05;
+    return data ? parseFloat(data.value) : 0;
 }
 
 async function getMinDepositUSD() {
@@ -811,25 +828,50 @@ function getEndTimeFromSlot(lottery, timeSlot) {
     return endTime.toDate();
 }
 
-async function broadcastToAllUsers(ctx, messageText = null) {
+// Para notificaciones automáticas (cron, números ganadores, sesiones…)
+async function broadcastToAllUsers(message, parseMode = 'HTML') {
     const { data: users } = await supabase.from('users').select('telegram_id');
     const deliveryErrorsToIgnore = [
-        'chat not found',
-        'bot was blocked by the user',
-        'user is deactivated',
-        'forbidden: bot was blocked by the user'
+        'chat not found', 'bot was blocked by the user',
+        'user is deactivated', 'forbidden: bot was blocked by the user'
+    ];
+
+    for (const u of users || []) {
+        try {
+            await bot.telegram.sendMessage(u.telegram_id, message, { parse_mode: parseMode });
+            await new Promise(resolve => setTimeout(resolve, 30));
+        } catch (e) {
+            const errorMessage = (e?.message || '').toLowerCase();
+            if (!deliveryErrorsToIgnore.some(frag => errorMessage.includes(frag))) {
+                console.warn(`Error broadcast a ${u.telegram_id}:`, e.message);
+            }
+        }
+    }
+}
+
+// Broadcast personalizado para el admin (no se envía a sí mismo)
+async function adminBroadcast(ctx, messageText = null) {
+    const { data: users } = await supabase.from('users').select('telegram_id');
+    const senderId = ctx.from.id;
+    const deliveryErrorsToIgnore = [
+        'chat not found', 'bot was blocked by the user',
+        'user is deactivated', 'forbidden: bot was blocked by the user'
     ];
 
     const messageId = ctx.message.message_id;
     const fromChatId = ctx.chat.id;
-    const sentMessageIds = []; // para almacenar los IDs de cada copia
+    const sentMessageIds = [];
 
     for (const u of users || []) {
+        // Saltarse al propio administrador
+        if (u.telegram_id === senderId) continue;
+
         try {
-            // Si es texto, podemos enviar con formato; si no, usamos copyMessage
             if (messageText) {
+                // Solo texto (sin prefijo)
                 await bot.telegram.sendMessage(u.telegram_id, messageText, { parse_mode: 'HTML' });
             } else {
+                // Multimedia: se copia exactamente
                 const copyResult = await ctx.telegram.copyMessage(u.telegram_id, fromChatId, messageId);
                 if (copyResult && copyResult.message_id) {
                     sentMessageIds.push({ chat_id: u.telegram_id, message_id: copyResult.message_id });
@@ -838,18 +880,16 @@ async function broadcastToAllUsers(ctx, messageText = null) {
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
             const errorMessage = (e?.message || '').toLowerCase();
-            if (!deliveryErrorsToIgnore.some(fragment => errorMessage.includes(fragment))) {
+            if (!deliveryErrorsToIgnore.some(frag => errorMessage.includes(frag))) {
                 console.warn(`Error broadcast a ${u.telegram_id}:`, e.message);
             }
         }
     }
 
-    // Guardar el mapeo solo si se enviaron copias (para futura edición)
+    // Guardar mapeo para editar luego (solo multimedia)
     if (sentMessageIds.length > 0) {
         broadcastMap.set(messageId, sentMessageIds);
     }
-
-    console.log(`[Broadcast] Enviado/copiado a ${sentMessageIds.length} usuarios`);
 }
 
 async function createDepositRequest(userId, methodId, fileBuffer, amountText, currency) {
@@ -953,6 +993,7 @@ function adminPanelKbd() {
             Markup.button.callback('💰 Mínimos por jugada', 'adm_min_per_bet')
         ],
         [Markup.button.callback('📈 Cambiar % referidos', 'adm_set_referral_rate')],
+        [Markup.button.callback('🔄 Cambiar token del bot', 'admin_change_token')],
         [Markup.button.callback('📋 Ver datos actuales', 'adm_view')],
         [Markup.button.callback('◀ Menú principal', 'main')]
     ];
@@ -1014,6 +1055,9 @@ bot.command('start', async (ctx) => {
     const firstName = ctx.from.first_name || 'Jugador';
     const refParam = ctx.payload;
 
+    const me = await ctx.telegram.getMe().catch(() => ({}));
+    const botName = me.first_name || 'el Bot';
+
     if (refParam) {
         const refId = parseInt(refParam);
         if (refId && refId !== uid) {
@@ -1026,7 +1070,7 @@ bot.command('start', async (ctx) => {
 
     // Mensaje de bienvenida (ahora primero)
     await safeEdit(ctx,
-        `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a 4pu3$t4$_Qva, tu asistente de la suerte 🍀\n\n` +
+        `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(botName)}, tu asistente de la suerte 🍀\n\n` +
         `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
         `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`,
         getMainKeyboard(ctx)
@@ -1178,7 +1222,7 @@ bot.command('referidos', async (ctx) => {
             `🎯 <b>¿Cómo funciona?</b>\n` +
             `1️⃣ Comparte tu enlace personal con amigos\n` +
             `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-            `3️⃣ Recibirás un ${(referralRate * 100).toFixed(2)} % del monto de CADA apuesta que realicen\n` +
+            `3️⃣ Recibirás un ${formatReferralPercent(referralRate)} % del monto de CADA apuesta que realicen\n` +
             `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
             `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
             `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -1644,7 +1688,7 @@ bot.action('referrals', async (ctx) => {
         `🎯 <b>¿Cómo funciona?</b>\n` +
         `1️⃣ Comparte tu enlace personal con amigos\n` +
         `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-        `3️⃣Recibirás un ${(referralRate * 100).toFixed(2)} % del monto de CADA apuesta que realicen\n` +
+        `3️⃣Recibirás un ${formatReferralPercent(referralRate)} % del monto de CADA apuesta que realicen\n` +
         `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
         `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
         `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -1663,6 +1707,13 @@ bot.action('how_to_play', async (ctx) => {
         Markup.inlineKeyboard([[Markup.button.callback('◀ Volver al inicio', 'main')]])
     );
 });
+
+// bot.action('admin_change_token', async (ctx) => {
+//     if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
+//     ctx.session.adminAction = 'change_bot_token';
+//     await ctx.reply('🔐 Envía el nuevo <b>BOT_TOKEN</b> que te dio @BotFather:', { parse_mode: 'HTML' });
+//     await ctx.answerCbQuery();
+// });
 
 bot.action('admin_panel', async (ctx) => {
     if (!isAdmin(ctx.from.id)) {
@@ -2087,7 +2138,7 @@ bot.action('adm_set_referral_rate', async (ctx) => {
     const current = await getReferralCommissionRate();
     ctx.session.adminAction = 'set_referral_rate';
     await ctx.reply(
-        `📈 <b>Comisión por referidos actual:</b> ${(current * 100).toFixed(2)}%\n\n` +
+        `📈 <b>Comisión por referidos actual:</b> ${formatReferralPercent(current)} %\n\n` +
         `Envía el nuevo porcentaje (por ej., 5 para 5%):`,
         { parse_mode: 'HTML' }
     );
@@ -2551,7 +2602,7 @@ bot.on(message('text'), async (ctx) => {
     const text = ctx.message.text.trim();
     const session = ctx.session;
     const user = ctx.dbUser;
-    const broadcastMap = new Map();
+    //const broadcastMap = new Map();
 
     const normalizedText = text.toLowerCase();
     if (normalizedText === 'cancelar' || normalizedText === '/cancel' || normalizedText === '❌ cancelar') {
@@ -2710,7 +2761,7 @@ bot.on(message('text'), async (ctx) => {
                     `🎯 <b>¿Cómo funciona?</b>\n` +
                     `1️⃣ Comparte tu enlace personal con amigos\n` +
                     `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-                    `3️⃣ Recibirás un ${(referralRate * 100).toFixed(2)} % del monto de CADA apuesta que realicen\n` +
+                    `3️⃣ Recibirás un ${formatReferralPercent(referralRate)} % del monto de CADA apuesta que realicen\n` +
                     `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
                     `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
                     `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -4358,8 +4409,7 @@ bot.on(message('text'), async (ctx) => {
         } else {
         // Si es admin y no está en ningún flujo, el mensaje se transmite a todos los usuarios
         if (isAdmin(uid) && !hasActiveAdminFlow(session)) {
-            const broadcastMessage = `📢 <b>Mensaje del administrador:</b>\n\n${escapeHTML(text)}`;
-            await broadcastToAllUsers(ctx, broadcastMessage);
+            await adminBroadcast(ctx, escapeHTML(text));   // sin prefijo
             await ctx.reply('✅ Mensaje enviado a todos los usuarios.', getMainKeyboard(ctx));
         } else {
             // Usuario normal sin flujo → mensaje de soporte (comportamiento original)
@@ -4442,6 +4492,12 @@ bot.on(message('photo'), async (ctx) => {
         session.awaitingDepositAmount = true;
 
         await ctx.reply('✅ Captura recibida correctamente. Ahora, por favor, envía el <b>monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usd</code>).', { parse_mode: 'HTML' });
+        return;
+    }
+
+    if (isAdmin(uid) && !hasActiveAdminFlow(session)) {
+        await adminBroadcast(ctx);
+        await ctx.reply('✅ Contenido enviado a todos los usuarios.', getMainKeyboard(ctx));
         return;
     }
 
@@ -4797,7 +4853,7 @@ bot.on(
         // Ignorar si el admin está realizando otra acción
         if (!isAdmin(uid) || hasActiveAdminFlow(session)) return next();
 
-        await broadcastToAllUsers(ctx);
+        await adminBroadcast(ctx);
         await ctx.reply('✅ Contenido enviado a todos los usuarios.', getMainKeyboard(ctx));
     }
 );
