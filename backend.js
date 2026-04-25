@@ -2125,6 +2125,27 @@ app.delete('/api/admin/withdraw-methods/:id', requireAdmin, async (req, res) => 
     res.json({ success: true });
 });
 
+app.get('/api/admin/config', requireAdmin, async (req, res) => {
+    const bonus = await getBonusCupDefault();
+    const rate = await getReferralCommissionRate();
+    res.json({ bonusCupDefault: bonus, referralRate: rate });
+});
+
+app.put('/api/admin/config', requireAdmin, async (req, res) => {
+    const { bonusCupDefault, referralRate } = req.body;
+    if (bonusCupDefault !== undefined) {
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'bonus_cup_default', value: bonusCupDefault.toString() }, { onConflict: 'key' });
+    }
+    if (referralRate !== undefined) {
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'referral_commission_rate', value: referralRate.toString() }, { onConflict: 'key' });
+    }
+    res.json({ success: true });
+});
+
 // --- Actualizar tasas de cambio ---
 app.put('/api/admin/exchange-rate/usd', requireAdmin, async (req, res) => {
     const { rate } = req.body;
