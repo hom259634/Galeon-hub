@@ -2714,7 +2714,7 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
 // ========== NUEVOS ENDPOINTS PARA SOLICITUDES PENDIENTES ==========
 
 // --- Listar solicitudes de depósito pendientes ---
-app.get('/api/admin/pending-deposits', requireAdmin, (req, res) => {
+app.get('/api/admin/pending-deposits', requireAdmin, async (req, res) => {
     const { data, error } = await supabase
         .from('deposit_requests')
         .select(`
