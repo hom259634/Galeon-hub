@@ -625,6 +625,15 @@ async function getMinTransferUSD() {
     return 1.0
 }
 
+async function getReferralCommissionRate() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'referral_commission_rate')
+        .single();
+    return data ? parseFloat(data.value) : 0.05;
+}
+
 async function getMinDepositUSD() {
     const { data } = await supabase
         .from('app_config')
@@ -940,6 +949,7 @@ function adminPanelKbd() {
             Markup.button.callback('💰 Mínimos por jugada', 'adm_min_per_bet')
         ],
         [Markup.button.callback('📋 Ver datos actuales', 'adm_view')],
+        [Markup.button.callback('📈 Cambiar % referidos', 'adm_set_referral_rate')],
         [Markup.button.callback('◀ Menú principal', 'main')]
     ];
     return Markup.inlineKeyboard(buttons);
@@ -1125,6 +1135,7 @@ bot.command('referidos', async (ctx) => {
             // Procesar comisiones
             if (comisiones && comisiones.length > 0) {
                 const tasaUSD = await getExchangeRateUSD();
+                const referralRate = await getReferralCommissionRate(); 
                 for (const com of comisiones) {
                     const userId = com.user_id;
                     const amount = parseFloat(com.commission_amount) || 0;
@@ -1163,7 +1174,7 @@ bot.command('referidos', async (ctx) => {
             `🎯 <b>¿Cómo funciona?</b>\n` +
             `1️⃣ Comparte tu enlace personal con amigos\n` +
             `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-            `3️⃣ Recibirás un 5 % del monto de CADA apuesta que realicen\n` +
+            `3️⃣ Recibirás un ${(referralRate * 100).toFixed(2)} % del monto de CADA apuesta que realicen\n` +
             `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
             `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
             `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -1621,6 +1632,7 @@ bot.action('referrals', async (ctx) => {
         .eq('ref_by', uid);
 
     const botInfo = await ctx.telegram.getMe();
+    const referralRate = await getReferralCommissionRate();
     const link = `https://t.me/${botInfo.username}?start=${uid}`;
 
     await safeEdit(ctx,
@@ -1628,7 +1640,7 @@ bot.action('referrals', async (ctx) => {
         `🎯 <b>¿Cómo funciona?</b>\n` +
         `1️⃣ Comparte tu enlace personal con amigos\n` +
         `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-        `3️⃣Recibirás un 5 % del monto de CADA apuesta que realicen\n` +
+        `3️⃣Recibirás un ${(referralRate * 100).toFixed(2)} % del monto de CADA apuesta que realicen\n` +
         `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
         `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
         `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -2063,6 +2075,18 @@ bot.action('adm_set_rate_trx', async (ctx) => {
     const rate = await getExchangeRateTRX();
     ctx.session.adminAction = 'set_rate_trx';
     await ctx.reply(`💰 <b>Tasa TRX/CUP actual:</b> 1 TRX = ${rate} CUP\n\nEnvía la nueva tasa (solo número, ej: 1.5):`, { parse_mode: 'HTML' });
+    await ctx.answerCbQuery();
+});
+
+bot.action('adm_set_referral_rate', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const current = await getReferralCommissionRate();
+    ctx.session.adminAction = 'set_referral_rate';
+    await ctx.reply(
+        `📈 <b>Comisión por referidos actual:</b> ${(current * 100).toFixed(2)}%\n\n` +
+        `Envía el nuevo porcentaje (por ej., 5 para 5%):`,
+        { parse_mode: 'HTML' }
+    );
     await ctx.answerCbQuery();
 });
 
@@ -2595,6 +2619,7 @@ bot.on(message('text'), async (ctx) => {
                 const totalReferidos = referidos?.length || 0;
                 let totalAportadoCUP = 0;
                 let referidosList = '';
+                const referralRate = await getReferralCommissionRate();
 
                 if (totalReferidos > 0) {
                     // Consultar comisiones generadas por referidos (datos reales ya acreditados)
@@ -2659,7 +2684,7 @@ bot.on(message('text'), async (ctx) => {
                     `🎯 <b>¿Cómo funciona?</b>\n` +
                     `1️⃣ Comparte tu enlace personal con amigos\n` +
                     `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-                    `3️⃣ Recibirás un 5 % del monto de CADA apuesta que realicen\n` +
+                    `3️⃣ Recibirás un ${(referralRate * 100).toFixed(2)} % del monto de CADA apuesta que realicen\n` +
                     `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
                     `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
                     `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -2829,6 +2854,23 @@ bot.on(message('text'), async (ctx) => {
         }
         await setExchangeRateUSD(rate);
         await ctx.reply(`✅ Tasa USD/CUP actualizada: 1 USD = ${rate} CUP`, { parse_mode: 'HTML' });
+        delete session.adminAction;
+        await safeEdit(ctx, '🔧 <b>Panel de administración</b>', adminPanelKbd());
+        return;
+    }
+
+    // --- Admin: configurar porcentaje de referidos ---
+    if (isAdmin(uid) && session.adminAction === 'set_referral_rate') {
+        const percent = parseFloat(text.replace(',', '.'));
+        if (isNaN(percent) || percent <= 0) {
+            await ctx.reply('❌ Porcentaje inválido. Envía un número positivo (ej: 5).');
+            return;
+        }
+        const rate = percent / 100;
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'referral_commission_rate', value: rate.toString() }, { onConflict: 'key' });
+        await ctx.reply(`✅ Comisión por referidos actualizada a: ${percent.toFixed(2)}%`, { parse_mode: 'HTML' });
         delete session.adminAction;
         await safeEdit(ctx, '🔧 <b>Panel de administración</b>', adminPanelKbd());
         return;
@@ -4002,12 +4044,13 @@ bot.on(message('text'), async (ctx) => {
                 if (userWithRef && userWithRef.ref_by) {
                     const referrerId = userWithRef.ref_by;
                     const referrerName = user.first_name || user.username || 'Usuario';
+                    const referralRate = await getReferralCommissionRate();
 
                     const realCupAmount = totalCUP;
                     const realUsdAmount = totalUSD;
 
-                    let commissionUSD = realUsdAmount * 0.05;
-                    let commissionCUP = realCupAmount * 0.05;
+                    let commissionUSD = realUsdAmount * referralRate;
+                    let commissionCUP = realCupAmount * referralRate;
                     let messages = [];
                     let bonusMovedCup = 0;
 
@@ -4286,9 +4329,30 @@ bot.on(message('text'), async (ctx) => {
             }
         }
         await ctx.reply('✅ Tu mensaje ha sido enviado al equipo de soporte. Te responderemos a la brevedad.');
-    } else {
-        // Si es admin y no está en modo respuesta, ignoramos (o podríamos dar un mensaje)
-        await ctx.reply('Usa los botones del menú para navegar.', getMainKeyboard(ctx));
+        } else {
+        // Si es admin y no está en ningún flujo, el mensaje se transmite a todos los usuarios
+        if (isAdmin(uid)) {
+            await broadcastToAllUsers(`📢 <b>Mensaje del administrador:</b>\n\n${escapeHTML(text)}`);
+            await ctx.reply('✅ Mensaje enviado a todos los usuarios.', getMainKeyboard(ctx));
+        } else {
+            // Usuario normal sin flujo → mensaje de soporte (comportamiento original)
+            for (const adminId of ADMIN_IDS) {
+                try {
+                    await bot.telegram.sendMessage(adminId,
+                        `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name)} (${uid}):\n\n${escapeHTML(text)}`,
+                        {
+                            parse_mode: 'HTML',
+                            reply_markup: Markup.inlineKeyboard([
+                                [Markup.button.callback('📩 Responder', `support_reply_${uid}`)]
+                            ]).reply_markup
+                        }
+                    );
+                } catch (e) {
+                    console.warn(`Error enviando soporte a admin ${adminId}:`, e.message);
+                }
+            }
+            await ctx.reply('✅ Tu mensaje ha sido enviado al equipo de soporte. Te responderemos a la brevedad.');
+        }
     }
 });
 

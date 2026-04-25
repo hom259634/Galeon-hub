@@ -59,6 +59,15 @@ function isAdmin(userId) {
     return ADMIN_IDS.includes(parseInt(userId));
 }
 
+async function getReferralCommissionRate() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'referral_commission_rate')
+        .single();
+    return data ? parseFloat(data.value) : 0.05;
+}
+
 function escapeHTML(text) {
     if (!text) return '';
     return String(text)
@@ -716,6 +725,12 @@ app.post('/api/auth', async (req, res) => {
         botDisplayName: botInfo.first_name || botInfo.username || '4pu3$t4$ Qva®',
         bonusCupDefault: BONUS_CUP_DEFAULT
     });
+});
+
+// --- Tasa de comisión de referidos (pública, para mostrar en la web) ---
+app.get('/api/referral-rate', async (req, res) => {
+    const rate = await getReferralCommissionRate();
+    res.json({ rate });
 });
 
 // --- Métodos de depósito ---
@@ -1376,9 +1391,10 @@ app.post('/api/bets', async (req, res) => {
             const newReferrerId = userWithRef.ref_by;
             const realCupAmount = totalCUP;
             const realUsdAmount = totalUSD;
+            const referralRate = await getReferralCommissionRate();
 
-            let commissionUSD = realUsdAmount * 0.05;
-            let commissionCUP = realCupAmount * 0.05;
+            let commissionUSD = realUsdAmount * referralRate;
+            let commissionCUP = realCupAmount * referralRate;
             let newDestination = null;
             let newCommissionAmount = 0;
             let newCommissionCurrency = '';
@@ -1578,12 +1594,13 @@ app.post('/api/bets', async (req, res) => {
         if (userWithRef && userWithRef.ref_by) {
             const referrerId = userWithRef.ref_by;
             const referrerName = user.first_name || user.username || 'Usuario';
+            const referralRate = await getReferralCommissionRate();
 
             const realCupAmount = totalCUP;
             const realUsdAmount = totalUSD;
 
-            let commissionUSD = realUsdAmount * 0.05;
-            let commissionCUP = realCupAmount * 0.05;
+            let commissionUSD = realUsdAmount * referralRate;
+            let commissionCUP = realCupAmount * referralRate;
             let messages = [];
             let bonusMovedCup = 0;
 
@@ -1831,9 +1848,10 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
             // Notificar al referidor
             try {
                 const userName = user.first_name || user.username || `ID ${userId}`;
+                const referralRate = await getReferralCommissionRate();
                 await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     chat_id: referrerId,
-                    text: `⚠️ Tu referido ${escapeHTML(userName)} ha removido una apuesta. Ha sido restado de tu saldo actual el 5% del monto retirado en la apuesta removida.`,
+                    text: `⚠️ Tu referido ${escapeHTML(userName)} ha removido una apuesta. Ha sido restado de tu saldo actual el ${(referralRate * 100).toFixed(2)} % del monto retirado en la apuesta removida.`,
                     parse_mode: 'HTML'
                 });
             } catch (e) {}
@@ -2138,6 +2156,24 @@ app.put('/api/admin/exchange-rate/trx', requireAdmin, async (req, res) => {
     const { rate } = req.body;
     if (!rate || rate <= 0) return res.status(400).json({ error: 'Tasa inválida' });
     await setExchangeRateTRX(rate);
+    res.json({ success: true });
+});
+
+// Obtener la tasa de comisión actual
+app.get('/api/admin/referral-rate', requireAdmin, async (req, res) => {
+    const rate = await getReferralCommissionRate();
+    res.json({ rate });
+});
+
+// Actualizar la tasa de comisión
+app.put('/api/admin/referral-rate', requireAdmin, async (req, res) => {
+    const { rate } = req.body;
+    if (rate === undefined || isNaN(parseFloat(rate)) || parseFloat(rate) < 0) {
+        return res.status(400).json({ error: 'Tasa inválida' });
+    }
+    await supabase
+        .from('app_config')
+        .upsert({ key: 'referral_commission_rate', value: rate.toString() }, { onConflict: 'key' });
     res.json({ success: true });
 });
 
@@ -2657,7 +2693,7 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
 // ========== NUEVOS ENDPOINTS PARA SOLICITUDES PENDIENTES ==========
 
 // --- Listar solicitudes de depósito pendientes ---
-app.get('/api/admin/pending-deposits', requireAdmin, async (req, res) => {
+app.get('/api/admin/pending-deposits', requireAdmin, (req, res) => {
     const { data, error } = await supabase
         .from('deposit_requests')
         .select(`
