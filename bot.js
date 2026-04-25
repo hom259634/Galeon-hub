@@ -31,6 +31,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) || 70;
 const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
+const broadcastMap = new Map();
 
 // ========== HORARIO DE RETIROS (hora Cuba) ==========
 // Disponibles diariamente de 10:00 PM a 11:30 PM (hora Cuba)
@@ -810,11 +811,8 @@ function getEndTimeFromSlot(lottery, timeSlot) {
     return endTime.toDate();
 }
 
-async function broadcastToAllUsers(message, parseMode = 'HTML') {
-    const { data: users } = await supabase
-        .from('users')
-        .select('telegram_id');
-
+async function broadcastToAllUsers(ctx, messageText = null) {
+    const { data: users } = await supabase.from('users').select('telegram_id');
     const deliveryErrorsToIgnore = [
         'chat not found',
         'bot was blocked by the user',
@@ -822,30 +820,36 @@ async function broadcastToAllUsers(message, parseMode = 'HTML') {
         'forbidden: bot was blocked by the user'
     ];
 
-    let sentCount = 0;
-    let inactiveCount = 0;
-    let failedCount = 0;
+    const messageId = ctx.message.message_id;
+    const fromChatId = ctx.chat.id;
+    const sentMessageIds = []; // para almacenar los IDs de cada copia
 
     for (const u of users || []) {
         try {
-            await bot.telegram.sendMessage(u.telegram_id, message, { parse_mode: parseMode });
-            sentCount += 1;
+            // Si es texto, podemos enviar con formato; si no, usamos copyMessage
+            if (messageText) {
+                await bot.telegram.sendMessage(u.telegram_id, messageText, { parse_mode: 'HTML' });
+            } else {
+                const copyResult = await ctx.telegram.copyMessage(u.telegram_id, fromChatId, messageId);
+                if (copyResult && copyResult.message_id) {
+                    sentMessageIds.push({ chat_id: u.telegram_id, message_id: copyResult.message_id });
+                }
+            }
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
             const errorMessage = (e?.message || '').toLowerCase();
-            const isInactiveUser = deliveryErrorsToIgnore.some(fragment => errorMessage.includes(fragment));
-
-            if (isInactiveUser) {
-                inactiveCount += 1;
-                continue;
+            if (!deliveryErrorsToIgnore.some(fragment => errorMessage.includes(fragment))) {
+                console.warn(`Error broadcast a ${u.telegram_id}:`, e.message);
             }
-
-            failedCount += 1;
-            console.warn(`Error enviando broadcast a ${u.telegram_id}:`, e.message);
         }
     }
 
-    console.log(`[Broadcast] Enviado: ${sentCount} · Inactivos: ${inactiveCount} · Fallidos: ${failedCount}`);
+    // Guardar el mapeo solo si se enviaron copias (para futura edición)
+    if (sentMessageIds.length > 0) {
+        broadcastMap.set(messageId, sentMessageIds);
+    }
+
+    console.log(`[Broadcast] Enviado/copiado a ${sentMessageIds.length} usuarios`);
 }
 
 async function createDepositRequest(userId, methodId, fileBuffer, amountText, currency) {
@@ -948,8 +952,8 @@ function adminPanelKbd() {
             Markup.button.callback('🎲 Configurar precios y pagos', 'adm_set_prices'),
             Markup.button.callback('💰 Mínimos por jugada', 'adm_min_per_bet')
         ],
-        [Markup.button.callback('📋 Ver datos actuales', 'adm_view')],
         [Markup.button.callback('📈 Cambiar % referidos', 'adm_set_referral_rate')],
+        [Markup.button.callback('📋 Ver datos actuales', 'adm_view')],
         [Markup.button.callback('◀ Menú principal', 'main')]
     ];
     return Markup.inlineKeyboard(buttons);
@@ -2520,12 +2524,34 @@ bot.action(/support_reply_(\d+)/, async (ctx) => {
     await ctx.answerCbQuery();
 });
 
+function hasActiveAdminFlow(session) {
+    return !!(
+        session.adminAction ||
+        session.editMethodId ||
+        session.priceStep ||
+        session.minStep ||
+        session.winningSessionId ||
+        session.supportReplyTo ||
+        session.awaitingDepositAmount ||
+        session.awaitingDepositPhoto ||
+        session.awaitingWithdrawAmount ||
+        session.awaitingWithdrawWallet ||
+        session.awaitingWithdrawNetwork ||
+        session.awaitingWithdrawAccountCard ||
+        session.awaitingWithdrawAccountMobile ||
+        session.awaitingTransferTarget ||
+        session.awaitingTransferAmount
+        // Agrega cualquier otra key que uses para flujos administrativos
+    );
+}
+
 // ========== MANEJADOR DE TEXTO PRINCIPAL ==========
 bot.on(message('text'), async (ctx) => {
     const uid = ctx.from.id;
     const text = ctx.message.text.trim();
     const session = ctx.session;
     const user = ctx.dbUser;
+    const broadcastMap = new Map();
 
     const normalizedText = text.toLowerCase();
     if (normalizedText === 'cancelar' || normalizedText === '/cancel' || normalizedText === '❌ cancelar') {
@@ -4331,8 +4357,9 @@ bot.on(message('text'), async (ctx) => {
         await ctx.reply('✅ Tu mensaje ha sido enviado al equipo de soporte. Te responderemos a la brevedad.');
         } else {
         // Si es admin y no está en ningún flujo, el mensaje se transmite a todos los usuarios
-        if (isAdmin(uid)) {
-            await broadcastToAllUsers(`📢 <b>Mensaje del administrador:</b>\n\n${escapeHTML(text)}`);
+        if (isAdmin(uid) && !hasActiveAdminFlow(session)) {
+            const broadcastMessage = `📢 <b>Mensaje del administrador:</b>\n\n${escapeHTML(text)}`;
+            await broadcastToAllUsers(ctx, broadcastMessage);
             await ctx.reply('✅ Mensaje enviado a todos los usuarios.', getMainKeyboard(ctx));
         } else {
             // Usuario normal sin flujo → mensaje de soporte (comportamiento original)
@@ -4757,5 +4784,51 @@ cron.schedule('* * * * *', () => {
     openScheduledSessions();
     withdrawNotifications();
 }, { timezone: TIMEZONE });
+
+//----------Cambios hechos por Luis David -----------//
+// Para q el admin pueda mandar multimedia y editar mensajes
+bot.on(
+    ['photo', 'audio', 'voice', 'video', 'document', 'animation', 'video_note', 'sticker'].map(type => message(type)),
+    async (ctx, next) => {
+        const uid = ctx.from.id;
+        const session = ctx.session;
+        // Ignorar si estamos en el flujo de depósito de foto
+        if (session.awaitingDepositPhoto && ctx.message?.photo) return next();
+        // Ignorar si el admin está realizando otra acción
+        if (!isAdmin(uid) || hasActiveAdminFlow(session)) return next();
+
+        await broadcastToAllUsers(ctx);
+        await ctx.reply('✅ Contenido enviado a todos los usuarios.', getMainKeyboard(ctx));
+    }
+);
+
+bot.on('edited_message', async (ctx) => {
+    const uid = ctx.from.id;
+    if (!isAdmin(uid)) return;
+
+    const originalId = ctx.editedMessage.message_id;
+    const recipients = broadcastMap.get(originalId);
+    if (!recipients || recipients.length === 0) return;
+
+    for (const { chat_id, message_id } of recipients) {
+        try {
+            if (ctx.editedMessage.text) {
+                await bot.telegram.editMessageText(chat_id, message_id, null,
+                    ctx.editedMessage.text,
+                    { parse_mode: 'HTML' }
+                );
+            } else if (ctx.editedMessage.caption) {
+                await bot.telegram.editMessageCaption(chat_id, message_id, null,
+                    ctx.editedMessage.caption,
+                    { parse_mode: 'HTML' }
+                );
+            }
+            // Para otros tipos (fotos, videos) no se puede editar, solo reenviar nuevo
+        } catch (e) {
+            console.warn(`No se pudo editar en chat ${chat_id}:`, e.message);
+        }
+    }
+    console.log(`[Broadcast Edit] Editado en ${recipients.length} usuarios.`);
+});
 
 module.exports = bot;
