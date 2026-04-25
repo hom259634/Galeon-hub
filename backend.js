@@ -17,14 +17,6 @@ const moment = require('moment-timezone');
 // ========== IMPORTAR BOT DE TELEGRAM ==========
 let bot; 
 let botInfo = { username: 'bot', first_name: 'Bot' };
-(async () => {
-    try {
-        botInfo = await bot.telegram.getMe();
-        console.log('Bot info:', botInfo);
-    } catch (e) {
-        console.error('Error obteniendo info del bot:', e);
-    }
-})();// will be loaded asynchronously via dynamic import to avoid ESM TLA errors
 
 // ========== CONFIGURACIÓN DESDE .ENV ==========
 const PORT = process.env.PORT || 3000;
@@ -32,7 +24,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id.trim())) : [];
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) || 70;
+const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) ?? 0;
 const WEBAPP_URL = process.env.WEBAPP_URL || `http://localhost:${PORT}`;
 const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const BOT_LAUNCH_MAX_RETRIES = parseInt(process.env.BOT_LAUNCH_MAX_RETRIES || '0', 10); // 0 = infinito
@@ -83,7 +75,7 @@ async function getBonusCupDefault() {
         .select('value')
         .eq('key', 'bonus_cup_default')
         .single();
-    return data ? parseFloat(data.value) : BONUS_CUP_DEFAULT;
+    return data ? parseFloat(data.value) : 0;
 }
 
 function escapeHTML(text) {
@@ -306,13 +298,14 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
 
         if (!user) {
             try {
+                const currentBonusDefault = await getBonusCupDefault();
                 const { data: newUser, error: insertError } = await supabase
                     .from('users')
                     .insert({
                         telegram_id: telegramId,
                         first_name: firstName,
                         username: username,
-                        bonus_cup: BONUS_CUP_DEFAULT,
+                        bonus_cup: currentBonusDefault,
                         cup: 0,
                         usd: 0
                     })
@@ -741,7 +734,7 @@ app.post('/api/auth', async (req, res) => {
         exchangeRateTRX: rates.rate_trx,
         botUsername: botInfo.username,
         botDisplayName: botInfo.first_name || botInfo.username || '4pu3$t4$ Qva®',
-        bonusCupDefault: BONUS_CUP_DEFAULT
+        bonusCupDefault: await getBonusCupDefault()
     });
 });
 
@@ -1867,9 +1860,11 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
             try {
                 const userName = user.first_name || user.username || `ID ${userId}`;
                 const referralRate = await getReferralCommissionRate();
+                const percent = referralRate * 100;
+                const displayPercent = Number.isInteger(percent) ? percent.toString() : percent.toFixed(2);
                 await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     chat_id: referrerId,
-                    text: `⚠️ Tu referido ${escapeHTML(userName)} ha removido una apuesta. Ha sido restado de tu saldo actual el ${(referralRate * 100).toFixed(2)} % del monto retirado en la apuesta removida.`,
+                    text: `⚠️ Tu referido ${escapeHTML(userName)} ha removido una apuesta. Ha sido restado de tu saldo actual el ${displayPercent}% del monto retirado en la apuesta removida.`,
                     parse_mode: 'HTML'
                 });
             } catch (e) {}

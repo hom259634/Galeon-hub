@@ -993,7 +993,6 @@ function adminPanelKbd() {
             Markup.button.callback('💰 Mínimos por jugada', 'adm_min_per_bet')
         ],
         [Markup.button.callback('📈 Cambiar % referidos', 'adm_set_referral_rate')],
-        [Markup.button.callback('🔄 Cambiar token del bot', 'admin_change_token')],
         [Markup.button.callback('📋 Ver datos actuales', 'adm_view')],
         [Markup.button.callback('◀ Menú principal', 'main')]
     ];
@@ -1222,7 +1221,7 @@ bot.command('referidos', async (ctx) => {
             `🎯 <b>¿Cómo funciona?</b>\n` +
             `1️⃣ Comparte tu enlace personal con amigos\n` +
             `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-            `3️⃣ Recibirás un ${formatReferralPercent(referralRate)} % del monto de CADA apuesta que realicen\n` +
+            `3️⃣ Recibirás un ${formatReferralPercent(referralRate)}% del monto de CADA apuesta que realicen\n` +
             `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
             `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
             `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -1688,7 +1687,7 @@ bot.action('referrals', async (ctx) => {
         `🎯 <b>¿Cómo funciona?</b>\n` +
         `1️⃣ Comparte tu enlace personal con amigos\n` +
         `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-        `3️⃣Recibirás un ${formatReferralPercent(referralRate)} % del monto de CADA apuesta que realicen\n` +
+        `3️⃣Recibirás un ${formatReferralPercent(referralRate)}% del monto de CADA apuesta que realicen\n` +
         `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
         `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
         `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -1721,6 +1720,45 @@ bot.action('admin_panel', async (ctx) => {
         return;
     }
     await safeEdit(ctx, '🔧 <b>Panel de administración</b>\nSelecciona una opción:', adminPanelKbd());
+});
+
+// ---------- ADMIN: ELIMINAR DIFUSIÓN ----------
+bot.action(/delete_broadcast_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) {
+        await ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
+        return;
+    }
+
+    const originalMsgId = parseInt(ctx.match[1]);
+    const recipients = broadcastMap.get(originalMsgId);
+
+    if (!recipients || recipients.length === 0) {
+        await ctx.answerCbQuery('⚠️ No hay destinatarios o el envío ya fue eliminado.', { show_alert: true });
+        return;
+    }
+
+    let deleted = 0;
+    let failed = 0;
+
+    for (const { chat_id, message_id } of recipients) {
+        try {
+            await bot.telegram.deleteMessage(chat_id, message_id);
+            deleted++;
+        } catch (e) {
+            failed++;
+            // Posibles causas: mensaje muy antiguo, chat eliminado...
+        }
+    }
+
+    // Limpiar el mapa para liberar memoria
+    broadcastMap.delete(originalMsgId);
+
+    // Eliminar el mensaje que contiene el botón (la respuesta del bot)
+    try {
+        await ctx.deleteMessage();
+    } catch (e) { /* ignorar si no se puede */ }
+
+    await ctx.answerCbQuery(`✅ Difusión eliminada (${deleted} eliminados, ${failed} fallidos)`);
 });
 
 bot.action('admin_sessions', async (ctx) => {
@@ -2138,7 +2176,7 @@ bot.action('adm_set_referral_rate', async (ctx) => {
     const current = await getReferralCommissionRate();
     ctx.session.adminAction = 'set_referral_rate';
     await ctx.reply(
-        `📈 <b>Comisión por referidos actual:</b> ${formatReferralPercent(current)} %\n\n` +
+        `📈 <b>Comisión por referidos actual:</b> ${formatReferralPercent(current)}%\n\n` +
         `Envía el nuevo porcentaje (por ej., 5 para 5%):`,
         { parse_mode: 'HTML' }
     );
@@ -2213,6 +2251,8 @@ bot.action('adm_view', async (ctx) => {
     const rates = await getExchangeRates();
     const minDep = await getMinDepositUSD();
     const minWit = await getMinWithdrawUSD();
+    const bonusDefault = await getBonusCupDefault();
+    const refRate = await getReferralCommissionRate();
     const { data: depMethods } = await supabase.from('deposit_methods').select('*');
     const { data: witMethods } = await supabase.from('withdraw_methods').select('*');
     const { data: prices } = await supabase.from('play_prices').select('*');
@@ -2232,6 +2272,8 @@ bot.action('adm_view', async (ctx) => {
     prices?.forEach(p => text += 
         `  ${p.bet_type}: Pago x${p.payout_multiplier || 0}  |  Mín: ${p.min_cup||0} CUP / ${p.min_usd||0} USD  |  Máx: ${p.max_cup||'∞'} CUP / ${p.max_usd||'∞'} USD\n`
     );
+    text += `\n🎁 <b>Bono de bienvenida:</b> ${bonusDefault} CUP\n`;
+    text += `📈 <b>Comisión por referidos:</b> ${formatReferralPercent(refRate)}%\n`;
 
     await safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback('◀ Volver a Admin', 'admin_panel')]]));
 });
@@ -2761,7 +2803,7 @@ bot.on(message('text'), async (ctx) => {
                     `🎯 <b>¿Cómo funciona?</b>\n` +
                     `1️⃣ Comparte tu enlace personal con amigos\n` +
                     `2️⃣ Cuando se registren y jueguen, tú ganas una comisión\n` +
-                    `3️⃣ Recibirás un ${formatReferralPercent(referralRate)} % del monto de CADA apuesta que realicen\n` +
+                    `3️⃣ Recibirás un ${formatReferralPercent(referralRate)}% del monto de CADA apuesta que realicen\n` +
                     `4️⃣ ¡Es automático y para siempre! 🔄\n\n` +
                     `🔥 Sin límites, sin topes, sin esfuerzo.\n\n` +
                     `📲 <b>Tu enlace mágico:</b> 👇\n` +
@@ -2939,15 +2981,16 @@ bot.on(message('text'), async (ctx) => {
     // --- Admin: configurar porcentaje de referidos ---
     if (isAdmin(uid) && session.adminAction === 'set_referral_rate') {
         const percent = parseFloat(text.replace(',', '.'));
-        if (isNaN(percent) || percent <= 0) {
-            await ctx.reply('❌ Porcentaje inválido. Envía un número positivo (ej: 5).');
+        if (isNaN(percent) || percent < 0) {
+            await ctx.reply('❌ Porcentaje inválido. Envía un número no negativo (ej: 5).');
             return;
         }
         const rate = percent / 100;
         await supabase
             .from('app_config')
             .upsert({ key: 'referral_commission_rate', value: rate.toString() }, { onConflict: 'key' });
-        await ctx.reply(`✅ Comisión por referidos actualizada a: ${percent.toFixed(2)}%`, { parse_mode: 'HTML' });
+        const displayPercent = Number.isInteger(percent) ? percent.toString() : percent.toFixed(2);
+        await ctx.reply(`✅ Comisión por referidos actualizada a: ${displayPercent}%`, { parse_mode: 'HTML' });
         delete session.adminAction;
         await safeEdit(ctx, '🔧 <b>Panel de administración</b>', adminPanelKbd());
         return;
@@ -4409,8 +4452,10 @@ bot.on(message('text'), async (ctx) => {
         } else {
         // Si es admin y no está en ningún flujo, el mensaje se transmite a todos los usuarios
         if (isAdmin(uid) && !hasActiveAdminFlow(session)) {
-            await adminBroadcast(ctx, escapeHTML(text));   // sin prefijo
-            await ctx.reply('✅ Mensaje enviado a todos los usuarios.', getMainKeyboard(ctx));
+            await adminBroadcast(ctx, escapeHTML(text));
+            await ctx.reply('✅ Mensaje enviado a todos los usuarios.', Markup.inlineKeyboard([
+                Markup.button.callback('🗑 Eliminar envío', `delete_broadcast_${ctx.message.message_id}`)
+            ]));
         } else {
             // Usuario normal sin flujo → mensaje de soporte (comportamiento original)
             for (const adminId of ADMIN_IDS) {
@@ -4854,7 +4899,9 @@ bot.on(
         if (!isAdmin(uid) || hasActiveAdminFlow(session)) return next();
 
         await adminBroadcast(ctx);
-        await ctx.reply('✅ Contenido enviado a todos los usuarios.', getMainKeyboard(ctx));
+        await ctx.reply('✅ Contenido enviado a todos los usuarios.', Markup.inlineKeyboard([
+            Markup.button.callback('🗑 Eliminar envío', `delete_broadcast_${ctx.message.message_id}`)
+        ]));
     }
 );
 
