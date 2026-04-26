@@ -100,31 +100,46 @@ async function withdrawNotifications() {
     const currentHour = now.hour();
     const currentMinute = now.minute();
     const start = await getWithdrawTimeStart();
-    const end = await getWithdrawTimeEnd();
+    const end   = await getWithdrawTimeEnd();
 
-    // Convertir decimal a hora y minuto exactos
     const startHour = Math.floor(start);
     const startMinute = Math.round((start - startHour) * 60);
-    const endHour = Math.floor(end);
+    const endHour   = Math.floor(end);
     const endMinute = Math.round((end - endHour) * 60);
 
-    const startStr = formatHour12(start);
-    const endStr = formatHour12(end);
-
-    // Apertura: justo en la hora/minuto configurados
-    if (currentHour === startHour && currentMinute === startMinute) {
-        await broadcastToAllUsers(
-            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-        );
+    // --- Revertir apertura manual temporal si expiró ---
+    const expiry = await getManualOpenExpiry();
+    if (expiry && now.isAfter(expiry)) {
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
+        await clearManualOpenExpiry();
+        // Opcional: podrías enviar un broadcast de que la sesión ha vuelto a horario normal,
+        // pero como el cierre programado automático se encargará, no es necesario.
     }
-    // Cierre: justo en la hora/minuto configurados
+
+    const currentlyAvailable = await isWithdrawTime();
+    const startStr = formatHour12(start);
+    const endStr   = formatHour12(end);
+
+    // Apertura automática: justo en la hora/minuto configurados (solo si está cerrado)
+    if (currentHour === startHour && currentMinute === startMinute) {
+        if (!currentlyAvailable) {
+            await broadcastToAllUsers(
+                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+            );
+        }
+    }
+    // Cierre automático: justo en la hora/minuto configurados (solo si está abierto)
     else if (currentHour === endHour && currentMinute === endMinute) {
-        await broadcastToAllUsers(
-            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
-        );
+        if (currentlyAvailable) {
+            await broadcastToAllUsers(
+                `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+                `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
+            );
+        }
     }
 }
 
@@ -510,6 +525,27 @@ async function getWithdrawTimeEnd() {
         .eq('key', 'withdraw_time_end')
         .single();
     return data ? parseFloat(data.value) : 23.5;
+}
+
+async function getManualOpenExpiry() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_manual_open_expiry')
+        .single();
+    return data ? new Date(data.value) : null;
+}
+
+async function setManualOpenExpiry(date) {
+    await supabase
+        .from('app_config')
+        .upsert({ key: 'withdraw_manual_open_expiry', value: date.toISOString() }, { onConflict: 'key' });
+}
+
+async function clearManualOpenExpiry() {
+    await supabase
+        .from('app_config')
+        .upsert({ key: 'withdraw_manual_open_expiry', value: null }, { onConflict: 'key' });
 }
 
 async function getMinTransferUSD() {
@@ -2261,6 +2297,7 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
         await supabase
             .from('app_config')
             .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
+        await clearManualOpenExpiry();
     }
     res.json({ success: true });
 });
@@ -2272,16 +2309,33 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
         return res.status(400).json({ error: 'Acción inválida. Use "open" o "close".' });
     }
 
-    const now = moment.tz(TIMEZONE);
-    const currentTimeStr = now.format('HH:mm');
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
     const startStr = formatHour12(start);
     const endStr = formatHour12(end);
-    // Actualizar el flag de anulación manual en la BD
+
+    // Actualizar el flag de anulación manual
     await supabase
         .from('app_config')
         .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
+
+    // Si se abre manualmente, verificar si es dentro del intervalo programado
+    if (action === 'open') {
+        const now = moment.tz(TIMEZONE);
+        const currentHour = now.hour() + now.minute() / 60;
+        const insideWindow = currentHour >= start && currentHour < end;
+        if (insideWindow) {
+            // Calcular la hora de fin del intervalo de hoy
+            const endMoment = now.clone().startOf('day').add(end, 'hours');
+            await setManualOpenExpiry(endMoment.toDate());
+        } else {
+            // Fuera del intervalo: apertura permanente, eliminamos cualquier expiración previa
+            await clearManualOpenExpiry();
+        }
+    } else { // action === 'close'
+        // Si se cierra manualmente, limpiamos cualquier expiración pendiente
+        await clearManualOpenExpiry();
+    }
 
     let message = '';
     if (action === 'open') {
