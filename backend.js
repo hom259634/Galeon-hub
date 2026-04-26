@@ -24,7 +24,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id.trim())) : [];
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) ?? 0;
+const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) || 0;
 const WEBAPP_URL = process.env.WEBAPP_URL || `http://localhost:${PORT}`;
 const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const BOT_LAUNCH_MAX_RETRIES = parseInt(process.env.BOT_LAUNCH_MAX_RETRIES || '0', 10); // 0 = infinito
@@ -58,6 +58,47 @@ const regionMap = {
 
 function isAdmin(userId) {
     return ADMIN_IDS.includes(parseInt(userId));
+}
+
+function formatHourDecimal(hourDecimal) {
+    const h = Math.floor(hourDecimal);
+    const m = Math.round((hourDecimal - h) * 60);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+}
+
+function isWithdrawTime() {
+    const now = moment.tz(TIMEZONE);
+    const currentHour = now.hour() + now.minute() / 60;
+    return (async () => {
+        const start = await getWithdrawTimeStart();
+        const end = await getWithdrawTimeEnd();
+        return currentHour >= start && currentHour < end;
+    })();
+}
+
+async function withdrawNotifications() {
+    const now = moment.tz(TIMEZONE);
+    const currentHour = now.hour();
+    const currentMinute = now.minute();
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
+    const startStr = formatHourDecimal(start);
+    const endStr = formatHourDecimal(end);
+
+    if (currentHour === Math.floor(start) && currentMinute === 0) {
+        await broadcastToAllUsers(
+            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`,
+            'HTML'
+        );
+    } else if (currentHour === Math.floor(end) && currentMinute === 30) {
+        await broadcastToAllUsers(
+            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`,
+            'HTML'
+        );
+    }
 }
 
 async function getReferralCommissionRate() {
@@ -426,6 +467,24 @@ async function getMinTransferCUP() {
     return 1.0
 }
 
+async function getWithdrawTimeStart() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_time_start')
+        .single();
+    return data ? parseFloat(data.value) : 22;
+}
+
+async function getWithdrawTimeEnd() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_time_end')
+        .single();
+    return data ? parseFloat(data.value) : 23.5;
+}
+
 async function getMinTransferUSD() {
     try {
         const { data: allMethods } = await supabase
@@ -738,6 +797,12 @@ app.post('/api/auth', async (req, res) => {
     });
 });
 
+app.get('/api/withdraw-hours', async (req, res) => {
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
+    res.json({ start, end });
+});
+
 // --- Tasa de comisión de referidos (pública, para mostrar en la web) ---
 app.get('/api/referral-rate', async (req, res) => {
     const rate = await getReferralCommissionRate();
@@ -973,10 +1038,15 @@ app.post('/api/withdraw-requests', async (req, res) => {
         });
     }
 
-    if (method.min_amount !== null && amount < method.min_amount) {
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ error: 'Monto inválido' });
+    }
+
+    if (method.min_amount !== null && parsedAmount < method.min_amount) {
         return res.status(400).json({ error: `Monto mínimo: ${method.min_amount} ${currency}` });
     }
-    if (method.max_amount !== null && amount > method.max_amount) {
+    if (method.max_amount !== null && parsedAmount > method.max_amount) {
         return res.status(400).json({ error: `Monto máximo: ${method.max_amount} ${currency}` });
     }
 
@@ -2141,20 +2211,24 @@ app.delete('/api/admin/withdraw-methods/:id', requireAdmin, async (req, res) => 
 app.get('/api/admin/config', requireAdmin, async (req, res) => {
     const bonus = await getBonusCupDefault();
     const rate = await getReferralCommissionRate();
-    res.json({ bonusCupDefault: bonus, referralRate: rate });
+    const withdrawStart = await getWithdrawTimeStart();
+    const withdrawEnd = await getWithdrawTimeEnd();
+    res.json({ bonusCupDefault: bonus, referralRate: rate, withdrawTimeStart: withdrawStart, withdrawTimeEnd: withdrawEnd });
 });
 
 app.put('/api/admin/config', requireAdmin, async (req, res) => {
-    const { bonusCupDefault, referralRate } = req.body;
+    const { bonusCupDefault, referralRate, withdrawTimeStart, withdrawTimeEnd } = req.body;
     if (bonusCupDefault !== undefined) {
-        await supabase
-            .from('app_config')
-            .upsert({ key: 'bonus_cup_default', value: bonusCupDefault.toString() }, { onConflict: 'key' });
+        await supabase.from('app_config').upsert({ key: 'bonus_cup_default', value: bonusCupDefault.toString() }, { onConflict: 'key' });
     }
     if (referralRate !== undefined) {
-        await supabase
-            .from('app_config')
-            .upsert({ key: 'referral_commission_rate', value: referralRate.toString() }, { onConflict: 'key' });
+        await supabase.from('app_config').upsert({ key: 'referral_commission_rate', value: referralRate.toString() }, { onConflict: 'key' });
+    }
+    if (withdrawTimeStart !== undefined) {
+        await supabase.from('app_config').upsert({ key: 'withdraw_time_start', value: withdrawTimeStart.toString() }, { onConflict: 'key' });
+    }
+    if (withdrawTimeEnd !== undefined) {
+        await supabase.from('app_config').upsert({ key: 'withdraw_time_end', value: withdrawTimeEnd.toString() }, { onConflict: 'key' });
     }
     res.json({ success: true });
 });

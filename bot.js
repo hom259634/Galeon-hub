@@ -37,10 +37,18 @@ const broadcastMap = new Map();
 // Disponibles diariamente de 10:00 PM a 11:30 PM (hora Cuba)
 const WITHDRAW_HOURS = { start: 22, end: 23.5};
 
-function isWithdrawTime() {  
+async function isWithdrawTime() {
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
     const now = moment.tz(TIMEZONE);
     const currentHour = now.hour() + now.minute() / 60;
-    return currentHour >= WITHDRAW_HOURS.start && currentHour < WITHDRAW_HOURS.end;
+    return currentHour >= start && currentHour < end;
+}
+
+function formatHourDecimal(hourDecimal) {
+    const h = Math.floor(hourDecimal);
+    const m = Math.round((hourDecimal - h) * 60);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 // ========== INICIALIZAR SUPABASE ==========
@@ -1497,13 +1505,11 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
 
 bot.action('withdraw', async (ctx) => {
     if (!isWithdrawTime()) {
-        const startStr = moment.tz(TIMEZONE).hours(22).minutes(0).format('h:mm A');
-        const endStr = moment.tz(TIMEZONE).hours(23).minutes(30).format('h:mm A');
-        await ctx.answerCbQuery(
-            `⏰ Los retiros solo están disponibles de ${startStr} a ${endStr} (hora de Cuba). Por favor, intenta en ese horario.`,
-            { show_alert: true }
-        );
-        return;
+        const start = await getWithdrawTimeStart();
+        const end = await getWithdrawTimeEnd();
+        const startStr = moment.tz(TIMEZONE).startOf('day').add(start, 'hours').format('h:mm A');
+        const endStr = moment.tz(TIMEZONE).startOf('day').add(end, 'hours').format('h:mm A');
+        await ctx.answerCbQuery(`⏰ Los retiros solo están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`, { show_alert: true });
     }
 
     // Marcar que el usuario inició el flujo de retiro dentro del horario.
@@ -4861,22 +4867,44 @@ async function openScheduledSessions() {
     }
 }
 
+async function getWithdrawTimeStart() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_time_start')
+        .single();
+    return data ? parseFloat(data.value) : 22;
+}
+
+async function getWithdrawTimeEnd() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_time_end')
+        .single();
+    return data ? parseFloat(data.value) : 23.5;
+}
+
 async function withdrawNotifications() {
     const now = moment.tz(TIMEZONE);
     const currentHour = now.hour();
     const currentMinute = now.minute();
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
+    const startStr = formatHourDecimal(start);
+    const endStr = formatHourDecimal(end);
 
-    if (currentHour === 22 && currentMinute === 0) {
+    if (currentHour === Math.floor(start) && currentMinute === 0) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-            `Ya puedes solicitar tus retiros de 10:00 PM a 11:30 PM (hora Cuba).\n` +
+            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
             `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`,
             'HTML'
         );
-    } else if (currentHour === 23 && currentMinute === 30) {
+    } else if (currentHour === Math.floor(end) && currentMinute === 30) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha finalizado. Vuelve mañana de 10:00 PM a 11:30 PM (hora Cuba).`,
+            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`,
             'HTML'
         );
     }
