@@ -66,14 +66,25 @@ function formatHourDecimal(hourDecimal) {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
-function isWithdrawTime() {
+async function isWithdrawTime() {
+    // Consultar el flag de anulación manual
+    const { data: overrideData } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_manual_override')
+        .single();
+
+    const override = overrideData?.value || 'none';
+
+    if (override === 'open') return true;   // forzar abierto
+    if (override === 'closed') return false; // forzar cerrado
+
+    // Si no hay anulación, usar el horario programado
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
     const now = moment.tz(TIMEZONE);
     const currentHour = now.hour() + now.minute() / 60;
-    return (async () => {
-        const start = await getWithdrawTimeStart();
-        const end = await getWithdrawTimeEnd();
-        return currentHour >= start && currentHour < end;
-    })();
+    return currentHour >= start && currentHour < end;
 }
 
 async function withdrawNotifications() {
@@ -97,16 +108,14 @@ async function withdrawNotifications() {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
             `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`,
-            'HTML'
+            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
         );
     }
     // Cierre: justo en la hora/minuto configurados
     else if (currentHour === endHour && currentMinute === endMinute) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`,
-            'HTML'
+            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
         );
     }
 }
@@ -2240,6 +2249,11 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
     if (withdrawTimeEnd !== undefined) {
         await supabase.from('app_config').upsert({ key: 'withdraw_time_end', value: withdrawTimeEnd.toString() }, { onConflict: 'key' });
     }
+    if (withdrawTimeStart !== undefined || withdrawTimeEnd !== undefined) {
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
+    }
     res.json({ success: true });
 });
 
@@ -2257,23 +2271,31 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
     const startStr = formatHourDecimal(start);
     const endStr = formatHourDecimal(end);
 
+    // Actualizar el flag de anulación manual en la BD
+    await supabase
+        .from('app_config')
+        .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
+
     let message = '';
     if (action === 'open') {
         message =
             `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-            `El administrador ha abierto la sesión manualmente a las ${currentTimeStr} (hora Cuba).\n` +
-            `Puedes solicitar tus retiros hasta las ${endStr}.\n` +
-            `Retiros disponibles en CUP, USD, USDT, TRX o MLC.`;
+            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`;
     } else {
         message =
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `El administrador ha cerrado la sesión manualmente a las ${currentTimeStr} (hora Cuba).\n` +
-            `La próxima ventana de retiros será de ${startStr} a ${endStr}.`;
+            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`;
     }
 
-    // Enviar difusión a todos los usuarios
     await broadcastToAllUsers(message, 'HTML');
     res.json({ success: true });
+});
+
+// ========== ESTADO ACTUAL DE RETIROS ==========
+app.get('/api/withdraw-status', async (req, res) => {
+    const available = await isWithdrawTime();
+    res.json({ available });
 });
 
 // --- Actualizar tasas de cambio ---

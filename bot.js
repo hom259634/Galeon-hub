@@ -38,6 +38,19 @@ const broadcastMap = new Map();
 const WITHDRAW_HOURS = { start: 22, end: 23.5};
 
 async function isWithdrawTime() {
+    // Consultar el flag de anulación manual
+    const { data: overrideData } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_manual_override')
+        .single();
+
+    const override = overrideData?.value || 'none';
+
+    if (override === 'open') return true;   // forzar abierto
+    if (override === 'closed') return false; // forzar cerrado
+
+    // Si no hay anulación, usar el horario programado
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
     const now = moment.tz(TIMEZONE);
@@ -1504,7 +1517,7 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
 });
 
 bot.action('withdraw', async (ctx) => {
-    if (!isWithdrawTime()) {
+    if (!(await isWithdrawTime())) {
         const start = await getWithdrawTimeStart();
         const end = await getWithdrawTimeEnd();
         const startStr = moment.tz(TIMEZONE).startOf('day').add(start, 'hours').format('h:mm A');
