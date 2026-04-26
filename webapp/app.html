@@ -555,6 +555,7 @@
                         <button data-admin-view="setPrices" class="admin-nav-btn bg-purple-600/80 p-3 rounded-xl hover:bg-purple-700"><i class="fas fa-dice mr-1"></i> Pagos, Mín y Máx</button>
                         <button data-admin-view="setBonus" class="admin-nav-btn bg-indigo-400/80 p-3 rounded-xl hover:bg-indigo-500"><i class="fas fa-gift mr-1"></i> Bono Inicial</button>
                         <button data-admin-view="setReferralRate" class="admin-nav-btn bg-orange-400/80 p-3 rounded-xl hover:bg-orange-500"><i class="fas fa-percent mr-1"></i>% Referidos</button>
+                        <button data-admin-view="setWithdrawHours" class="admin-nav-btn bg-purple-400/80 p-3 rounded-xl hover:bg-purple-500"><i class="fas fa-clock mr-1"></i> Horario Retiros</button>
                         <button data-admin-view="pendingRequests" class="admin-nav-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700"><i class="fas fa-clock mr-1"></i> Solicitudes Pendientes</button>
                         <button data-admin-view="viewData" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-eye mr-1"></i> Ver Datos</button>
                         
@@ -611,8 +612,8 @@
             ]
         };
 
-        const WITHDRAW_START = 22;   // 10:00 PM
-        const WITHDRAW_END = 23.5;    // 11:30 PM
+        let withdrawStart = 22;   // valores iniciales por defecto
+        let withdrawEnd = 23.5;
 
         // Estado global
         let currentUser = null;
@@ -664,6 +665,13 @@
         const withdrawAccountFields = document.getElementById('withdrawAccountFields');
 
         // Funciones auxiliares
+
+        function formatHour(hourDecimal) {
+            const h = Math.floor(hourDecimal);
+            const m = Math.round((hourDecimal - h) * 60);
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        }
+
         function getCurrentCubaTime() {
             const now = new Date();
             const formatter = new Intl.DateTimeFormat('es-CU', { timeZone: 'America/Havana', hour: 'numeric', minute: 'numeric', hour12: false });
@@ -698,15 +706,28 @@
 
         function isWithdrawTime() {
             const now = getCurrentCubaTime();
-            return now.totalHours >= WITHDRAW_START && now.totalHours < WITHDRAW_END;
+            return now.totalHours >= withdrawStart && now.totalHours < withdrawEnd;
         }
 
-        function updateWithdrawTimeStatus() {
-            if (!withdrawTimeStatus) return;
-            const available = isWithdrawTime();
-            withdrawTimeStatus.innerHTML = available ? '✅ Disponible ahora' : '❌ No disponible (horario: 10:00 PM - 11:30 PM)';
-            withdrawTimeStatus.className = `withdraw-time-status ${available ? 'time-available' : 'time-unavailable'}`;
-        }
+       async function updateWithdrawTimeStatus() {
+            if (!withdrawTimeStatus) return;    
+            try {
+                const res = await fetch('/api/withdraw-hours');
+                if (res.ok) {
+                    const { start, end } = await res.json();
+                    withdrawStart = start;
+                    withdrawEnd = end;
+                    const now = getCurrentCubaTime();
+                    const available = now.totalHours >= start && now.totalHours < end;
+                    withdrawTimeStatus.innerHTML = available
+                        ? `✅ Disponible ahora (${formatHour(start)} - ${formatHour(end)})`
+                        : `❌ No disponible (horario: ${formatHour(start)} - ${formatHour(end)})`;
+                    withdrawTimeStatus.className = `withdraw-time-status ${available ? 'time-available' : 'time-unavailable'}`;
+                }
+            } catch (e) {
+                console.error('Error updating withdraw time status:', e);
+            }
+        }   
 
         function onShowWallet() {
             updateWithdrawTimeStatus();
@@ -2021,6 +2042,104 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         // ========== FUNCIONES DE ADMIN (completas) ==========
 
+        async function renderSetWithdrawHoursView() {
+            try {
+                const res = await fetch(`/api/admin/config?userId=${currentUser.telegram_id}`);
+                if (!res.ok) throw new Error('Error al obtener configuración');
+                const config = await res.json();
+                const start = config.withdrawTimeStart || 22;
+                const end = config.withdrawTimeEnd || 23.5;
+
+                // Convertir decimales a partes de 12 horas para los selectores
+                function decimalToTimeParts(decimal) {
+                    const h = Math.floor(decimal);
+                    const m = Math.round((decimal - h) * 60);
+                    const ampm = h >= 12 ? 'PM' : 'AM';
+                    const hour12 = h % 12 === 0 ? 12 : h % 12;
+                    return { hour12, minute: m, ampm };
+                }
+
+                const startParts = decimalToTimeParts(start);
+                const endParts = decimalToTimeParts(end);
+
+                // Generar HTML con selectores
+                adminViewContainer.innerHTML = `
+                    <h4 class="text-xl font-semibold mb-4">⏰ Horario de Retiros</h4>
+                    <p class="mb-2">Horario actual: <span class="text-cyan-300 font-bold">${formatHour(start)} - ${formatHour(end)}</span></p>
+
+                    <label class="block text-sm mb-1">Hora de inicio</label>
+                    <div class="flex gap-2 mb-3">
+                        <select id="selStartH" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                            ${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===startParts.hour12?'selected':''}>${i+1}</option>`).join('')}
+                        </select>
+                        <span class="text-white mt-2">:</span>
+                        <select id="selStartM" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                            ${Array.from({length:60},(_,i)=>`<option value="${i}" ${i===startParts.minute?'selected':''}>${i.toString().padStart(2,'0')}</option>`).join('')}
+                        </select>
+                        <select id="selStartA" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                            <option value="AM" ${startParts.ampm==='AM'?'selected':''}>AM</option>
+                            <option value="PM" ${startParts.ampm==='PM'?'selected':''}>PM</option>
+                        </select>
+                    </div>
+
+                    <label class="block text-sm mb-1">Hora de cierre</label>
+                    <div class="flex gap-2 mb-3">
+                        <select id="selEndH" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                            ${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===endParts.hour12?'selected':''}>${i+1}</option>`).join('')}
+                        </select>
+                        <span class="text-white mt-2">:</span>
+                        <select id="selEndM" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                            ${Array.from({length:60},(_,i)=>`<option value="${i}" ${i===endParts.minute?'selected':''}>${i.toString().padStart(2,'0')}</option>`).join('')}
+                        </select>
+                        <select id="selEndA" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                            <option value="AM" ${endParts.ampm==='AM'?'selected':''}>AM</option>
+                            <option value="PM" ${endParts.ampm==='PM'?'selected':''}>PM</option>
+                        </select>
+                    </div>
+
+                    <button id="saveWithdrawHoursBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar</button>
+                `;
+
+                // Asignar evento al botón Guardar
+                document.getElementById('saveWithdrawHoursBtn').addEventListener('click', async () => {
+                    // Convertir selectores a decimal
+                    function timePartsToDecimal(hour12, minute, ampm) {
+                        let h = parseInt(hour12);
+                        if (ampm === 'PM' && h !== 12) h += 12;
+                        if (ampm === 'AM' && h === 12) h = 0;
+                        return h + parseInt(minute) / 60;
+                    }
+
+                    const startVal = timePartsToDecimal(
+                        document.getElementById('selStartH').value,
+                        document.getElementById('selStartM').value,
+                        document.getElementById('selStartA').value
+                    );
+                    const endVal = timePartsToDecimal(
+                        document.getElementById('selEndH').value,
+                        document.getElementById('selEndM').value,
+                        document.getElementById('selEndA').value
+                    );
+
+                    if (isNaN(startVal) || isNaN(endVal) || startVal >= endVal) {
+                        iziToast.warning({ message: 'Horario inválido. El inicio debe ser menor que el cierre.' });
+                        return;
+                    }
+
+                    await fetch('/api/admin/config', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ withdrawTimeStart: startVal, withdrawTimeEnd: endVal, userId: currentUser.telegram_id })
+                    });
+                    iziToast.success({ message: 'Horario de retiros actualizado' });
+                    renderSetWithdrawHoursView(); // Refrescar la vista
+                });
+            } catch (e) {
+                console.error(e);
+                adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar horario.</p>';
+            }
+        }
+
         async function renderSessionsView() {
             const today = getCurrentCubaDate();
             let sessions = [];
@@ -2987,6 +3106,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 else if (view === 'viewData') renderViewDataView();
                 else if (view === 'pendingRequests') renderPendingRequestsView();
                 else if (view === 'setBonus') renderSetBonusView();
+                else if (view === 'setWithdrawHours') renderSetWithdrawHoursView();
             });
         });
 
