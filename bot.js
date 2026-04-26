@@ -28,7 +28,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id.trim())) : [];
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) || 70;
+const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) || 0;
 const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
 const broadcastMap = new Map();
@@ -49,14 +49,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 // ========== INICIALIZAR BOT ==========
 const bot = new Telegraf(BOT_TOKEN);
 let botInfo = { username: 'bot', first_name: 'Bot' };
-(async () => {
-    try {
-        botInfo = await bot.telegram.getMe();
-        console.log('Bot info:', botInfo);
-    } catch (e) {
-        console.error('Error obteniendo info del bot:', e);
-    }
-})();
 
 // ========== CONFIGURAR COMANDOS DEL MENÚ LATERAL ==========
 const MENU_COMMANDS = [
@@ -128,6 +120,15 @@ function escapeHTML(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+async function getBonusCupDefault() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'bonus_cup_default')
+        .single();
+    return data ? parseFloat(data.value) : 0;
 }
 
 function formatReferralPercent(rate) {
@@ -563,6 +564,7 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
             return user;
         }
 
+        const currentBonus = await getBonusCupDefault()
         const { data: newUser, error: insertError } = await supabase
             .from('users')
             .insert({
@@ -571,7 +573,7 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
                 username: username,
                 cup: 0,
                 usd: 0,
-                bonus_cup: BONUS_CUP_DEFAULT
+                bonus_cup: currentBonus
             })
             .select()
             .single();
