@@ -82,17 +82,27 @@ async function withdrawNotifications() {
     const currentMinute = now.minute();
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
+
+    // Convertir decimal a hora y minuto exactos
+    const startHour = Math.floor(start);
+    const startMinute = Math.round((start - startHour) * 60);
+    const endHour = Math.floor(end);
+    const endMinute = Math.round((end - endHour) * 60);
+
     const startStr = formatHourDecimal(start);
     const endStr = formatHourDecimal(end);
 
-    if (currentHour === Math.floor(start) && currentMinute === 0) {
+    // Apertura: justo en la hora/minuto configurados
+    if (currentHour === startHour && currentMinute === startMinute) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
             `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
             `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`,
             'HTML'
         );
-    } else if (currentHour === Math.floor(end) && currentMinute === 30) {
+    }
+    // Cierre: justo en la hora/minuto configurados
+    else if (currentHour === endHour && currentMinute === endMinute) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
             `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`,
@@ -2230,6 +2240,39 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
     if (withdrawTimeEnd !== undefined) {
         await supabase.from('app_config').upsert({ key: 'withdraw_time_end', value: withdrawTimeEnd.toString() }, { onConflict: 'key' });
     }
+    res.json({ success: true });
+});
+
+// ========== MANUAL TOGGLE DE SESIÓN DE RETIROS ==========
+app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => {
+    const { action } = req.body;   // 'open' o 'close'
+    if (!action || !['open', 'close'].includes(action)) {
+        return res.status(400).json({ error: 'Acción inválida. Use "open" o "close".' });
+    }
+
+    const now = moment.tz(TIMEZONE);
+    const currentTimeStr = now.format('HH:mm');
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
+    const startStr = formatHourDecimal(start);
+    const endStr = formatHourDecimal(end);
+
+    let message = '';
+    if (action === 'open') {
+        message =
+            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+            `El administrador ha abierto la sesión manualmente a las ${currentTimeStr} (hora Cuba).\n` +
+            `Puedes solicitar tus retiros hasta las ${endStr}.\n` +
+            `Retiros disponibles en CUP, USD, USDT, TRX o MLC.`;
+    } else {
+        message =
+            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+            `El administrador ha cerrado la sesión manualmente a las ${currentTimeStr} (hora Cuba).\n` +
+            `La próxima ventana de retiros será de ${startStr} a ${endStr}.`;
+    }
+
+    // Enviar difusión a todos los usuarios
+    await broadcastToAllUsers(message, 'HTML');
     res.json({ success: true });
 });
 

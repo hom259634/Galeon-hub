@@ -1619,7 +1619,7 @@ bot.action('transfer', async (ctx) => {
     ctx.session.awaitingTransferCurrency = true;
     const currencyButtons = [
         [Markup.button.callback('🇨🇺 CUP', 'transfer_currency_CUP'), Markup.button.callback('💵 USD', 'transfer_currency_USD')],
-        [Markup.button.callback('◀ Cancelar', 'main')]
+        [Markup.button.callback('◀ Cancelar', 'my_money')]
     ];
     await safeEdit(ctx, '🔄 <b>Transferir saldo a otro usuario</b>\n\nSelecciona la moneda que deseas transferir:', Markup.inlineKeyboard(currencyButtons));
 });
@@ -4891,17 +4891,27 @@ async function withdrawNotifications() {
     const currentMinute = now.minute();
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
+
+    // Convertir decimal a hora y minuto exactos
+    const startHour = Math.floor(start);
+    const startMinute = Math.round((start - startHour) * 60);
+    const endHour = Math.floor(end);
+    const endMinute = Math.round((end - endHour) * 60);
+
     const startStr = formatHourDecimal(start);
     const endStr = formatHourDecimal(end);
 
-    if (currentHour === Math.floor(start) && currentMinute === 0) {
+    // Apertura: justo en la hora/minuto configurados
+    if (currentHour === startHour && currentMinute === startMinute) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
             `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
             `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`,
             'HTML'
         );
-    } else if (currentHour === Math.floor(end) && currentMinute === 30) {
+    }
+    // Cierre: justo en la hora/minuto configurados
+    else if (currentHour === endHour && currentMinute === endMinute) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
             `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`,
