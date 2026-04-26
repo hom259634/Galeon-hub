@@ -1517,16 +1517,21 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
 });
 
 bot.action('withdraw', async (ctx) => {
-    if (!(await isWithdrawTime())) {
+    const available = await isWithdrawTime();
+
+    if (!available) {
         const start = await getWithdrawTimeStart();
         const end = await getWithdrawTimeEnd();
         const startStr = moment.tz(TIMEZONE).startOf('day').add(start, 'hours').format('h:mm A');
         const endStr = moment.tz(TIMEZONE).startOf('day').add(end, 'hours').format('h:mm A');
-        await ctx.answerCbQuery(`⏰ Los retiros solo están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`, { show_alert: true });
+        await ctx.answerCbQuery(
+            `⏰ Los retiros solo están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
+            { show_alert: true }
+        );
+        return; // 🛑 Aquí se detiene, el usuario se queda en la misma pantalla
     }
 
-    // Marcar que el usuario inició el flujo de retiro dentro del horario.
-    // Esto permitirá que complete el flujo aunque el horario expire mientras interactúa.
+    // Solo si está abierto continúa
     if (ctx.session) ctx.session.withdrawFlowAllowed = true;
 
     const { data: methods } = await supabase

@@ -2295,7 +2295,9 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
 // ========== ESTADO ACTUAL DE RETIROS ==========
 app.get('/api/withdraw-status', async (req, res) => {
     const available = await isWithdrawTime();
-    res.json({ available });
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
+    res.json({ available, start, end });
 });
 
 // --- Actualizar tasas de cambio ---
