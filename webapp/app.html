@@ -2050,7 +2050,6 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const start = config.withdrawTimeStart || 22;
                 const end = config.withdrawTimeEnd || 23.5;
 
-                // Convertir decimales a partes de 12 horas para los selectores
                 function decimalToTimeParts(decimal) {
                     const h = Math.floor(decimal);
                     const m = Math.round((decimal - h) * 60);
@@ -2062,7 +2061,6 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const startParts = decimalToTimeParts(start);
                 const endParts = decimalToTimeParts(end);
 
-                // Generar HTML con selectores
                 adminViewContainer.innerHTML = `
                     <h4 class="text-xl font-semibold mb-4">⏰ Horario de Retiros</h4>
                     <p class="mb-2">Horario actual: <span class="text-cyan-300 font-bold">${formatHour(start)} - ${formatHour(end)}</span></p>
@@ -2097,13 +2095,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         </select>
                     </div>
 
-                    <button id="saveWithdrawHoursBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar</button>
+                    <button id="saveWithdrawHoursBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar horario fijo</button>
                     <button id="manualToggleWithdrawBtn" class="w-full bg-teal-600 py-2 rounded-xl hover:bg-teal-700 mt-3">Cargando...</button>
                 `;
 
-                // Asignar evento al botón Guardar
+                // Evento para Guardar horario fijo
                 document.getElementById('saveWithdrawHoursBtn').addEventListener('click', async () => {
-                    // Convertir selectores a decimal
                     function timePartsToDecimal(hour12, minute, ampm) {
                         let h = parseInt(hour12);
                         if (ampm === 'PM' && h !== 12) h += 12;
@@ -2136,17 +2133,26 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     renderSetWithdrawHoursView(); // Refrescar la vista
                 });
 
-                 // --- NUEVO: Control manual de apertura/cierre de sesión de retiros ---
+                // Configurar botón manual según estado real
                 const toggleBtn = document.getElementById('manualToggleWithdrawBtn');
                 if (toggleBtn) {
-                    // Estas variables 'start' y 'end' ya existen en el ámbito (tomadas de config)
-                    const nowCuba = getCurrentCubaTime();
-                    const isWithin = nowCuba.totalHours >= start && nowCuba.totalHours < end;
-                    toggleBtn.textContent = isWithin ? '🔴 Cerrar sesión ahora' : '🟢 Abrir sesión ahora';
+                    try {
+                        const statusRes = await fetch('/api/withdraw-status');
+                        if (statusRes.ok) {
+                            const { available } = await statusRes.json();
+                            toggleBtn.textContent = available ? '🔴 Cerrar sesión ahora' : '🟢 Abrir sesión ahora';
+                            // Guardar estado en atributo data para usarlo en el click
+                            toggleBtn.dataset.available = available;
+                        } else {
+                            toggleBtn.textContent = 'Error al cargar estado';
+                        }
+                    } catch (e) {
+                        toggleBtn.textContent = 'Error de conexión';
+                    }
 
                     toggleBtn.addEventListener('click', async () => {
                         toggleBtn.disabled = true;
-                        const action = isWithin ? 'close' : 'open';
+                        const action = toggleBtn.dataset.available === 'true' ? 'close' : 'open';
                         toggleBtn.textContent = '⏳ Procesando...';
                         try {
                             const res = await fetch('/api/admin/withdraw-manual-toggle', {
@@ -2159,7 +2165,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             });
                             if (res.ok) {
                                 iziToast.success({ message: `Sesión ${action === 'open' ? 'abierta' : 'cerrada'} manualmente` });
-                                // Recargar la vista para que el botón cambie de texto
+                                // Refrescar la vista para que el botón muestre el nuevo estado
                                 renderSetWithdrawHoursView();
                             } else {
                                 const err = await res.json();
@@ -2711,7 +2717,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const res = await fetch(`/api/admin/config?userId=${currentUser.telegram_id}`);
                 if (!res.ok) throw new Error('Error al obtener bono');
                 const config = await res.json();
-                const currentBonus = config.bonusCupDefault || 70;
+                const currentBonus = config.bonusCupDefault || 0;
                 adminViewContainer.innerHTML = `
                     <h4 class="text-xl font-semibold mb-4">🎁 Bono de bienvenida para nuevos usuarios</h4>
                     <p class="mb-2">Valor actual: <span class="text-cyan-300 font-bold">${currentBonus} CUP</span></p>
