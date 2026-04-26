@@ -1304,7 +1304,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 // Actualizar el nombre del bot en la cabecera
                 const botNameEl = document.getElementById('botDisplayName');
                 if (botNameEl) botNameEl.innerText = botDisplayName || '4pu3$t4$_Qva';
-                bonusCupDefault = data.bonusCupDefault || 70;
+                bonusCupDefault = data.bonusCupDefault != null ? data.bonusCupDefault : 0;
                 
                 // Show actual bonus if user has it, otherwise hide welcome bonus label
                 const initialBonus = parseFloat(currentUser.bonus_cup) || 0;
@@ -2098,6 +2098,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     </div>
 
                     <button id="saveWithdrawHoursBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar</button>
+                    <button id="manualToggleWithdrawBtn" class="w-full bg-teal-600 py-2 rounded-xl hover:bg-teal-700 mt-3">Cargando...</button>
                 `;
 
                 // Asignar evento al botón Guardar
@@ -2134,6 +2135,42 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.success({ message: 'Horario de retiros actualizado' });
                     renderSetWithdrawHoursView(); // Refrescar la vista
                 });
+
+                 // --- NUEVO: Control manual de apertura/cierre de sesión de retiros ---
+                const toggleBtn = document.getElementById('manualToggleWithdrawBtn');
+                if (toggleBtn) {
+                    // Estas variables 'start' y 'end' ya existen en el ámbito (tomadas de config)
+                    const nowCuba = getCurrentCubaTime();
+                    const isWithin = nowCuba.totalHours >= start && nowCuba.totalHours < end;
+                    toggleBtn.textContent = isWithin ? '🔴 Cerrar sesión ahora' : '🟢 Abrir sesión ahora';
+
+                    toggleBtn.addEventListener('click', async () => {
+                        toggleBtn.disabled = true;
+                        const action = isWithin ? 'close' : 'open';
+                        toggleBtn.textContent = '⏳ Procesando...';
+                        try {
+                            const res = await fetch('/api/admin/withdraw-manual-toggle', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    userId: currentUser.telegram_id,
+                                    action
+                                })
+                            });
+                            if (res.ok) {
+                                iziToast.success({ message: `Sesión ${action === 'open' ? 'abierta' : 'cerrada'} manualmente` });
+                                // Recargar la vista para que el botón cambie de texto
+                                renderSetWithdrawHoursView();
+                            } else {
+                                const err = await res.json();
+                                iziToast.error({ message: err.error || 'Error al ejecutar la acción' });
+                            }
+                        } catch (e) {
+                            iziToast.error({ message: 'Error de conexión' });
+                        }
+                        toggleBtn.disabled = false;
+                    });
+                }
             } catch (e) {
                 console.error(e);
                 adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar horario.</p>';
