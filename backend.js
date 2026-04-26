@@ -60,6 +60,14 @@ function isAdmin(userId) {
     return ADMIN_IDS.includes(parseInt(userId));
 }
 
+function formatHour12(hourDecimal) {
+    const totalMinutes = Math.round(hourDecimal * 60);
+    const h = Math.floor(totalMinutes / 60) % 12 || 12;
+    const m = totalMinutes % 60;
+    const ampm = totalMinutes < 720 ? 'AM' : 'PM';
+    return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
+}
+
 function formatHourDecimal(hourDecimal) {
     const h = Math.floor(hourDecimal);
     const m = Math.round((hourDecimal - h) * 60);
@@ -100,8 +108,8 @@ async function withdrawNotifications() {
     const endHour = Math.floor(end);
     const endMinute = Math.round((end - endHour) * 60);
 
-    const startStr = formatHourDecimal(start);
-    const endStr = formatHourDecimal(end);
+    const startStr = formatHour12(start);
+    const endStr = formatHour12(end);
 
     // Apertura: justo en la hora/minuto configurados
     if (currentHour === startHour && currentMinute === startMinute) {
@@ -2268,9 +2276,8 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
     const currentTimeStr = now.format('HH:mm');
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
-    const startStr = formatHourDecimal(start);
-    const endStr = formatHourDecimal(end);
-
+    const startStr = formatHour12(start);
+    const endStr = formatHour12(end);
     // Actualizar el flag de anulación manual en la BD
     await supabase
         .from('app_config')

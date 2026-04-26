@@ -176,6 +176,11 @@ function formatBetTypeLabel(betType) {
     return labels[String(betType || '').toLowerCase()] || (betType || 'N/D');
 }
 
+function formatBotDisplayName(name) {
+    const display = name || '4pu3$t4$_Qva';
+    return display.endsWith('®') ? display : display + '®';
+}
+
 function buildLastBetsText(bets) {
     let text = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
 
@@ -1092,7 +1097,7 @@ bot.command('start', async (ctx) => {
 
     // Mensaje de bienvenida (ahora primero)
     await safeEdit(ctx,
-        `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(botName)}, tu asistente de la suerte 🍀\n\n` +
+        `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(formatBotDisplayName(botName))}, tu asistente de la suerte 🍀\n\n` +
         `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
         `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`,
         getMainKeyboard(ctx)
@@ -1525,7 +1530,8 @@ bot.action('withdraw', async (ctx) => {
         const startStr = moment.tz(TIMEZONE).startOf('day').add(start, 'hours').format('h:mm A');
         const endStr = moment.tz(TIMEZONE).startOf('day').add(end, 'hours').format('h:mm A');
         await ctx.answerCbQuery(
-            `⏰ Los retiros solo están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
+            `
+            ⏰ Los retiros están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
             { show_alert: true }
         );
         return; // 🛑 Aquí se detiene, el usuario se queda en la misma pantalla
@@ -4903,6 +4909,14 @@ async function getWithdrawTimeEnd() {
     return data ? parseFloat(data.value) : 23.5;
 }
 
+function formatHour12(hourDecimal) {
+    const totalMinutes = Math.round(hourDecimal * 60);
+    const h = Math.floor(totalMinutes / 60) % 12 || 12; // 0 => 12
+    const m = totalMinutes % 60;
+    const ampm = totalMinutes < 720 ? 'AM' : 'PM';
+    return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
+}
+
 async function withdrawNotifications() {
     const now = moment.tz(TIMEZONE);
     const currentHour = now.hour();
@@ -4910,30 +4924,27 @@ async function withdrawNotifications() {
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
 
-    // Convertir decimal a hora y minuto exactos
     const startHour = Math.floor(start);
     const startMinute = Math.round((start - startHour) * 60);
     const endHour = Math.floor(end);
     const endMinute = Math.round((end - endHour) * 60);
 
-    const startStr = formatHourDecimal(start);
-    const endStr = formatHourDecimal(end);
+    const startStr = formatHour12(start);
+    const endStr = formatHour12(end);
 
     // Apertura: justo en la hora/minuto configurados
     if (currentHour === startHour && currentMinute === startMinute) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
             `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`,
-            'HTML'
+            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
         );
     }
     // Cierre: justo en la hora/minuto configurados
     else if (currentHour === endHour && currentMinute === endMinute) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`,
-            'HTML'
+            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
         );
     }
 }
