@@ -453,7 +453,7 @@
 
                     <div id="withdrawTimeInfo" class="bg-gray-800/50 p-3 rounded-xl text-xs text-center text-gray-300 mb-2">
                         <i class="fas fa-clock mr-1 text-pink-400"></i> 
-                        Los retiros están disponibles de <strong>10:00 PM a 11:30 PM</strong> (hora Cuba). 
+                        Los retiros están disponibles de <strong id="withdrawTimeRange">10:00 PM a 11:30 PM</strong> (hora Cuba). 
                         <span id="withdrawTimeStatus" class="withdraw-time-status"></span>
                     </div>
 
@@ -673,6 +673,14 @@
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
         }
 
+        function formatHour12(hourDecimal) {
+            const totalMinutes = Math.round(hourDecimal * 60);
+            const h = Math.floor(totalMinutes / 60) % 12 || 12; // 0 se convierte en 12
+            const m = totalMinutes % 60;
+            const ampm = totalMinutes < 720 ? 'AM' : 'PM';
+            return h + ':' + m.toString().padStart(2, '0') + ' ' + ampm;
+        }
+
         function getCurrentCubaTime() {
             const now = new Date();
             const formatter = new Intl.DateTimeFormat('es-CU', { timeZone: 'America/Havana', hour: 'numeric', minute: 'numeric', hour12: false });
@@ -717,12 +725,19 @@
                 if (res.ok) {
                     const { available, start, end } = await res.json();
                     withdrawAvailable = available;
-                    withdrawStart = start;    // mantenemos actualizados los valores por si se usan en otro lado
+                    withdrawStart = start;
                     withdrawEnd = end;
+                    // Actualizar el span de estado
                     withdrawTimeStatus.innerHTML = available
-                        ? `✅ Disponible ahora (${formatHour(start)} - ${formatHour(end)})`
+                        ? `✅ Disponible ahora`
                         : `❌ No disponible (horario: ${formatHour(start)} - ${formatHour(end)})`;
                     withdrawTimeStatus.className = `withdraw-time-status ${available ? 'time-available' : 'time-unavailable'}`;
+
+                    // Actualizar el texto del horario fijo con las horas reales en formato 12h
+                    const rangeEl = document.getElementById('withdrawTimeRange');
+                    if (rangeEl) {
+                        rangeEl.textContent = `${formatHour(start)} a ${formatHour(end)}`;
+                    }
                 }
             } catch (e) {
                 console.error('Error updating withdraw time status:', e);
@@ -1330,7 +1345,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                try {
                     const discardTitleEl = document.getElementById('discardModalTitle');
                     if (discardTitleEl) {
-                        discardTitleEl.innerText = (botDisplayName || '4pu3$t4$_Qva') + '®';
+                        const baseName = botDisplayName || '4pu3$t4$_Qva';
+                        discardTitleEl.innerText = baseName.endsWith('®') ? baseName : baseName + '®';
                     }
                 } catch (e) { /* silent */ }
                 updateBalanceUI();
