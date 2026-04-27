@@ -891,19 +891,17 @@ async function adminBroadcast(ctx, messageText = null) {
     const sentMessageIds = [];
 
     for (const u of users || []) {
-        // Saltarse al propio administrador
         if (u.telegram_id === senderId) continue;
 
         try {
+            let result;
             if (messageText) {
-                // Solo texto (sin prefijo)
-                await bot.telegram.sendMessage(u.telegram_id, messageText, { parse_mode: 'HTML' });
+                result = await bot.telegram.sendMessage(u.telegram_id, messageText, { parse_mode: 'HTML' });
             } else {
-                // Multimedia: se copia exactamente
-                const copyResult = await ctx.telegram.copyMessage(u.telegram_id, fromChatId, messageId);
-                if (copyResult && copyResult.message_id) {
-                    sentMessageIds.push({ chat_id: u.telegram_id, message_id: copyResult.message_id });
-                }
+                result = await ctx.telegram.copyMessage(u.telegram_id, fromChatId, messageId);
+            }
+            if (result && result.message_id) {
+                sentMessageIds.push({ chat_id: u.telegram_id, message_id: result.message_id });
             }
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
@@ -914,7 +912,6 @@ async function adminBroadcast(ctx, messageText = null) {
         }
     }
 
-    // Guardar mapeo para editar luego (solo multimedia)
     if (sentMessageIds.length > 0) {
         broadcastMap.set(messageId, sentMessageIds);
     }
@@ -960,7 +957,7 @@ function getMainKeyboard(ctx) {
         ['❌ Cancelar']
     ];
     if (isAdmin(ctx.from.id)) {
-        buttons.push(['🔧 Admin']);
+        buttons.push(['🔧 Admin'],['📢 Difusión']);
     }
     return Markup.keyboard(buttons).resize();
 }
@@ -1530,8 +1527,7 @@ bot.action('withdraw', async (ctx) => {
         const startStr = moment.tz(TIMEZONE).startOf('day').add(start, 'hours').format('h:mm A');
         const endStr = moment.tz(TIMEZONE).startOf('day').add(end, 'hours').format('h:mm A');
         await ctx.answerCbQuery(
-            `
-            ⏰ Los retiros están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
+            `\n\n⏰ Los retiros están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
             { show_alert: true }
         );
         return; // 🛑 Aquí se detiene, el usuario se queda en la misma pantalla
@@ -2872,7 +2868,16 @@ bot.on(message('text'), async (ctx) => {
         } else if (text === '🔧 Admin' && isAdmin(uid)) {
             await safeEdit(ctx, '🔧 <b>Panel de administración</b>\nSelecciona una opción:', adminPanelKbd());
             return;
+        } else if (text === '📢 Difusión' && isAdmin(uid)) {
+            const cleared = clearPendingFlow(session || {});
+            if (cleared) {
+                await ctx.reply('✅ Flujo de administración cancelado. Ya puedes enviar mensajes de difusión.', getMainKeyboard(ctx));
+            } else {
+                await ctx.reply('ℹ️ No hay ningún flujo activo. Ya puedes enviar mensajes de difusión.', getMainKeyboard(ctx));
+            }
+            return;
         }
+        
     }
 
     // 3. Manejo de flujos existentes (apuestas, depósitos, etc.)
@@ -3287,7 +3292,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(amountText);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debes escribir el monto earManualOpenExpiryido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
             return;
         }
 
@@ -4909,6 +4914,27 @@ async function getWithdrawTimeEnd() {
     return data ? parseFloat(data.value) : 23.5;
 }
 
+async function getManualOverrideExpiry() {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_manual_override_expiry')
+        .single();
+    return data ? new Date(data.value) : null;
+}
+
+async function setManualOverrideExpiry(date) {
+    await supabase
+        .from('app_config')
+        .upsert({ key: 'withdraw_manual_override_expiry', value: date.toISOString() }, { onConflict: 'key' });
+}
+
+async function clearManualOverrideExpiry() {
+    await supabase
+        .from('app_config')
+        .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
+}
+
 function formatHour12(hourDecimal) {
     const totalMinutes = Math.round(hourDecimal * 60);
     const h = Math.floor(totalMinutes / 60) % 12 || 12; // 0 => 12
@@ -4922,30 +4948,41 @@ async function withdrawNotifications() {
     const currentHour = now.hour();
     const currentMinute = now.minute();
     const start = await getWithdrawTimeStart();
-    const end = await getWithdrawTimeEnd();
+    const end   = await getWithdrawTimeEnd();
 
     const startHour = Math.floor(start);
     const startMinute = Math.round((start - startHour) * 60);
-    const endHour = Math.floor(end);
+    const endHour   = Math.floor(end);
     const endMinute = Math.round((end - endHour) * 60);
 
-    const startStr = formatHour12(start);
-    const endStr = formatHour12(end);
-
-    // Apertura: justo en la hora/minuto configurados
-    if (currentHour === startHour && currentMinute === startMinute) {
-        await broadcastToAllUsers(
-            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-        );
+    // --- Revertir cualquier anulación manual temporal si expiró ---
+    const expiry = await getManualOverrideExpiry();
+    if (expiry && now.isAfter(expiry)) {
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
+        await clearManualOverrideExpiry();
     }
-    // Cierre: justo en la hora/minuto configurados
-    else if (currentHour === endHour && currentMinute === endMinute) {
-        await broadcastToAllUsers(
-            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
-        );
+
+    const currentlyAvailable = await isWithdrawTime();
+    const startStr = formatHour12(start);
+    const endStr   = formatHour12(end);
+
+    if (currentHour === startHour && currentMinute === startMinute) {
+        if (!currentlyAvailable) {
+            await broadcastToAllUsers(
+                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+            );
+        }
+    } else if (currentHour === endHour && currentMinute === endMinute) {
+        if (currentlyAvailable) {
+            await broadcastToAllUsers(
+                `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+                `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
+            );
+        }
     }
 }
 
