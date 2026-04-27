@@ -736,7 +736,7 @@
                     // Actualizar el texto del horario fijo con las horas reales en formato 12h
                     const rangeEl = document.getElementById('withdrawTimeRange');
                     if (rangeEl) {
-                        rangeEl.textContent = `${formatHour(start)} a ${formatHour(end)}`;
+                        rangeEl.textContent = `${formatHour12(start)} a ${formatHour12(end)}`;
                     }
                 }
             } catch (e) {
@@ -1742,7 +1742,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         };
 
         window.cancelBet = async (betId) => {
-            if (!confirm('¿Estás seguro de eliminar esta jugada? Se te reembolsará el monto.')) return;
+            if (!confirm('\n¿Estás seguro de eliminar esta jugada? Se te reembolsará el monto.')) return;
             
             const bet = userBets.find(b => b.id === betId);
             if (!bet) return;
@@ -2686,7 +2686,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }
 
         window.deleteDepositMethod = async (methodId) => {
-            if (!confirm('¿Estás seguro de eliminar este método?')) return;
+            if (!confirm('\n¿Estás seguro de eliminar este método?')) return;
             try {
                 const res = await fetch(`/api/admin/deposit-methods/${methodId}?userId=${currentUser.telegram_id}`, {
                     method: 'DELETE'
