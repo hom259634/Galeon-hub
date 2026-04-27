@@ -774,6 +774,10 @@
         }
 
         function showSection(sectionId) {
+            if (sectionId !== 'admin' && withdrawPollInterval) {
+                clearInterval(withdrawPollInterval);
+                withdrawPollInterval = null;
+            }
             if (sectionId !== 'play') {
                 resetBetEditMode(false);
             }
@@ -1742,7 +1746,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         };
 
         window.cancelBet = async (betId) => {
-            if (!confirm('\n¿Estás seguro de eliminar esta jugada? Se te reembolsará el monto.')) return;
+            if (!confirm('¿Estás seguro de eliminar esta jugada? Se te reembolsará el monto.')) return;
             
             const bet = userBets.find(b => b.id === betId);
             if (!bet) return;
@@ -2072,6 +2076,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         });
 
         // ========== FUNCIONES DE ADMIN (completas) ==========
+        let withdrawPollInterval = null;
 
         async function renderSetWithdrawHoursView() {
             try {
@@ -2164,22 +2169,30 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     renderSetWithdrawHoursView(); // Refrescar la vista
                 });
 
-                // Configurar botón manual según estado real
                 const toggleBtn = document.getElementById('manualToggleWithdrawBtn');
                 if (toggleBtn) {
-                    try {
-                        const statusRes = await fetch('/api/withdraw-status');
-                        if (statusRes.ok) {
-                            const { available } = await statusRes.json();
-                            toggleBtn.textContent = available ? '🔴 Cerrar sesión ahora' : '🟢 Abrir sesión ahora';
-                            // Guardar estado en atributo data para usarlo en el click
-                            toggleBtn.dataset.available = available;
-                        } else {
-                            toggleBtn.textContent = 'Error al cargar estado';
+                    // Función para actualizar el botón con el estado real
+                    const updateToggleBtn = async () => {
+                        try {
+                            const statusRes = await fetch('/api/withdraw-status');
+                            if (statusRes.ok) {
+                                const { available } = await statusRes.json();
+                                toggleBtn.textContent = available ? '🔴 Cerrar sesión ahora' : '🟢 Abrir sesión ahora';
+                                toggleBtn.dataset.available = available;
+                            } else {
+                                toggleBtn.textContent = 'Error al cargar estado';
+                            }
+                        } catch (e) {
+                            toggleBtn.textContent = 'Error de conexión';
                         }
-                    } catch (e) {
-                        toggleBtn.textContent = 'Error de conexión';
-                    }
+                    };
+
+                    // Inicializar el botón
+                    await updateToggleBtn();
+
+                    // Limpiar cualquier intervalo anterior y arrancar uno nuevo cada 5 segundos
+                    if (withdrawPollInterval) clearInterval(withdrawPollInterval);
+                    withdrawPollInterval = setInterval(updateToggleBtn, 5000);
 
                     toggleBtn.addEventListener('click', async () => {
                         toggleBtn.disabled = true;
@@ -2196,14 +2209,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             });
                             if (res.ok) {
                                 iziToast.success({ message: `Sesión ${action === 'open' ? 'abierta' : 'cerrada'} manualmente` });
-                                // Refrescar la vista para que el botón muestre el nuevo estado
-                                renderSetWithdrawHoursView();
+                                // Forzar actualización inmediata tras la acción
+                                await updateToggleBtn();
                             } else {
                                 const err = await res.json();
                                 iziToast.error({ message: err.error || 'Error al ejecutar la acción' });
+                                // Restaurar estado anterior del botón en caso de error
+                                await updateToggleBtn();
                             }
                         } catch (e) {
                             iziToast.error({ message: 'Error de conexión' });
+                            await updateToggleBtn();
                         }
                         toggleBtn.disabled = false;
                     });
@@ -3165,6 +3181,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         adminNavBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 if (!isAdmin) return;
+                if (withdrawPollInterval) {
+                    clearInterval(withdrawPollInterval);
+                    withdrawPollInterval = null;
+                }
                 const view = e.currentTarget.dataset.adminView;
                 if (view === 'sessions') renderSessionsView();
                 else if (view === 'publishWinning') renderPublishWinningView();
