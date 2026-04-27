@@ -100,44 +100,31 @@ async function withdrawNotifications() {
     const currentHour = now.hour();
     const currentMinute = now.minute();
     const start = await getWithdrawTimeStart();
-    const end   = await getWithdrawTimeEnd();
+    const end = await getWithdrawTimeEnd();
 
+    // Convertir decimal a hora y minuto exactos
     const startHour = Math.floor(start);
     const startMinute = Math.round((start - startHour) * 60);
-    const endHour   = Math.floor(end);
+    const endHour = Math.floor(end);
     const endMinute = Math.round((end - endHour) * 60);
 
-    // --- Revertir cualquier anulación manual temporal si expiró ---
-    const expiry = await getManualOverrideExpiry();
-    if (expiry && now.isAfter(expiry)) {
-        await supabase
-            .from('app_config')
-            .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
-        await clearManualOverrideExpiry();
-    }
-
-    const currentlyAvailable = await isWithdrawTime();
     const startStr = formatHour12(start);
-    const endStr   = formatHour12(end);
+    const endStr = formatHour12(end);
 
-    // Apertura automática: justo en la hora/minuto configurados (solo si está cerrado)
+    // Apertura: justo en la hora/minuto configurados
     if (currentHour === startHour && currentMinute === startMinute) {
-        if (!currentlyAvailable) {
-            await broadcastToAllUsers(
-                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-            );
-        }
+        await broadcastToAllUsers(
+            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+        );
     }
-    // Cierre automático: justo en la hora/minuto configurados (solo si está abierto)
+    // Cierre: justo en la hora/minuto configurados
     else if (currentHour === endHour && currentMinute === endMinute) {
-        if (currentlyAvailable) {
-            await broadcastToAllUsers(
-                `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-                `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
-            );
-        }
+        await broadcastToAllUsers(
+            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
+        );
     }
 }
 
@@ -523,27 +510,6 @@ async function getWithdrawTimeEnd() {
         .eq('key', 'withdraw_time_end')
         .single();
     return data ? parseFloat(data.value) : 23.5;
-}
-
-async function getManualOverrideExpiry() {
-    const { data } = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', 'withdraw_manual_override_expiry')
-        .single();
-    return data ? new Date(data.value) : null;
-}
-
-async function setManualOverrideExpiry(date) {
-    await supabase
-        .from('app_config')
-        .upsert({ key: 'withdraw_manual_override_expiry', value: date.toISOString() }, { onConflict: 'key' });
-}
-
-async function clearManualOverrideExpiry() {
-    await supabase
-        .from('app_config')
-        .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
 }
 
 async function getMinTransferUSD() {
@@ -2295,7 +2261,6 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
         await supabase
             .from('app_config')
             .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
-        await clearManualOverrideExpiry();
     }
     res.json({ success: true });
 });
@@ -2307,44 +2272,16 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
         return res.status(400).json({ error: 'Acción inválida. Use "open" o "close".' });
     }
 
+    const now = moment.tz(TIMEZONE);
+    const currentTimeStr = now.format('HH:mm');
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
     const startStr = formatHour12(start);
     const endStr = formatHour12(end);
-
-    // Actualizar el flag de anulación manual
+    // Actualizar el flag de anulación manual en la BD
     await supabase
         .from('app_config')
         .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
-
-    const now = moment.tz(TIMEZONE);
-    let expiryDate = null;
-
-    if (action === 'open') {
-        const currentHour = now.hour() + now.minute() / 60;
-        const insideWindow = currentHour >= start && currentHour < end;
-        if (insideWindow) {
-            // Expira al final de la ventana actual
-            expiryDate = now.clone().startOf('day').add(end, 'hours').toDate();
-        } else {
-            // Fuera de ventana: apertura permanente (sin expiración)
-            await clearManualOverrideExpiry();
-        }
-    } else { // action === 'close'
-        // El cierre manual expira en el PRÓXIMO INICIO de ventana
-        const todayStart = now.clone().startOf('day').add(start, 'hours');
-        if (now.isBefore(todayStart)) {
-            expiryDate = todayStart.toDate();   // hoy mismo
-        } else {
-            expiryDate = todayStart.add(1, 'day').toDate(); // mañana
-        }
-    }
-
-    if (expiryDate) {
-        await setManualOverrideExpiry(expiryDate);
-    } else {
-        await clearManualOverrideExpiry();
-    }
 
     let message = '';
     if (action === 'open') {
@@ -2355,7 +2292,7 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
     } else {
         message =
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha sido cerrada. Se reabrirá automáticamente el próximo ${startStr} (hora Cuba).`;
+            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`;
     }
 
     await broadcastToAllUsers(message, 'HTML');

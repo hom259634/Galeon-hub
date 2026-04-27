@@ -1530,7 +1530,8 @@ bot.action('withdraw', async (ctx) => {
         const startStr = moment.tz(TIMEZONE).startOf('day').add(start, 'hours').format('h:mm A');
         const endStr = moment.tz(TIMEZONE).startOf('day').add(end, 'hours').format('h:mm A');
         await ctx.answerCbQuery(
-            `\n\n⏰ Los retiros están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
+            `
+            ⏰ Los retiros están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
             { show_alert: true }
         );
         return; // 🛑 Aquí se detiene, el usuario se queda en la misma pantalla
@@ -3286,7 +3287,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(amountText);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debes escribir el monto earManualOpenExpiryido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
             return;
         }
 
@@ -4908,27 +4909,6 @@ async function getWithdrawTimeEnd() {
     return data ? parseFloat(data.value) : 23.5;
 }
 
-async function getManualOverrideExpiry() {
-    const { data } = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', 'withdraw_manual_override_expiry')
-        .single();
-    return data ? new Date(data.value) : null;
-}
-
-async function setManualOverrideExpiry(date) {
-    await supabase
-        .from('app_config')
-        .upsert({ key: 'withdraw_manual_override_expiry', value: date.toISOString() }, { onConflict: 'key' });
-}
-
-async function clearManualOverrideExpiry() {
-    await supabase
-        .from('app_config')
-        .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
-}
-
 function formatHour12(hourDecimal) {
     const totalMinutes = Math.round(hourDecimal * 60);
     const h = Math.floor(totalMinutes / 60) % 12 || 12; // 0 => 12
@@ -4942,41 +4922,30 @@ async function withdrawNotifications() {
     const currentHour = now.hour();
     const currentMinute = now.minute();
     const start = await getWithdrawTimeStart();
-    const end   = await getWithdrawTimeEnd();
+    const end = await getWithdrawTimeEnd();
 
     const startHour = Math.floor(start);
     const startMinute = Math.round((start - startHour) * 60);
-    const endHour   = Math.floor(end);
+    const endHour = Math.floor(end);
     const endMinute = Math.round((end - endHour) * 60);
 
-    // --- Revertir cualquier anulación manual temporal si expiró ---
-    const expiry = await getManualOverrideExpiry();
-    if (expiry && now.isAfter(expiry)) {
-        await supabase
-            .from('app_config')
-            .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
-        await clearManualOverrideExpiry();
-    }
-
-    const currentlyAvailable = await isWithdrawTime();
     const startStr = formatHour12(start);
-    const endStr   = formatHour12(end);
+    const endStr = formatHour12(end);
 
+    // Apertura: justo en la hora/minuto configurados
     if (currentHour === startHour && currentMinute === startMinute) {
-        if (!currentlyAvailable) {
-            await broadcastToAllUsers(
-                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-            );
-        }
-    } else if (currentHour === endHour && currentMinute === endMinute) {
-        if (currentlyAvailable) {
-            await broadcastToAllUsers(
-                `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-                `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
-            );
-        }
+        await broadcastToAllUsers(
+            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+        );
+    }
+    // Cierre: justo en la hora/minuto configurados
+    else if (currentHour === endHour && currentMinute === endMinute) {
+        await broadcastToAllUsers(
+            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
+        );
     }
 }
 
