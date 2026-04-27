@@ -3286,7 +3286,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(amountText);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debes escribir el monto earManualOpenExpiryido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
             return;
         }
 
@@ -4908,25 +4908,25 @@ async function getWithdrawTimeEnd() {
     return data ? parseFloat(data.value) : 23.5;
 }
 
-async function getManualOpenExpiry() {
+async function getManualOverrideExpiry() {
     const { data } = await supabase
         .from('app_config')
         .select('value')
-        .eq('key', 'withdraw_manual_open_expiry')
+        .eq('key', 'withdraw_manual_override_expiry')
         .single();
     return data ? new Date(data.value) : null;
 }
 
-async function setManualOpenExpiry(date) {
+async function setManualOverrideExpiry(date) {
     await supabase
         .from('app_config')
-        .upsert({ key: 'withdraw_manual_open_expiry', value: date.toISOString() }, { onConflict: 'key' });
+        .upsert({ key: 'withdraw_manual_override_expiry', value: date.toISOString() }, { onConflict: 'key' });
 }
 
-async function clearManualOpenExpiry() {
+async function clearManualOverrideExpiry() {
     await supabase
         .from('app_config')
-        .upsert({ key: 'withdraw_manual_open_expiry', value: null }, { onConflict: 'key' });
+        .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
 }
 
 function formatHour12(hourDecimal) {
@@ -4949,22 +4949,19 @@ async function withdrawNotifications() {
     const endHour   = Math.floor(end);
     const endMinute = Math.round((end - endHour) * 60);
 
-    // --- Revertir apertura manual temporal si expiró ---
-    const expiry = await getManualOpenExpiry();
+    // --- Revertir cualquier anulación manual temporal si expiró ---
+    const expiry = await getManualOverrideExpiry();
     if (expiry && now.isAfter(expiry)) {
         await supabase
             .from('app_config')
             .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
-        await clearManualOpenExpiry();
-        // Opcional: podrías enviar un broadcast de que la sesión ha vuelto a horario normal,
-        // pero como el cierre programado automático se encargará, no es necesario.
+        await clearManualOverrideExpiry();
     }
 
     const currentlyAvailable = await isWithdrawTime();
     const startStr = formatHour12(start);
     const endStr   = formatHour12(end);
 
-    // Apertura automática: justo en la hora/minuto configurados (solo si está cerrado)
     if (currentHour === startHour && currentMinute === startMinute) {
         if (!currentlyAvailable) {
             await broadcastToAllUsers(
@@ -4973,9 +4970,7 @@ async function withdrawNotifications() {
                 `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
             );
         }
-    }
-    // Cierre automático: justo en la hora/minuto configurados (solo si está abierto)
-    else if (currentHour === endHour && currentMinute === endMinute) {
+    } else if (currentHour === endHour && currentMinute === endMinute) {
         if (currentlyAvailable) {
             await broadcastToAllUsers(
                 `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +

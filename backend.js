@@ -107,15 +107,13 @@ async function withdrawNotifications() {
     const endHour   = Math.floor(end);
     const endMinute = Math.round((end - endHour) * 60);
 
-    // --- Revertir apertura manual temporal si expiró ---
-    const expiry = await getManualOpenExpiry();
+    // --- Revertir cualquier anulación manual temporal si expiró ---
+    const expiry = await getManualOverrideExpiry();
     if (expiry && now.isAfter(expiry)) {
         await supabase
             .from('app_config')
             .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
-        await clearManualOpenExpiry();
-        // Opcional: podrías enviar un broadcast de que la sesión ha vuelto a horario normal,
-        // pero como el cierre programado automático se encargará, no es necesario.
+        await clearManualOverrideExpiry();
     }
 
     const currentlyAvailable = await isWithdrawTime();
@@ -527,25 +525,25 @@ async function getWithdrawTimeEnd() {
     return data ? parseFloat(data.value) : 23.5;
 }
 
-async function getManualOpenExpiry() {
+async function getManualOverrideExpiry() {
     const { data } = await supabase
         .from('app_config')
         .select('value')
-        .eq('key', 'withdraw_manual_open_expiry')
+        .eq('key', 'withdraw_manual_override_expiry')
         .single();
     return data ? new Date(data.value) : null;
 }
 
-async function setManualOpenExpiry(date) {
+async function setManualOverrideExpiry(date) {
     await supabase
         .from('app_config')
-        .upsert({ key: 'withdraw_manual_open_expiry', value: date.toISOString() }, { onConflict: 'key' });
+        .upsert({ key: 'withdraw_manual_override_expiry', value: date.toISOString() }, { onConflict: 'key' });
 }
 
-async function clearManualOpenExpiry() {
+async function clearManualOverrideExpiry() {
     await supabase
         .from('app_config')
-        .upsert({ key: 'withdraw_manual_open_expiry', value: null }, { onConflict: 'key' });
+        .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
 }
 
 async function getMinTransferUSD() {
@@ -2297,7 +2295,7 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
         await supabase
             .from('app_config')
             .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
-        await clearManualOpenExpiry();
+        await clearManualOverrideExpiry();
     }
     res.json({ success: true });
 });
@@ -2319,22 +2317,33 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
         .from('app_config')
         .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
 
-    // Si se abre manualmente, verificar si es dentro del intervalo programado
+    const now = moment.tz(TIMEZONE);
+    let expiryDate = null;
+
     if (action === 'open') {
-        const now = moment.tz(TIMEZONE);
         const currentHour = now.hour() + now.minute() / 60;
         const insideWindow = currentHour >= start && currentHour < end;
         if (insideWindow) {
-            // Calcular la hora de fin del intervalo de hoy
-            const endMoment = now.clone().startOf('day').add(end, 'hours');
-            await setManualOpenExpiry(endMoment.toDate());
+            // Expira al final de la ventana actual
+            expiryDate = now.clone().startOf('day').add(end, 'hours').toDate();
         } else {
-            // Fuera del intervalo: apertura permanente, eliminamos cualquier expiración previa
-            await clearManualOpenExpiry();
+            // Fuera de ventana: apertura permanente (sin expiración)
+            await clearManualOverrideExpiry();
         }
     } else { // action === 'close'
-        // Si se cierra manualmente, limpiamos cualquier expiración pendiente
-        await clearManualOpenExpiry();
+        // El cierre manual expira en el PRÓXIMO INICIO de ventana
+        const todayStart = now.clone().startOf('day').add(start, 'hours');
+        if (now.isBefore(todayStart)) {
+            expiryDate = todayStart.toDate();   // hoy mismo
+        } else {
+            expiryDate = todayStart.add(1, 'day').toDate(); // mañana
+        }
+    }
+
+    if (expiryDate) {
+        await setManualOverrideExpiry(expiryDate);
+    } else {
+        await clearManualOverrideExpiry();
     }
 
     let message = '';
@@ -2346,7 +2355,7 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
     } else {
         message =
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`;
+            `La ventana de retiros ha sido cerrada. Se reabrirá automáticamente el próximo ${startStr} (hora Cuba).`;
     }
 
     await broadcastToAllUsers(message, 'HTML');
