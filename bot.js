@@ -1530,7 +1530,7 @@ bot.action('withdraw', async (ctx) => {
         const startStr = moment.tz(TIMEZONE).startOf('day').add(start, 'hours').format('h:mm A');
         const endStr = moment.tz(TIMEZONE).startOf('day').add(end, 'hours').format('h:mm A');
         await ctx.answerCbQuery(
-            `\n⏰ Los retiros están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
+            `\n\n⏰ Los retiros están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
             { show_alert: true }
         );
         return; // 🛑 Aquí se detiene, el usuario se queda en la misma pantalla
