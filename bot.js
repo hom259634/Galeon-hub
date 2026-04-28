@@ -957,7 +957,7 @@ function getMainKeyboard(ctx) {
         ['❌ Cancelar']
     ];
     if (isAdmin(ctx.from.id)) {
-        buttons.push(['🔧 Admin'],['📢 Difusión']);
+        buttons.push(['🔧 Admin', '📢 Difusión']);
     }
     return Markup.keyboard(buttons).resize();
 }
@@ -4488,7 +4488,7 @@ bot.on(message('text'), async (ctx) => {
         await ctx.reply('✅ Tu mensaje ha sido enviado al equipo de soporte. Te responderemos a la brevedad.');
         } else {
         // Si es admin y no está en ningún flujo, el mensaje se transmite a todos los usuarios
-        if (isAdmin(uid) && !hasActiveAdminFlow(session)) {
+        if (isAdmin(uid) && !hasActiveAdminFlow(session) && text.trim() !== '📢 Difusión') {
             await adminBroadcast(ctx, escapeHTML(text));
             await ctx.reply('✅ Mensaje enviado a todos los usuarios.', Markup.inlineKeyboard([
                 Markup.button.callback('🗑 Eliminar envío', `delete_broadcast_${ctx.message.message_id}`)
