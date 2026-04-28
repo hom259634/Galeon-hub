@@ -957,7 +957,7 @@ function getMainKeyboard(ctx) {
         ['❌ Cancelar']
     ];
     if (isAdmin(ctx.from.id)) {
-        buttons.push(['🔧 Admin', '📢 Difusión']);
+        buttons.push(['🔧 Admin']);
     }
     return Markup.keyboard(buttons).resize();
 }
@@ -1103,13 +1103,16 @@ bot.command('start', async (ctx) => {
     if (ctx.session?.isNewUser) {
         const bonusAmount = parseFloat(ctx.dbUser?.bonus_cup);
         const normalizedBonus = Number.isFinite(bonusAmount) ? bonusAmount : BONUS_CUP_DEFAULT;
-        const bonusDisplay = Number.isInteger(normalizedBonus) ? normalizedBonus.toFixed(0) : normalizedBonus.toFixed(2);
-        await ctx.reply(
-            `🎁 <b>¡Bono de bienvenida!</b>\n\n` +
-            `Has recibido <b>${bonusDisplay} CUP</b> como bono no retirable.\n` +
-            `Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`,
-            { parse_mode: 'HTML' }
-        );
+        if (normalizedBonus > 0)
+        {
+            const bonusDisplay = Number.isInteger(normalizedBonus) ? normalizedBonus.toFixed(0) : normalizedBonus.toFixed(2);
+            await ctx.reply(
+                `🎁 <b>¡Bono de bienvenida!</b>\n\n` +
+                `Has recibido <b>${bonusDisplay} CUP</b> como bono no retirable.\n` +
+                `Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`,
+                { parse_mode: 'HTML' }
+            );
+        }
         ctx.session.isNewUser = false;
     }
 });
@@ -4579,7 +4582,9 @@ bot.on(message('photo'), async (ctx) => {
 
     if (isAdmin(uid) && !hasActiveAdminFlow(session)) {
         await adminBroadcast(ctx);
-        await ctx.reply('✅ Contenido enviado a todos los usuarios.', getMainKeyboard(ctx));
+        await ctx.reply('✅ Contenido enviado a todos los usuarios.', Markup.inlineKeyboard([
+        Markup.button.callback('🗑 Eliminar envío', `delete_broadcast_${ctx.message.message_id}`)
+        ]));
         return;
     }
 
@@ -4999,15 +5004,20 @@ bot.on(
     async (ctx, next) => {
         const uid = ctx.from.id;
         const session = ctx.session;
-        // Ignorar si estamos en el flujo de depósito de foto
+        // Si está en el flujo de depósito y es una foto, se procesa aparte
         if (session.awaitingDepositPhoto && ctx.message?.photo) return next();
-        // Ignorar si el admin está realizando otra acción
-        if (!isAdmin(uid) || hasActiveAdminFlow(session)) return next();
-
-        await adminBroadcast(ctx);
-        await ctx.reply('✅ Contenido enviado a todos los usuarios.', Markup.inlineKeyboard([
-            Markup.button.callback('🗑 Eliminar envío', `delete_broadcast_${ctx.message.message_id}`)
-        ]));
+        
+        // Si es admin y no está en otro flujo -> difundir
+        if (isAdmin(uid) && !hasActiveAdminFlow(session)) {
+            await adminBroadcast(ctx);
+            await ctx.reply('✅ Contenido enviado a todos los usuarios.', Markup.inlineKeyboard([
+                Markup.button.callback('🗑 Eliminar envío', `delete_broadcast_${ctx.message.message_id}`)
+            ]));
+            return;
+        }
+        if (!ctx.message?.photo) {
+            await ctx.reply('No se esperaba este tipo de contenido. Por favor, usa los botones del menú.', getMainKeyboard(ctx));
+        }
     }
 );
 
