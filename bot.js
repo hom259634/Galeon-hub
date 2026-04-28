@@ -4964,21 +4964,21 @@ async function withdrawNotifications() {
     const startStr = formatHour12(start);
     const endStr   = formatHour12(end);
 
+    // Notificar APERTURA justo a la hora de inicio
     if (currentHour === startHour && currentMinute === startMinute) {
-        if (!currentlyAvailable) {
-            await broadcastToAllUsers(
-                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-            );
-        }
-    } else if (currentHour === endHour && currentMinute === endMinute) {
-        if (currentlyAvailable) {
-            await broadcastToAllUsers(
-                `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-                `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
-            );
-        }
+        await broadcastToAllUsers(
+            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+        );
+    }
+
+    // Notificar CIERRE justo a la hora de fin
+    if (currentHour === endHour && currentMinute === endMinute) {
+        await broadcastToAllUsers(
+            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
+        );
     }
 }
 
