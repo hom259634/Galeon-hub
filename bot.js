@@ -1755,39 +1755,30 @@ bot.action('admin_panel', async (ctx) => {
 
 // ---------- ADMIN: ELIMINAR DIFUSIÓN ----------
 bot.action(/delete_broadcast_(\d+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) {
-        await ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
-        return;
-    }
+    if (!isAdmin(ctx.from.id)) { /* ... */ }
 
     const originalMsgId = parseInt(ctx.match[1]);
     const recipients = broadcastMap.get(originalMsgId);
+    if (!recipients || recipients.length === 0) { /* ... */ }
 
-    if (!recipients || recipients.length === 0) {
-        await ctx.answerCbQuery('⚠️ No hay destinatarios o el envío ya fue eliminado.', { show_alert: true });
-        return;
-    }
-
-    let deleted = 0;
-    let failed = 0;
-
+    let deleted = 0, failed = 0;
     for (const { chat_id, message_id } of recipients) {
         try {
             await bot.telegram.deleteMessage(chat_id, message_id);
             deleted++;
-        } catch (e) {
-            failed++;
-            // Posibles causas: mensaje muy antiguo, chat eliminado...
-        }
+        } catch (e) { failed++; }
     }
 
-    // Limpiar el mapa para liberar memoria
+    // Limpiar el mapa
     broadcastMap.delete(originalMsgId);
 
-    // Eliminar el mensaje que contiene el botón (la respuesta del bot)
+    // 🔥 Eliminar también el mensaje original del admin
     try {
-        await ctx.deleteMessage();
-    } catch (e) { /* ignorar si no se puede */ }
+        await bot.telegram.deleteMessage(ctx.chat.id, originalMsgId);
+    } catch (e) { /* ignorar si ya no existe */ }
+
+    // Eliminar el mensaje del bot (el que contiene el botón)
+    try { await ctx.deleteMessage(); } catch (e) {}
 
     await ctx.answerCbQuery(`✅ Difusión eliminada (${deleted} eliminados, ${failed} fallidos)`);
 });
