@@ -736,7 +736,7 @@
                     // Actualizar el texto del horario fijo con las horas reales en formato 12h
                     const rangeEl = document.getElementById('withdrawTimeRange');
                     if (rangeEl) {
-                        rangeEl.textContent = `${formatHour12(start)} a ${formatHour12(end)}`;
+                        rangeEl.textContent = `${formatHour(start)} a ${formatHour(end)}`;
                     }
                 }
             } catch (e) {
@@ -1817,7 +1817,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             if (!withdrawAvailable) {
                 iziToast.error({
                     title: '⏰ Fuera de horario',
-                    message: `Los retiros no están disponibles en este momento.\nHorario programado: ${formatHour12(withdrawStart)} a ${formatHour12(withdrawEnd)} (hora Cuba).`,
+                    message: `Los retiros no están disponibles en este momento.\nHorario programado: ${formatHour(withdrawStart)} a ${formatHour(withdrawEnd)} (hora Cuba).`,
                     position: 'topCenter',
                     timeout: 5000
                 });
