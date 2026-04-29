@@ -313,6 +313,12 @@
         .iziToast-success { background: #10b981 !important; }
         .iziToast-warning { background: #f59e0b !important; }
         .iziToast-error { background: #ef4444 !important; }
+        
+        .btn-transfer-disabled {
+            background: #dc2626 !important; /* rojo */
+            cursor: not-allowed !important;
+            opacity: 0.7;
+        }
     </style>
 </head>
 <body class="p-4 md:p-6">
@@ -501,7 +507,7 @@
                             <option value="USD">USD</option>
                         </select>
                         
-                        <input type="number" id="transferAmount" step="0.01" min="0.01" placeholder="Monto" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
+                        <input type="number" id="transferAmount" step="0.01" min="0.01" placeholder="Monto (ej: 10, 50,500)" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
                         <p class="text-xs text-gray-400 mb-3" id="transferEquivalent">Equivalente en CUP: 0.00</p>
                         
                         <button id="submitTransferBtn" class="w-full bg-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-700">Transferir</button>
@@ -649,6 +655,9 @@
         const betInput = document.getElementById('betInput');
         const betPreview = document.getElementById('betPreview');
         const submitBetBtn = document.getElementById('submitBetBtn');
+        const depositBtnOriginalHTML = document.getElementById('submitDepositBtn').innerHTML;
+        const withdrawBtnOriginalHTML = document.getElementById('submitWithdrawBtn').innerHTML;
+        const transferBtnOriginalHTML = document.getElementById('submitTransferBtn').innerHTML;
         const defaultSubmitBetBtnHtml = submitBetBtn ? submitBetBtn.innerHTML : '';
         const welcomeBonus = document.getElementById('welcomeBonus');
         const withdrawTimeStatus = document.getElementById('withdrawTimeStatus');
@@ -745,6 +754,7 @@
         }
 
         function onShowWallet() {
+            updateTransferBtnState();
             updateWithdrawTimeStatus();
             if (withdrawSection) withdrawSection.classList.add('hidden');
             document.getElementById('rechargeSection')?.classList.add('hidden');
@@ -774,6 +784,10 @@
         }
 
         function showSection(sectionId) {
+            if (sectionId !== 'admin' && withdrawPollInterval) {
+                clearInterval(withdrawPollInterval);
+                withdrawPollInterval = null;
+            }
             if (sectionId !== 'play') {
                 resetBetEditMode(false);
             }
@@ -1350,6 +1364,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     }
                 } catch (e) { /* silent */ }
                 updateBalanceUI();
+                updateTransferBtnState();
 
                 if (isAdmin) {
                     document.getElementById('adminNavBtn').classList.remove('hidden');
@@ -1429,6 +1444,24 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     withdrawAvailableBalance.innerText = balance.toFixed(2);
                     withdrawCurrency.innerText = currency;
                 }
+            }
+            updateTransferBtnState();
+        }
+
+        function updateTransferBtnState() {
+            const transferBtn = document.getElementById('transferBtn');
+            if (!transferBtn || !currentUser) return;
+            const totalCup = (parseFloat(currentUser.cup) || 0) + (parseFloat(currentUser.usd) || 0) * exchangeRates.rate;
+            const hasBalance = totalCup > 0;
+
+            if (!hasBalance) {
+                transferBtn.disabled = true;
+                transferBtn.classList.add('btn-transfer-disabled');
+                transferBtn.title = 'No tienes saldo disponible para transferir';
+            } else {
+                transferBtn.disabled = false;
+                transferBtn.classList.remove('btn-transfer-disabled');
+                transferBtn.title = '';
             }
         }
 
@@ -1829,13 +1862,40 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             document.getElementById('transferSection').classList.add('hidden');
         });
         document.getElementById('transferBtn').addEventListener('click', () => {
+            // Validar saldo para mostrar el formulario
+            const totalCup = (parseFloat(currentUser?.cup) || 0) + (parseFloat(currentUser?.usd) || 0) * exchangeRates.rate;
+            if (totalCup <= 0) {
+                iziToast.warning({ message: 'No tienes saldo disponible para transferir' });
+                return;
+            }
             document.getElementById('transferSection').classList.toggle('hidden');
             document.getElementById('rechargeSection').classList.add('hidden');
             document.getElementById('withdrawSection').classList.add('hidden');
         });
 
-        document.getElementById('transferCurrency').addEventListener('change', updateTransferEquivalent);
+        // Función para actualizar el placeholder del monto según la moneda
+        function updateTransferPlaceholder() {
+            const currency = document.getElementById('transferCurrency').value;
+            const amountInput = document.getElementById('transferAmount');
+            if (!amountInput) return;
+            if (currency === 'CUP') {
+                amountInput.placeholder = 'Monto (ej. 500 para 500 CUP)';
+            } else if (currency === 'USD') {
+                amountInput.placeholder = 'Monto (ej. 20 para 20 USD)';
+            }
+        }
+
+        // Evento del select de moneda (se ejecuta al cambiar)
+        document.getElementById('transferCurrency').addEventListener('change', () => {
+            updateTransferEquivalent();
+            updateTransferPlaceholder();
+        });
+
+        // Evento del input de monto (se mantiene igual)
         document.getElementById('transferAmount').addEventListener('input', updateTransferEquivalent);
+
+        // Establecer placeholder inicial (cuando carga la página con "CUP" por defecto)
+        updateTransferPlaceholder();
 
         function updateTransferEquivalent() {
             const currency = document.getElementById('transferCurrency').value;
@@ -1879,6 +1939,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 return;
             }
 
+            // Limpiar campos y bloquear botón
+            document.getElementById('depositAmount').value = '';
+            document.getElementById('depositScreenshot').value = '';
+            const depositSendBtn = document.getElementById('submitDepositBtn');
+            depositSendBtn.disabled = true;
+            depositSendBtn.innerHTML = 'Enviando...';
+
             const formData = new FormData();
             formData.append('methodId', methodId);
             formData.append('userId', currentUser.telegram_id);
@@ -1888,13 +1955,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             try {
                 const res = await fetch('/api/deposit-requests', { method: 'POST', body: formData });
                 if (res.ok) {
+                    depositSendBtn.disabled = false;
+                    depositSendBtn.innerHTML = depositBtnOriginalHTML;
                     iziToast.success({ message: 'Solicitud enviada' });
                     document.getElementById('rechargeSection').classList.add('hidden');
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) {
+                depositSendBtn.disabled = false;
+                depositSendBtn.innerHTML = depositBtnOriginalHTML;
+                iziToast.error({ message: 'Error de conexión' }); }
         });
 
         submitWithdrawBtn.addEventListener('click', async () => {
@@ -1954,6 +2026,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 accountInfo = `Tarjeta: ${card} | Confirmación: ${confirm}`;
             }
 
+            // Limpiar campos y bloquear botón
+            withdrawAmount.value = '';
+            document.getElementById('withdrawWallet')?.setAttribute('value', ''); // limpia visualmente
+            document.getElementById('withdrawNetwork')?.setAttribute('value', '');
+            document.getElementById('withdrawCard')?.setAttribute('value', '');
+            document.getElementById('withdrawConfirm')?.setAttribute('value', '');
+            const withdrawSendBtn = submitWithdrawBtn; // ya tienes la variable
+            withdrawSendBtn.disabled = true;
+            withdrawSendBtn.innerHTML = 'Enviando...';
+
             try {
                 const res = await fetch('/api/withdraw-requests', {
                     method: 'POST',
@@ -1967,13 +2049,19 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     })
                 });
                 if (res.ok) {
+
+                    withdrawSendBtn.disabled = false;
+                    withdrawSendBtn.innerHTML = withdrawBtnOriginalHTML;
                     iziToast.success({ message: 'Solicitud enviada' });
                     document.getElementById('withdrawSection').classList.add('hidden');
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) { 
+                withdrawSendBtn.disabled = false;
+                withdrawSendBtn.innerHTML = withdrawBtnOriginalHTML;
+                iziToast.error({ message: 'Error de conexión' }); }
         });
 
         document.getElementById('submitTransferBtn').addEventListener('click', async () => {
@@ -2031,6 +2119,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 return;
             }
 
+            // Limpiar campos y bloquear botón para evitar doble envío
+            document.getElementById('transferTarget').value = '';
+            document.getElementById('transferAmount').value = '';
+            const transferSendBtn = document.getElementById('submitTransferBtn');
+            transferSendBtn.disabled = true;
+            transferSendBtn.innerHTML = 'Enviando...';
+
             try {
                 const res = await fetch('/api/transfer', {
                     method: 'POST',
@@ -2058,10 +2153,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         currentUser.usd = (parseFloat(currentUser.usd) || 0) - usdDebit;
                     }
                     updateBalanceUI();
+                    transferSendBtn.disabled = false;
+                    transferSendBtn.innerHTML = transferBtnOriginalHTML;
                 } else {
+                    transferSendBtn.disabled = false;
+                    transferSendBtn.innerHTML = transferBtnOriginalHTML;
                     iziToast.error({ message: data.error || 'Error al transferir' });
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) { 
+                transferSendBtn.disabled = false;
+                transferSendBtn.innerHTML = transferBtnOriginalHTML;
+                iziToast.error({ message: 'Error de conexión' }); 
+            }
         });
 
         document.getElementById('copyLinkBtn').addEventListener('click', () => {
@@ -2072,6 +2175,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         });
 
         // ========== FUNCIONES DE ADMIN (completas) ==========
+        let withdrawPollInterval = null;
 
         async function renderSetWithdrawHoursView() {
             try {
@@ -2164,22 +2268,30 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     renderSetWithdrawHoursView(); // Refrescar la vista
                 });
 
-                // Configurar botón manual según estado real
                 const toggleBtn = document.getElementById('manualToggleWithdrawBtn');
                 if (toggleBtn) {
-                    try {
-                        const statusRes = await fetch('/api/withdraw-status');
-                        if (statusRes.ok) {
-                            const { available } = await statusRes.json();
-                            toggleBtn.textContent = available ? '🔴 Cerrar sesión ahora' : '🟢 Abrir sesión ahora';
-                            // Guardar estado en atributo data para usarlo en el click
-                            toggleBtn.dataset.available = available;
-                        } else {
-                            toggleBtn.textContent = 'Error al cargar estado';
+                    // Función para actualizar el botón con el estado real
+                    const updateToggleBtn = async () => {
+                        try {
+                            const statusRes = await fetch('/api/withdraw-status');
+                            if (statusRes.ok) {
+                                const { available } = await statusRes.json();
+                                toggleBtn.textContent = available ? '🔴 Cerrar sesión ahora' : '🟢 Abrir sesión ahora';
+                                toggleBtn.dataset.available = available;
+                            } else {
+                                toggleBtn.textContent = 'Error al cargar estado';
+                            }
+                        } catch (e) {
+                            toggleBtn.textContent = 'Error de conexión';
                         }
-                    } catch (e) {
-                        toggleBtn.textContent = 'Error de conexión';
-                    }
+                    };
+
+                    // Inicializar el botón
+                    await updateToggleBtn();
+
+                    // Limpiar cualquier intervalo anterior y arrancar uno nuevo cada 5 segundos
+                    if (withdrawPollInterval) clearInterval(withdrawPollInterval);
+                    withdrawPollInterval = setInterval(updateToggleBtn, 5000);
 
                     toggleBtn.addEventListener('click', async () => {
                         toggleBtn.disabled = true;
@@ -2196,14 +2308,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             });
                             if (res.ok) {
                                 iziToast.success({ message: `Sesión ${action === 'open' ? 'abierta' : 'cerrada'} manualmente` });
-                                // Refrescar la vista para que el botón muestre el nuevo estado
-                                renderSetWithdrawHoursView();
+                                // Forzar actualización inmediata tras la acción
+                                await updateToggleBtn();
                             } else {
                                 const err = await res.json();
                                 iziToast.error({ message: err.error || 'Error al ejecutar la acción' });
+                                // Restaurar estado anterior del botón en caso de error
+                                await updateToggleBtn();
                             }
                         } catch (e) {
                             iziToast.error({ message: 'Error de conexión' });
+                            await updateToggleBtn();
                         }
                         toggleBtn.disabled = false;
                     });
@@ -2686,7 +2801,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }
 
         window.deleteDepositMethod = async (methodId) => {
-            if (!confirm('¿Estás seguro de eliminar este método?')) return;
+            if (!confirm('\n¿Estás seguro de eliminar este método?')) return;
             try {
                 const res = await fetch(`/api/admin/deposit-methods/${methodId}?userId=${currentUser.telegram_id}`, {
                     method: 'DELETE'
@@ -3165,6 +3280,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         adminNavBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 if (!isAdmin) return;
+                if (withdrawPollInterval) {
+                    clearInterval(withdrawPollInterval);
+                    withdrawPollInterval = null;
+                }
                 const view = e.currentTarget.dataset.adminView;
                 if (view === 'sessions') renderSessionsView();
                 else if (view === 'publishWinning') renderPublishWinningView();
