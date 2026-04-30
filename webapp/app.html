@@ -636,6 +636,13 @@
         let selectedBetType = null;
         let activeSlot = null;
         let userBets = [];
+        const WITHDRAW_AMOUNT_EXAMPLES = {
+            CUP: 'ej: 600 para 600 CUP',
+            USD: 'ej: 10 para 10 USD',
+            MLC: 'ej: 10 para 10 MLC',
+            USDT: 'ej: 10 para 10 USDT',
+            TRX: 'ej: 100 para 100 TRX'
+        };
 
         // Elementos DOM
         const globalLoader = document.getElementById('globalLoader');
@@ -673,6 +680,16 @@
         const depositMethodLimits = document.getElementById('depositMethodLimits');
         const withdrawMethodLimits = document.getElementById('withdrawMethodLimits');
         const withdrawAccountFields = document.getElementById('withdrawAccountFields');
+        // Filtrar solo dígitos en campos numéricos de retiro
+        withdrawAccountFields.addEventListener('input', function(e) {
+            const target = e.target;
+            if (target.classList.contains('digits-only')) {
+                // Permitir dígitos y espacios (opcional)
+                target.value = target.value.replace(/[^0-9\s\-_]/g, '');
+                // Opcional: eliminar más de un espacio seguido (si no quieres múltiples espacios)
+                // target.value = target.value.replace(/\s{2,}/g, ' ').trimStart();
+            }
+        });
 
         // Funciones auxiliares
 
@@ -1196,43 +1213,28 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
             }
 
-            try {
-                // Antes de enviar, validar localmente saldo disponible.
+            // Validación de saldo (solo nuevas apuestas, no ediciones)
+            if (!window.editingBetId) {
                 const newTotalCUP = parsed.totalCUP || 0;
                 const newTotalUSD = parsed.totalUSD || 0;
-                // Incluir bono en la validación local (el servidor ya permite usar bonus_cup)
                 let availableCup = (parseFloat(currentUser?.cup) || 0) + (parseFloat(currentUser?.bonus_cup) || 0);
                 let availableUsd = parseFloat(currentUser?.usd) || 0;
-                // Si estamos editando, sumar de vuelta el monto original de la jugada para permitir reutilizarlo
-                let deltaCup = newTotalCUP;
-                let deltaUsd = newTotalUSD;
-                if (window.editingBetId) {
-                    const original = userBets.find(b => b.id === window.editingBetId);
-                    const origCup = original ? (parseFloat(original.cost_cup) || 0) : 0;
-                    const origUsd = original ? (parseFloat(original.cost_usd) || 0) : 0;
-                    // Durante edición el usuario ya tiene el original descontado, así que puede reutilizarlo
-                    availableCup += origCup;
-                    availableUsd += origUsd;
-                    deltaCup = newTotalCUP - origCup;
-                    deltaUsd = newTotalUSD - origUsd;
+                if (newTotalCUP > 0 && availableCup < newTotalCUP) {
+                    iziToast.error({ message: `❌Saldo CUP insuficiente. Por favor, recarga` });
+                    return;
                 }
-
-                // Validación local de saldo solo para NUEVAS apuestas. Para edición
-                // dejamos que el backend gestione el reembolso y devuelva el mensaje
-                // oficial de 'saldo insuficiente', así el cliente mostrará exactamente
-                // lo que envía el servidor.
-                    if (!window.editingBetId) {
-                    if (newTotalCUP > 0 && availableCup < newTotalCUP) {
-                        iziToast.error({ message: `❌Saldo CUP insuficiente. Por favor, recarga` });
-                        return;
-                    }
-                    if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
-                        iziToast.error({ message: `❌Saldo USD insuficiente. Por favor, recarga` });
-                        return;
-                    }
+                if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
+                    iziToast.error({ message: `❌Saldo USD insuficiente. Por favor, recarga` });
+                    return;
                 }
+            }
 
-                // Usar POST en todas las circunstancias y, si es edición, enviar betId en el body
+            // Bloquear botón para evitar doble envío
+            submitBetBtn.disabled = true;
+            const isEditing = !!window.editingBetId;
+            submitBetBtn.innerHTML = isEditing ? '<i class="fas fa-save mr-2"></i>Guardando...' : '<i class="fas fa-check-circle mr-2"></i>Registrando...';
+
+            try {
                 const payload = {
                     userId: currentUser.telegram_id,
                     lottery: selectedLottery,
@@ -1265,6 +1267,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             } catch (e) {
                 console.error(e);
                 iziToast.error({ message: 'Error de conexión' });
+            } finally {
+                // Restaurar botón siempre, incluso si hubo error
+                submitBetBtn.disabled = false;
+                if (!window.editingBetId) {
+                    submitBetBtn.innerHTML = defaultSubmitBetBtnHtml; // "Registrar apuesta"
+                } else {
+                    // Si seguía en modo edición (porque falló), volver a "Guardar cambios"
+                    submitBetBtn.innerHTML = '<i class="fas fa-save mr-2"></i>Guardar cambios';
+                }
             }
         });
 
@@ -1570,6 +1581,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             const currency = method.currency || 'CUP';
                             const balance = getWithdrawAvailableBalance(currency);
                             withdrawAvailableBalance.innerText = balance.toFixed(2);
+                            const example = WITHDRAW_AMOUNT_EXAMPLES[currency] || `ej: 10 para 10 ${currency}`;
+                            withdrawAmount.placeholder = `Monto a retirar (${example})`;
                             withdrawCurrency.innerText = currency;
 
                             let limitsHtml = '';
@@ -1617,11 +1630,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 html = `
                     <div>
                         <label class="block text-sm font-medium mb-1">Número de tarjeta / cuenta</label>
-                        <input type="text" id="withdrawCard" placeholder="${escapeHTML(method.card) || 'Ej: 1234-5678-9012-3456'}" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500">
+                        <input type="text" id="withdrawCard" class="digits-only w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500" placeholder="${escapeHTML(method.card) || 'Ej: 1234567890123456'}" inputmode="numeric" maxlength="20">
                     </div>
                     <div>
                         <label class="block text-sm font-medium mb-1">Número a confirmar</label>
-                        <input type="text" id="withdrawConfirm" placeholder="${escapeHTML(method.confirm) || 'Ej: 1234'}" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500">
+                        <input type="text" id="withdrawConfirm" class="digits-only w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500" placeholder="${escapeHTML(method.confirm) || 'Ej: 1234'}" inputmode="numeric" maxlength="8">
                     </div>
                 `;
             }
@@ -1944,7 +1957,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             document.getElementById('depositScreenshot').value = '';
             const depositSendBtn = document.getElementById('submitDepositBtn');
             depositSendBtn.disabled = true;
-            depositSendBtn.innerHTML = 'Enviando...';
+            depositSendBtn.innerHTML = 'Recargando...';
 
             const formData = new FormData();
             formData.append('methodId', methodId);
