@@ -1511,7 +1511,7 @@ app.post('/api/bets', async (req, res) => {
             const newReferrerId = userWithRef.ref_by;
             let newReferrer;
             if (newReferrerId === oldReferrerId) {
-                newReferrer = referrerStateAfterRevert; // estado determinista
+                newReferrer = referrerStateAfterRevert; // estado determinista tras revertir
             } else {
                 const { data: fetched } = await supabase
                     .from('users')
@@ -1521,20 +1521,16 @@ app.post('/api/bets', async (req, res) => {
                 newReferrer = fetched || { cup: 0, usd: 0, bonus_cup: 0 };
             }
 
-            const referrerHasBonus = (parseFloat(newReferrer.bonus_cup) || 0) > 0;
-            const isUSDOnlyBet = (totalCUP === 0 && totalUSD > 0);
-            const useUSDBranch = isUSDOnlyBet && !referrerHasBonus;
+            // 1. Determinar la moneda ORIGINAL de la comisión (la que se usó al crear la apuesta)
+            const originalCurrency = existingBet.commission_currency || 'CUP';
 
-            if (useUSDBranch) {
-                // Rama USD (sin tocar bono)
+            if (originalCurrency === 'USD') {
+                // --- RAMA USD (respetar moneda original) ---
                 let effectiveRateUSD = await getReferralCommissionRate();
+                // Si existía comisión anterior en USD, preservar la tasa efectiva para no distorsionar
                 if (existingBet.commission_amount > 0 && existingBet.commission_currency === 'USD') {
                     const oldTotalUSD = parseFloat(existingBet.cost_usd) || 0;
                     if (oldTotalUSD > 0) effectiveRateUSD = parseFloat(existingBet.commission_amount) / oldTotalUSD;
-                } else if (existingBet.commission_amount > 0 && existingBet.commission_currency === 'CUP') {
-                    const usdRate = await getExchangeRateUSD();
-                    const oldTotalCostCUP = parseFloat(existingBet.cost_cup || 0) + parseFloat(existingBet.cost_usd || 0) * usdRate;
-                    if (oldTotalCostCUP > 0) effectiveRateUSD = parseFloat(existingBet.commission_amount) / oldTotalCostCUP;
                 }
                 const newCommissionUSD = totalUSD * effectiveRateUSD;
 
@@ -1556,10 +1552,11 @@ app.post('/api/bets', async (req, res) => {
                     };
                 }
             } else {
-                // Rama CUP unificada
+                // --- RAMA CUP (comportamiento original unificado) ---
                 const usdRate = await getExchangeRateUSD();
                 let effectiveRate = await getReferralCommissionRate();
-                if (existingBet.commission_amount > 0) {
+                // Si ya existía comisión en CUP, usar su tasa efectiva para mantener proporción
+                if (existingBet.commission_amount > 0 && existingBet.commission_currency === 'CUP') {
                     const oldTotalCUP = parseFloat(existingBet.cost_cup || 0) + parseFloat(existingBet.cost_usd || 0) * usdRate;
                     if (oldTotalCUP > 0) {
                         effectiveRate = parseFloat(existingBet.commission_amount) / oldTotalCUP;
@@ -1610,6 +1607,23 @@ app.post('/api/bets', async (req, res) => {
                         commission_destination: destination,
                         bonusMovedCup: bonusMovedCup
                     };
+
+                    // --- Notificar si el bono se movió al principal por la edición ---
+                    if (bonusMovedCup > 0) {
+                        const bonusMovedStr = bonusMovedCup.toFixed(2);
+                        const notifyMsg = `ℹ️ Tu referido ha editado el monto de una apuesta. Tu saldo actual ha cambiado. Por favor, consulta.\n🎁 Tu bono de bienvenida de ${bonusMovedStr} CUP se ha movido a tu saldo principal.\n📊 Saldo actualizado.`;
+                        try {
+                            if (bot && bot.telegram) {
+                                await bot.telegram.sendMessage(newReferrerId, notifyMsg, { parse_mode: 'HTML' });
+                            } else {
+                                await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                                    chat_id: newReferrerId,
+                                    text: notifyMsg,
+                                    parse_mode: 'HTML'
+                                }).catch(() => {});
+                            }
+                        } catch (e) {}
+                    }
                 }
             }
         }
@@ -1736,6 +1750,7 @@ app.post('/api/bets', async (req, res) => {
                             let notifyMessage = `🔄 Has recibido una referencia\n\n` +
                                 `👤 De: ${escapeHTML(referrerName)}\n` +
                                 `💰 Monto: ${commissionUSD.toFixed(2)} USD\n` +
+                                `🎁 La referencia ha sido añadida a tu saldo principal.\n` +
                                 `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n` +
                                 `📊 Saldo actualizado.`;
 
@@ -1819,9 +1834,9 @@ app.post('/api/bets', async (req, res) => {
                         } else if (destination === 'bonus_cup') {
                             // Se añadió al bono sin migrar
                             notifyMessage += `🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n`;
+                        } else {
+                            notifyMessage += `🎁 La referencia ha sido añadida a tu saldo principal.\n`;
                         }
-                        // Si destination === 'cup' y bonusMovedCup === 0, no se añade línea extra
-                        
                         notifyMessage += `📊 Saldo actualizado.`;
 
                         try {
@@ -3008,11 +3023,12 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
         const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
             ? String(request.amount)
             : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
+        const currencySymbol = creditedCurrency === 'USD' ? '💵' : '🇨🇺';
 
         let text =
             `✅ <b>Depósito aprobado</b>\n\n` +
             `💰 Monto depositado: ${depositedAmountText}\n` +
-            `💵 Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
+            `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
 
         if (request.currency === 'USD') {
             text += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;

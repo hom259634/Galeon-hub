@@ -206,10 +206,11 @@ function buildLastBetsText(bets) {
 }
 
 function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, creditedCurrency, includeUsdFollowup = false, bonusMovedCup = 0, showBonusMovedNotice = false }) {
+    const currencySymbol = creditedCurrency === 'CUP' ? '🇨🇺' : '💵';
     let text =
         `✅ <b>Depósito aprobado</b>\n\n` +
         `💰 Monto depositado: ${depositedAmountText}\n` +
-        `💵 Se acreditaron ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
+        `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
 
     if (includeUsdFollowup) {
         text += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -3343,6 +3344,17 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('❌ El dato no puede estar vacío. Por favor, ingresa la tarjeta o dato solicitado.', getMainKeyboard(ctx));
             return;
         }
+
+        const cardPattern = /^[\d\s\-_]+$/;
+        if (!cardPattern.test(card)) {
+            await ctx.reply('❌ Solo se permiten números, espacios, guiones (-) y guiones bajos (_). Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
+            return;
+        }
+
+        if (card.length > 20) {
+            await ctx.reply('❌ El dato no puede exceder los 20 caracteres. Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
+            return;
+        }
         session.withdrawAccountCard = card;
         // No persistir en la base de datos: mantener el dato en la sesión
         delete session.awaitingWithdrawAccountCard;
@@ -3387,6 +3399,12 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('❌ El móvil no puede estar vacío. Por favor, ingresa un número de móvil válido.', getMainKeyboard(ctx));
             return;
         }
+
+         if (!/^\d{8}$/.test(mobile)) {
+            await ctx.reply('❌ El número de móvil debe contener exactamente 8 dígitos (solo números). Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
+            return;
+        }
+
         session.withdrawAccountMobile = mobile;
         // No persistir en la base de datos: mantener el dato en la sesión
         delete session.awaitingWithdrawAccountMobile;
@@ -4223,6 +4241,8 @@ bot.on(message('text'), async (ctx) => {
                                 let msg = `🔄 Has recibido una referencia\n\n` +
                                     `👤 De: ${escapeHTML(referrerName)}\n` +
                                     `💰 Monto: ${commissionUSD.toFixed(2)} USD\n` +
+                                    `🎁 La referencia ha sido añadida a tu saldo principal.\n` +
+                                    `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n` +
                                     `📊 Saldo actualizado.`;
 
                                 try {
@@ -4292,6 +4312,11 @@ bot.on(message('text'), async (ctx) => {
                                     `💰 Monto: ${commissionCUP.toFixed(2)} CUP\n`;
                                 if (bonusMovedCup > 0) {
                                     msg += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+                                } else if (destination === 'bonus_cup') {
+                                    msg += `🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n`;
+                                } else {
+                                    // en este caso destination === 'cup' y bonusMovedCup === 0
+                                    msg += `🎁 La referencia ha sido añadida a tu saldo principal.\n`;
                                 }
                                 msg += `📊 Saldo actualizado.`;
 
