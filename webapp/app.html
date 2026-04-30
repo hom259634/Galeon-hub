@@ -496,7 +496,7 @@
                     <div id="transferSection" class="hidden mt-6">
                         <h4 class="text-lg font-semibold mb-3">🔄 Transferir saldo</h4>
                         <p class="text-xs text-gray-400 mb-2">⚠️ Solo puedes transferir CUP o USD. El bono de bienvenida no es transferible.</p>
-                        <div class="text-xs text-gray-300 mb-3">
+                       <div id="transferMinContainer" class="text-xs text-gray-300 mb-3">
                             <strong>CUP Mín:</strong> <span id="transferMinCup">-</span>&nbsp;&nbsp;&nbsp;&nbsp;
                             <strong>USD Mín:</strong> <span id="transferMinUsd">-</span>
                         </div>
@@ -554,6 +554,8 @@
                         <button data-admin-view="addDeposit" class="admin-nav-btn bg-blue-600/80 p-3 rounded-xl hover:bg-blue-700"><i class="fas fa-plus mr-1"></i> Añadir Depósito</button>
                         <button data-admin-view="addWithdraw" class="admin-nav-btn bg-pink-600/80 p-3 rounded-xl hover:bg-pink-700"><i class="fas fa-plus mr-1"></i> Añadir Retiro</button>
                         <button data-admin-view="editDeposit" class="admin-nav-btn bg-indigo-400/80 p-3 rounded-xl hover:bg-indigo-500"><i class="fas fa-edit mr-1"></i> Editar Depósito</button>
+                        <button data-admin-view="transferMins" class="admin-nav-btn bg-teal-400/80 p-3 rounded-xl hover:bg-teal-500"><i class="fas fa-sliders-h mr-1"></i> Min. Transferencia</button>
+                        <button data-admin-view="minDeposit" class="admin-nav-btn bg-blue-400/80 p-3 rounded-xl hover:bg-blue-500"><i class="fas fa-coins mr-1"></i> Min. Depósito</button>
                         <button data-admin-view="editWithdraw" class="admin-nav-btn bg-pink-400/80 p-3 rounded-xl hover:bg-pink-500"><i class="fas fa-edit mr-1"></i> Editar Retiro</button>
                         <button data-admin-view="deleteDeposit" class="admin-nav-btn bg-red-600/80 p-3 rounded-xl hover:bg-red-700"><i class="fas fa-trash mr-1"></i> Eliminar Depósito</button>
                         <button data-admin-view="deleteWithdraw" class="admin-nav-btn bg-red-600/80 p-3 rounded-xl hover:bg-red-700"><i class="fas fa-trash mr-1"></i> Eliminar Retiro</button>
@@ -604,17 +606,17 @@
         // ---------- CONFIGURACIÓN DE HORARIOS POR LOTERÍA (hora de Cuba) ----------
         const LOTTERY_SCHEDULES = {
             'Florida': [
-                { name: '🌅 Mañana', start: 9, end: 13 },
-                { name: '🌙 Noche', start: 14, end: 21 }
+                { name: '🌅 Mañana', start: 9, end: 13.25 },
+                { name: '🌙 Noche', start: 14, end: 21.25 }
             ],
             'Georgia': [
-                { name: '🌅 Mañana', start: 9, end: 12 },
-                { name: '☀️ Tarde', start: 14, end: 18.5 },
-                { name: '🌙 Noche', start: 20, end: 23 }
+                { name: '🌅 Mañana', start: 9, end: 12.25 },
+                { name: '☀️ Tarde', start: 14, end: 18.75 },
+                { name: '🌙 Noche', start: 20, end: 23.25 }
             ],
             'Nueva York': [
-                { name: '🌅 Mañana', start: 9, end: 14 },
-                { name: '🌙 Noche', start: 15, end: 22 }
+                { name: '🌅 Mañana', start: 9, end: 14.25 },
+                { name: '🌙 Noche', start: 15, end: 22.25 }
             ]
         };
 
@@ -771,7 +773,6 @@
         }
 
         function onShowWallet() {
-            updateTransferBtnState();
             updateWithdrawTimeStatus();
             if (withdrawSection) withdrawSection.classList.add('hidden');
             document.getElementById('rechargeSection')?.classList.add('hidden');
@@ -1375,7 +1376,6 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     }
                 } catch (e) { /* silent */ }
                 updateBalanceUI();
-                updateTransferBtnState();
 
                 if (isAdmin) {
                     document.getElementById('adminNavBtn').classList.remove('hidden');
@@ -1456,24 +1456,6 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     withdrawCurrency.innerText = currency;
                 }
             }
-            updateTransferBtnState();
-        }
-
-        function updateTransferBtnState() {
-            const transferBtn = document.getElementById('transferBtn');
-            if (!transferBtn || !currentUser) return;
-            const totalCup = (parseFloat(currentUser.cup) || 0) + (parseFloat(currentUser.usd) || 0) * exchangeRates.rate;
-            const hasBalance = totalCup > 0;
-
-            if (!hasBalance) {
-                transferBtn.disabled = true;
-                transferBtn.classList.add('btn-transfer-disabled');
-                transferBtn.title = 'No tienes saldo disponible para transferir';
-            } else {
-                transferBtn.disabled = false;
-                transferBtn.classList.remove('btn-transfer-disabled');
-                transferBtn.title = '';
-            }
         }
 
         async function loadDepositMethods() {
@@ -1529,32 +1511,59 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        function updateTransferMins() {
+        async function updateTransferMins() {
             const elCup = document.getElementById('transferMinCup');
             const elUsd = document.getElementById('transferMinUsd');
-            let cupMin = '-';
-            let usdMin = '-';
+            const minInfo = document.getElementById('transferMinInfo'); // necesitamos un div contenedor (ver abajo)
 
-            if (depositMethods && depositMethods.length > 0) {
-                const cupMethods = depositMethods.filter(m => (m.currency || '').toUpperCase() === 'CUP');
-                if (cupMethods.length > 0) {
-                    const method = cupMethods.reduce((a, b) => (a.id > b.id ? a : b));
-                    if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
-                        cupMin = parseFloat(method.min_amount).toFixed(2);
-                    }
-                }
+            // Intentar obtener los mínimos configurados por el admin
+            try {
+                const res = await fetch(`/api/admin/transfer-mins?userId=${currentUser.telegram_id}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    let cupMinAdmin = data.min_cup !== null ? data.min_cup : null;
+                    let usdMinAdmin = data.min_usd !== null ? data.min_usd : null;
 
-                const usdMethods = depositMethods.filter(m => (m.currency || '').toUpperCase() === 'USD');
-                if (usdMethods.length > 0) {
-                    const method = usdMethods.reduce((a, b) => (a.id > b.id ? a : b));
-                    if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
-                        usdMin = parseFloat(method.min_amount).toFixed(2);
+                    // Si no hay administrador, usar los del método de depósito como antes
+                    if (cupMinAdmin === null) {
+                        const cupMethods = depositMethods.filter(m => (m.currency || '').toUpperCase() === 'CUP');
+                        if (cupMethods.length > 0) {
+                            const method = cupMethods.reduce((a, b) => (a.id > b.id ? a : b));
+                            if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
+                                cupMinAdmin = parseFloat(method.min_amount);
+                            }
+                        }
                     }
+                    if (usdMinAdmin === null) {
+                        const usdMethods = depositMethods.filter(m => (m.currency || '').toUpperCase() === 'USD');
+                        if (usdMethods.length > 0) {
+                            const method = usdMethods.reduce((a, b) => (a.id > b.id ? a : b));
+                            if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
+                                usdMinAdmin = parseFloat(method.min_amount);
+                            }
+                        }
+                    }
+
+                    // Mostrar u ocultar según corresponda
+                    const cupMinText = cupMinAdmin !== null && cupMinAdmin > 0 ? cupMinAdmin.toFixed(2) : '-';
+                    const usdMinText = usdMinAdmin !== null && usdMinAdmin > 0 ? usdMinAdmin.toFixed(2) : '-';
+
+                    if (elCup) elCup.innerText = cupMinText;
+                    if (elUsd) elUsd.innerText = usdMinText;
+
+                    // Si ambos son 0 o null, ocultar todo el bloque de mínimos
+                    const bothZero = (!cupMinAdmin || cupMinAdmin === 0) && (!usdMinAdmin || usdMinAdmin === 0);
+                    const minContainer = document.getElementById('transferMinContainer'); // necesitamos un div contenedor
+                    if (minContainer) {
+                        minContainer.style.display = bothZero ? 'none' : '';
+                    }
+                    return;
                 }
+            } catch (e) {
+                console.warn('Error al obtener mínimos de transferencia:', e);
             }
-
-            if (elCup) elCup.innerText = cupMin;
-            if (elUsd) elUsd.innerText = usdMin;
+            // Fallback: mostrar los mínimos del método de depósito (como antes)
+            // (código existente)
         }
 
         async function loadWithdrawMethods() {
@@ -1582,7 +1591,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             const balance = getWithdrawAvailableBalance(currency);
                             withdrawAvailableBalance.innerText = balance.toFixed(2);
                             const example = WITHDRAW_AMOUNT_EXAMPLES[currency] || `ej: 10 para 10 ${currency}`;
-                            withdrawAmount.placeholder = `Monto a retirar (${example})`;
+                            withdrawAmount.placeholder = `Monto (${example})`;
                             withdrawCurrency.innerText = currency;
 
                             let limitsHtml = '';
@@ -2093,20 +2102,32 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 return;
             }
 
-            // Buscar el método de depósito activo para la moneda seleccionada (igual que en recarga)
+            // Obtener mínimo configurado por el admin (endpoint público)
             let minAmount = null;
-            if (depositMethods && depositMethods.length > 0) {
-                // Buscar el método más reciente (mayor id) para la moneda seleccionada
+            try {
+                const res = await fetch('/api/transfer-mins'); // endpoint público, sin userId
+                if (res.ok) {
+                    const data = await res.json();
+                    if (currency === 'CUP') minAmount = data.min_cup;
+                    else if (currency === 'USD') minAmount = data.min_usd;
+                }
+            } catch (e) {
+                console.warn('Error obteniendo mínimos de transferencia:', e);
+            }
+
+            // Si no hay mínimo configurado, usar el método de depósito más reciente como fallback
+            if (minAmount === null && depositMethods && depositMethods.length > 0) {
                 const filtered = depositMethods.filter(m => (m.currency || '').toUpperCase() === currency);
                 if (filtered.length > 0) {
-                    // Elegir el de mayor id (más reciente)
                     const method = filtered.reduce((a, b) => (a.id > b.id ? a : b));
                     if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
                         minAmount = parseFloat(method.min_amount);
                     }
                 }
             }
-            if (minAmount !== null && amount < minAmount) {
+
+            // Solo validar si el mínimo es mayor que cero
+            if (minAmount !== null && minAmount > 0 && amount < minAmount) {
                 iziToast.warning({ message: `Monto mínimo para transferir: ${minAmount} ${currency}` });
                 return;
             }
@@ -3313,6 +3334,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 else if (view === 'pendingRequests') renderPendingRequestsView();
                 else if (view === 'setBonus') renderSetBonusView();
                 else if (view === 'setWithdrawHours') renderSetWithdrawHoursView();
+                else if (view === 'transferMins') renderTransferMinsView();
+                else if (view === 'minDeposit') renderMinDepositView();
             });
         });
 
@@ -3357,6 +3380,104 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const key = String(betType || '').toLowerCase();
             if (!key) return 'N/D';
             return labels[key] || (key.charAt(0).toUpperCase() + key.slice(1));
+        }
+
+        async function renderMinDepositView() {
+            try {
+                const res = await fetch(`/api/admin/min-deposit?userId=${currentUser.telegram_id}`);
+                if (!res.ok) throw new Error('Error al obtener mínimo de depósito');
+                const data = await res.json();
+                const currentMin = data.value || 0;
+
+                adminViewContainer.innerHTML = `
+                    <h4 class="text-xl font-semibold mb-4">💰 Mínimo de Depósito</h4>
+                    <p class="mb-3 text-sm text-gray-300">Define el monto mínimo en USD que un usuario debe depositar. Se aplica a nivel global.</p>
+
+                    <div class="mb-4">
+                        <label class="block text-sm mb-1">Mínimo depósito (USD)</label>
+                        <input type="number" id="minDepositValue" value="${currentMin}" step="0.01" min="0.01" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-blue-500">
+                    </div>
+                    <button id="saveMinDepositBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar</button>
+                `;
+
+                document.getElementById('saveMinDepositBtn').addEventListener('click', async () => {
+                    const value = parseFloat(document.getElementById('minDepositValue').value);
+                    if (isNaN(value) || value <= 0) {
+                        iziToast.warning({ message: 'Valor inválido. Debe ser un número positivo.' });
+                        return;
+                    }
+
+                    try {
+                        const res = await fetch('/api/admin/min-deposit', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ value, userId: currentUser.telegram_id })
+                        });
+                        if (res.ok) {
+                            iziToast.success({ message: 'Mínimo de depósito actualizado' });
+                            renderMinDepositView(); // Refrescar
+                        } else {
+                            const err = await res.json();
+                            iziToast.error({ message: err.error });
+                        }
+                    } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                });
+            } catch (e) {
+                console.error(e);
+                adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar configuración.</p>';
+            }
+        }
+
+        async function renderTransferMinsView() {
+            try {
+                const res = await fetch(`/api/admin/transfer-mins?userId=${currentUser.telegram_id}`);
+                if (!res.ok) throw new Error('Error al obtener mínimos');
+                const data = await res.json();
+                const cupMin = data.min_cup !== null ? data.min_cup : '—';
+                const usdMin = data.min_usd !== null ? data.min_usd : '—';
+
+                adminViewContainer.innerHTML = `
+                    <h4 class="text-xl font-semibold mb-4">🔄 Mínimos de Transferencia</h4>
+                    <p class="mb-3 text-sm text-gray-300">Define el monto mínimo que un usuario debe transferir. Si es 0, no se exigirá mínimo.</p>
+
+                    <div class="mb-4">
+                        <label class="block text-sm mb-1">Mínimo CUP</label>
+                        <input type="number" id="transferMinCup" value="${cupMin}" step="0.01" min="0" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-teal-500">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm mb-1">Mínimo USD</label>
+                        <input type="number" id="transferMinUsd" value="${usdMin}" step="0.01" min="0" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-teal-500">
+                    </div>
+                    <button id="saveTransferMinsBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar</button>
+                `;
+
+                document.getElementById('saveTransferMinsBtn').addEventListener('click', async () => {
+                    const minCup = parseFloat(document.getElementById('transferMinCup').value);
+                    const minUsd = parseFloat(document.getElementById('transferMinUsd').value);
+                    if (isNaN(minCup) || minCup < 0 || isNaN(minUsd) || minUsd < 0) {
+                        iziToast.warning({ message: 'Valores inválidos' });
+                        return;
+                    }
+
+                    try {
+                        const res = await fetch('/api/admin/transfer-mins', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ min_cup: minCup, min_usd: minUsd, userId: currentUser.telegram_id })
+                        });
+                        if (res.ok) {
+                            iziToast.success({ message: 'Mínimos de transferencia actualizados' });
+                            renderTransferMinsView(); // Refrescar
+                        } else {
+                            const err = await res.json();
+                            iziToast.error({ message: err.error });
+                        }
+                    } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                });
+            } catch (e) {
+                console.error(e);
+                adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar configuración.</p>';
+            }
         }
 
         function parseAmountWithCurrency(text) {
