@@ -1062,25 +1062,25 @@ function getAllowedHours(lotteryKey) {
             name: 'Florida',
             emoji: '🦩',
             slots: [
-                { name: '🌅 Mañana', start: 9, end: 13 },
-                { name: '🌙 Noche',  start: 14, end: 21 }
+                { name: '🌅 Mañana', start: 9, end: 13.25 },
+                { name: '🌙 Noche',  start: 14, end: 21.25 }
             ]
         },
         georgia: {
             name: 'Georgia',
             emoji: '🍑',
             slots: [
-                { name: '🌅 Mañana', start: 9, end: 12 },
-                { name: '☀️ Tarde',  start: 14, end: 18.5 },
-                { name: '🌙 Noche',  start: 20, end: 23 }
+                { name: '🌅 Mañana', start: 9, end: 12.25 },
+                { name: '☀️ Tarde',  start: 14, end: 18.75 },
+                { name: '🌙 Noche',  start: 20, end: 23.25 }
             ]
         },
         newyork: {
             name: 'Nueva York',
             emoji: '🗽',
             slots: [
-                { name: '🌅 Mañana', start: 9, end: 14 },
-                { name: '🌙 Noche',  start: 15, end: 22 }
+                { name: '🌅 Mañana', start: 9, end: 14.25 },
+                { name: '🌙 Noche',  start: 15, end: 22.25 }
             ]
         }
     };
@@ -1672,7 +1672,17 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
 });
 
 bot.action('transfer', async (ctx) => {
-    // Paso 1: elegir moneda
+    // Verificar que el usuario tenga saldo principal (sin contar el bono)
+    const user = ctx.dbUser;
+    const cup = parseFloat(user.cup) || 0;
+    const usd = parseFloat(user.usd) || 0;
+    const totalCUP = cup + (usd * await getExchangeRateUSD());
+    if (totalCUP <= 0) {
+        await ctx.answerCbQuery('⚠️ No tienes saldo disponible para transferir', { show_alert: true });
+        return;
+    }
+
+    // Paso 1: elegir moneda (código existente)
     ctx.session.awaitingTransferCurrency = true;
     const currencyButtons = [
         [Markup.button.callback('🇨🇺 CUP', 'transfer_currency_CUP'), Markup.button.callback('💵 USD', 'transfer_currency_USD')],
