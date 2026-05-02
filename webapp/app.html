@@ -447,7 +447,7 @@
                     </div>
 
                     <div class="bg-blue-900/50 p-4 rounded-2xl text-center mb-4">
-                        <p class="text-sm">🎁 Bono (no retirable ni transferible)</p>
+                        <p class="text-sm">🎁 Bono (no transferible ni retirable)</p>
                         <p id="walletBonus" class="text-2xl font-semibold text-cyan-300">0.00 CUP</p>
                     </div>
 
@@ -554,7 +554,6 @@
                         <button data-admin-view="addDeposit" class="admin-nav-btn bg-blue-600/80 p-3 rounded-xl hover:bg-blue-700"><i class="fas fa-plus mr-1"></i> Añadir Depósito</button>
                         <button data-admin-view="addWithdraw" class="admin-nav-btn bg-pink-600/80 p-3 rounded-xl hover:bg-pink-700"><i class="fas fa-plus mr-1"></i> Añadir Retiro</button>
                         <button data-admin-view="editDeposit" class="admin-nav-btn bg-indigo-400/80 p-3 rounded-xl hover:bg-indigo-500"><i class="fas fa-edit mr-1"></i> Editar Depósito</button>
-                        <button data-admin-view="transferMins" class="admin-nav-btn bg-teal-400/80 p-3 rounded-xl hover:bg-teal-500"><i class="fas fa-sliders-h mr-1"></i> Min. Transferencia</button>
                         <button data-admin-view="editWithdraw" class="admin-nav-btn bg-pink-400/80 p-3 rounded-xl hover:bg-pink-500"><i class="fas fa-edit mr-1"></i> Editar Retiro</button>
                         <button data-admin-view="deleteDeposit" class="admin-nav-btn bg-red-600/80 p-3 rounded-xl hover:bg-red-700"><i class="fas fa-trash mr-1"></i> Eliminar Depósito</button>
                         <button data-admin-view="deleteWithdraw" class="admin-nav-btn bg-red-600/80 p-3 rounded-xl hover:bg-red-700"><i class="fas fa-trash mr-1"></i> Eliminar Retiro</button>
@@ -563,6 +562,7 @@
                         <button data-admin-view="setBonus" class="admin-nav-btn bg-indigo-400/80 p-3 rounded-xl hover:bg-indigo-500"><i class="fas fa-gift mr-1"></i> Bono Inicial</button>
                         <button data-admin-view="setReferralRate" class="admin-nav-btn bg-orange-400/80 p-3 rounded-xl hover:bg-orange-500"><i class="fas fa-percent mr-1"></i>% Referidos</button>
                         <button data-admin-view="setWithdrawHours" class="admin-nav-btn bg-purple-400/80 p-3 rounded-xl hover:bg-purple-500"><i class="fas fa-clock mr-1"></i> Horario Retiros</button>
+                        <button data-admin-view="transferMins" class="admin-nav-btn bg-teal-400/80 p-3 rounded-xl hover:bg-teal-500"><i class="fas fa-sliders-h mr-1"></i> Min. Transferencia</button>
                         <button data-admin-view="pendingRequests" class="admin-nav-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700"><i class="fas fa-clock mr-1"></i> Solicitudes Pendientes</button>
                         <button data-admin-view="viewData" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-eye mr-1"></i> Ver Datos</button>
                         
@@ -1366,7 +1366,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const bonusDisplay = Number.isInteger(bonusValue) ? bonusValue.toFixed(0) : bonusValue.toFixed(2);
                     iziToast.success({
                         title: '🎁 ¡Bono de bienvenida!',
-                        message: `Has recibido ${bonusDisplay} CUP como bono no retirable. Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`
+                        message: `Has recibido ${bonusDisplay} CUP como bono no transferible ni retirable. Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`
                     });
                 }
 
@@ -3440,18 +3440,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                     <div class="mb-4">
                         <label class="block text-sm mb-1">Mínimo CUP</label>
-                        <input type="number" id="transferMinCup" value="${cupMin}" step="0.01" min="0" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-teal-500">
+                        <input type="number" id="adminTransferMinCup" value="${cupMin}" step="0.01" min="0" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-teal-500">
                     </div>
                     <div class="mb-4">
                         <label class="block text-sm mb-1">Mínimo USD</label>
-                        <input type="number" id="transferMinUsd" value="${usdMin}" step="0.01" min="0" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-teal-500">
+                        <input type="number" id="adminTransferMinUsd" value="${usdMin}" step="0.01" min="0" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-teal-500">
                     </div>
                     <button id="saveTransferMinsBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar</button>
                 `;
 
                 document.getElementById('saveTransferMinsBtn').addEventListener('click', async () => {
-                    const minCup = parseFloat(document.getElementById('transferMinCup').value);
-                    const minUsd = parseFloat(document.getElementById('transferMinUsd').value);
+                    const minCup = parseFloat(document.getElementById('adminTransferMinCup').value);
+                    const minUsd = parseFloat(document.getElementById('adminTransferMinUsd').value);
                     if (isNaN(minCup) || minCup < 0 || isNaN(minUsd) || minUsd < 0) {
                         iziToast.warning({ message: 'Valores inválidos' });
                         return;
