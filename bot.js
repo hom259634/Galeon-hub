@@ -1142,7 +1142,7 @@ bot.command('start', async (ctx) => {
             const bonusDisplay = Number.isInteger(normalizedBonus) ? normalizedBonus.toFixed(0) : normalizedBonus.toFixed(2);
             await ctx.reply(
                 `🎁 <b>¡Bono de bienvenida!</b>\n\n` +
-                `Has recibido <b>${bonusDisplay} CUP</b> como bono no retirable ni transferible.\n` +
+                `Has recibido <b>${bonusDisplay} CUP</b> como bono no transferible ni retirable.\n` +
                 `Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`,
                 { parse_mode: 'HTML' }
             );
@@ -1168,7 +1168,7 @@ bot.command('mi_dinero', async (ctx) => {
         `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
         `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
         if (bonusCup > 0) {
-        text += `🎁 <b>Bono (no retirable):</b> ${parseFloat(bonusCup.toFixed(2))} CUP\n`;
+        text += `🎁 <b>Bono (no transferible ni retirable):</b> ${parseFloat(bonusCup.toFixed(2))} CUP\n`;
         }
         text += `\n¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
@@ -1491,7 +1491,7 @@ bot.action('my_money', async (ctx) => {
         `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
         `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
         if (bonusCup > 0) {
-        text += `🎁 <b>Bono (no retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
+        text += `🎁 <b>Bono (no transferible ni retirable):</b> ${parseFloat(bonusCup.toFixed(2))} CUP\n`;
         }
         text += `\n¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
@@ -1710,7 +1710,7 @@ bot.action(/^transfer_currency_(CUP|USD)$/, async (ctx) => {
     await safeEdit(ctx,
         '🔄 <b>Transferir saldo a otro usuario</b>\n\n' +
         'Envía el <b>nombre de usuario</b> de Telegram (ej: @usuario) de la persona a la que deseas transferir.\n' +
-        'También puedes usar su ID numérico si lo conoces.' +
+        'También puedes usar su ID numérico si lo conoces.\n\n' +
         minLine +
         '\n\nPor favor, ingresa el usuario:',
         null
@@ -2750,7 +2750,7 @@ bot.on(message('text'), async (ctx) => {
                 `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
                 `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
                 if (bonusCup > 0) {
-                text += `🎁 <b>Bono (no retirable ni transferible):</b> ${bonusCup.toFixed(2)} CUP\n`;
+                text += `🎁 <b>Bono (no transferible ni retirable):</b> ${parseFloat(bonusCup.toFixed(2))} CUP\n`;
                 }
                 text += `\n¿Qué deseas hacer?`;
             await safeEdit(ctx, text, myMoneyKbd());
