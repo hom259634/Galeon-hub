@@ -1168,7 +1168,7 @@ bot.command('mi_dinero', async (ctx) => {
         `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
         `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
         if (bonusCup > 0) {
-        text += `🎁 <b>Bono (no transferible ni retirable):</b> ${parseFloat(bonusCup.toFixed(2))} CUP\n`;
+        text += `🎁 <b>Bono (no transferible ni retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
         }
         text += `\n¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
@@ -1491,7 +1491,7 @@ bot.action('my_money', async (ctx) => {
         `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
         `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
         if (bonusCup > 0) {
-        text += `🎁 <b>Bono (no transferible ni retirable):</b> ${parseFloat(bonusCup.toFixed(2))} CUP\n`;
+        text += `🎁 <b>Bono (no transferible ni retirable):</b>${bonusCup.toFixed(2)} CUP\n`;
         }
         text += `\n¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
@@ -2307,21 +2307,22 @@ bot.action(/set_min_(.+)/, async (ctx) => {
 bot.action('adm_view', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     const rates = await getExchangeRates();
-    const minDep = await getMinDepositUSD();
-    const minWit = await getMinWithdrawUSD();
     const bonusDefault = await getBonusCupDefault();
     const refRate = await getReferralCommissionRate();
     const { data: depMethods } = await supabase.from('deposit_methods').select('*');
     const { data: witMethods } = await supabase.from('withdraw_methods').select('*');
     const { data: prices } = await supabase.from('play_prices').select('*');
+    const minTransCup = await getTransferMinCUP();
+    const minTransUsd = await getTransferMinUSD();
 
     let text = `💰 <b>Tasas de cambio:</b>\n`;
     text += `MLC/CUP: 1 MLC = ${rates.rate_mlc} CUP\n`;
     text += `USD/CUP: 1 USD = ${rates.rate} CUP\n`;
     text += `USDT/CUP: 1 USDT = ${rates.rate_usdt} CUP\n`;
     text += `TRX/CUP: 1 TRX = ${rates.rate_trx} CUP\n\n`;
-    text += `📥 <b>Mínimo depósito:</b> ${minDep} USD (${(minDep * rates.rate).toFixed(2)} CUP)\n`;
-    text += `📤 <b>Mínimo retiro:</b> ${minWit} USD (${(minWit * rates.rate).toFixed(2)} CUP)\n\n`;
+    text += `🔄 <b>Mínimos de transferencia:</b>\n`;
+    text += `  CUP: ${minTransCup !== null ? minTransCup : '-'} CUP\n`;
+    text += `  USD: ${minTransUsd !== null ? minTransUsd : '-'} USD\n\n`;
     text += `📥 <b>Métodos de DEPÓSITO:</b>\n`;
     depMethods?.forEach(m => text += `  ID ${m.id}: ${escapeHTML(m.name)} (${m.currency}) - ${escapeHTML(m.card)} / ${escapeHTML(m.confirm)} | Mín: ${m.min_amount !== null ? m.min_amount : '-'} | Máx: ${m.max_amount !== null ? m.max_amount : '-'}\n`);
     text += `\n📤 <b>Métodos de RETIRO:</b>\n`;
@@ -2750,7 +2751,7 @@ bot.on(message('text'), async (ctx) => {
                 `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
                 `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
                 if (bonusCup > 0) {
-                text += `🎁 <b>Bono (no transferible ni retirable):</b> ${parseFloat(bonusCup.toFixed(2))} CUP\n`;
+                text += `🎁 <b>Bono (no transferible ni retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
                 }
                 text += `\n¿Qué deseas hacer?`;
             await safeEdit(ctx, text, myMoneyKbd());
