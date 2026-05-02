@@ -447,7 +447,7 @@
                     </div>
 
                     <div class="bg-blue-900/50 p-4 rounded-2xl text-center mb-4">
-                        <p class="text-sm">🎁 Bono (no retirable)</p>
+                        <p class="text-sm">🎁 Bono (no retirable ni transferible)</p>
                         <p id="walletBonus" class="text-2xl font-semibold text-cyan-300">0.00 CUP</p>
                     </div>
 
@@ -495,7 +495,7 @@
                     <!-- TRANSFERENCIA -->
                     <div id="transferSection" class="hidden mt-6">
                         <h4 class="text-lg font-semibold mb-3">🔄 Transferir saldo</h4>
-                        <p class="text-xs text-gray-400 mb-2">⚠️ Solo puedes transferir CUP o USD. El bono de bienvenida no es transferible.</p>
+                        <p class="text-xs text-gray-400 mb-2">⚠️ Solo puedes transferir CUP o USD.</p>
                        <div id="transferMinContainer" class="text-xs text-gray-300 mb-3">
                             <strong>CUP Mín:</strong> <span id="transferMinCup">-</span>&nbsp;&nbsp;&nbsp;&nbsp;
                             <strong>USD Mín:</strong> <span id="transferMinUsd">-</span>
@@ -1518,46 +1518,38 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         async function updateTransferMins() {
             const elCup = document.getElementById('transferMinCup');
             const elUsd = document.getElementById('transferMinUsd');
-            const minInfo = document.getElementById('transferMinInfo'); // necesitamos un div contenedor (ver abajo)
+            const minContainer = document.getElementById('transferMinContainer');
 
-            // Intentar obtener los mínimos configurados por el admin
             try {
-                const res = await fetch(`/api/admin/transfer-mins?userId=${currentUser.telegram_id}`);
+                // Usar el endpoint público (sin autenticación)
+                const res = await fetch('/api/transfer-mins');
                 if (res.ok) {
                     const data = await res.json();
-                    let cupMinAdmin = data.min_cup !== null ? data.min_cup : null;
-                    let usdMinAdmin = data.min_usd !== null ? data.min_usd : null;
+                    let cupMinAdmin = data.min_cup !== null ? parseFloat(data.min_cup) : null;
+                    let usdMinAdmin = data.min_usd !== null ? parseFloat(data.min_usd) : null;
 
-                    // Si no hay administrador, usar los del método de depósito como antes
-                    if (cupMinAdmin === null) {
+                    // Fallback: si el admin no ha configurado, usar el mínimo del método de depósito CUP/USD más reciente
+                    if (cupMinAdmin === null || isNaN(cupMinAdmin)) {
                         const cupMethods = depositMethods.filter(m => (m.currency || '').toUpperCase() === 'CUP');
                         if (cupMethods.length > 0) {
                             const method = cupMethods.reduce((a, b) => (a.id > b.id ? a : b));
-                            if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
-                                cupMinAdmin = parseFloat(method.min_amount);
-                            }
+                            cupMinAdmin = method.min_amount !== null ? parseFloat(method.min_amount) : 0;
                         }
                     }
-                    if (usdMinAdmin === null) {
+                    if (usdMinAdmin === null || isNaN(usdMinAdmin)) {
                         const usdMethods = depositMethods.filter(m => (m.currency || '').toUpperCase() === 'USD');
                         if (usdMethods.length > 0) {
                             const method = usdMethods.reduce((a, b) => (a.id > b.id ? a : b));
-                            if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
-                                usdMinAdmin = parseFloat(method.min_amount);
-                            }
+                            usdMinAdmin = method.min_amount !== null ? parseFloat(method.min_amount) : 0;
                         }
                     }
 
-                    // Mostrar u ocultar según corresponda
-                    const cupMinText = cupMinAdmin !== null && cupMinAdmin > 0 ? cupMinAdmin.toFixed(2) : '-';
-                    const usdMinText = usdMinAdmin !== null && usdMinAdmin > 0 ? usdMinAdmin.toFixed(2) : '-';
+                    // Actualizar textos
+                    if (elCup) elCup.innerText = (cupMinAdmin !== null && cupMinAdmin > 0) ? cupMinAdmin.toFixed(2) : '-';
+                    if (elUsd) elUsd.innerText = (usdMinAdmin !== null && usdMinAdmin > 0) ? usdMinAdmin.toFixed(2) : '-';
 
-                    if (elCup) elCup.innerText = cupMinText;
-                    if (elUsd) elUsd.innerText = usdMinText;
-
-                    // Si ambos son 0 o null, ocultar todo el bloque de mínimos
+                    // Ocultar contenedor si ambos son 0 o nulos
                     const bothZero = (!cupMinAdmin || cupMinAdmin === 0) && (!usdMinAdmin || usdMinAdmin === 0);
-                    const minContainer = document.getElementById('transferMinContainer'); // necesitamos un div contenedor
                     if (minContainer) {
                         minContainer.style.display = bothZero ? 'none' : '';
                     }
@@ -1566,10 +1558,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             } catch (e) {
                 console.warn('Error al obtener mínimos de transferencia:', e);
             }
-            // Fallback: mostrar los mínimos del método de depósito (como antes)
-            // (código existente)
-        }
 
+            // Si falla la petición, mostrar valores por defecto
+            if (elCup) elCup.innerText = '-';
+            if (elUsd) elUsd.innerText = '-';
+            if (minContainer) minContainer.style.display = '';
+        }
         async function loadWithdrawMethods() {
             try {
                 const res = await fetch('/api/withdraw-methods');
@@ -1970,7 +1964,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             document.getElementById('depositScreenshot').value = '';
             const depositSendBtn = document.getElementById('submitDepositBtn');
             depositSendBtn.disabled = true;
-            depositSendBtn.innerHTML = 'Recargando...';
+            depositSendBtn.innerHTML = 'Enviando...';
 
             const formData = new FormData();
             formData.append('methodId', methodId);
