@@ -638,7 +638,7 @@
         let activeSlot = null;
         let userBets = [];
         const WITHDRAW_AMOUNT_EXAMPLES = {
-            CUP: 'ej: 600 para 600 CUP',
+            CUP: 'ej: 1000 para 1000 CUP',
             USD: 'ej: 10 para 10 USD',
             MLC: 'ej: 10 para 10 MLC',
             USDT: 'ej: 10 para 10 USDT',
@@ -3136,11 +3136,19 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const referralRate = refData.rate;
                 const refPercent = formatReferralPercent(referralRate); // función ya existente
 
+                const transRes = await fetch(`/api/admin/transfer-mins?userId=${currentUser.telegram_id}`);
+                const transData = await transRes.json();
+                const minTransCup = transData.min_cup !== null ? transData.min_cup : '—';
+                const minTransUsd = transData.min_usd !== null ? transData.min_usd : '—';
+
                 let text = `💰 <b>Tasas:</b>\n`;
                 text += `MLC/CUP: 1 MLC = ${exchangeRates.rate_mlc} CUP\n`;
                 text += `USD/CUP: 1 USD = ${exchangeRates.rate} CUP\n`;
                 text += `USDT/CUP: 1 USDT = ${exchangeRates.rate_usdt} CUP\n`;
                 text += `TRX/CUP: 1 TRX = ${exchangeRates.rate_trx} CUP\n\n`;
+                text += `🔄 <b>Mínimos de transferencia:</b>\n`;
+                text += `  CUP: ${minTransCup} CUP\n`;
+                text += `  USD: ${minTransUsd} USD\n\n`;
                 text += `📥 <b>Métodos DEPÓSITO:</b>\n`;
                 depMethods.forEach(m => text += `  • ${m.name} (${m.currency}) - ${m.card} / ${m.confirm} | Mín: ${m.min_amount !== null ? m.min_amount : '-'} | Máx: ${m.max_amount !== null ? m.max_amount : '-'}\n`);
                 text += `\n📤 <b>Métodos RETIRO:</b>\n`;
