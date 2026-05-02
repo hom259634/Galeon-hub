@@ -1710,9 +1710,9 @@ bot.action(/^transfer_currency_(CUP|USD)$/, async (ctx) => {
     await safeEdit(ctx,
         '🔄 <b>Transferir saldo a otro usuario</b>\n\n' +
         'Envía el <b>nombre de usuario</b> de Telegram (ej: @usuario) de la persona a la que deseas transferir.\n' +
-        'También puedes usar su ID numérico si lo conoces.\n\n' +
+        'También puedes usar su ID numérico si lo conoces.' +
         minLine +
-        '\n\nPor favor, ingresa el usuario:',
+        '\n\n\n\nPor favor, ingresa el usuario:',
         null
     );
 });
