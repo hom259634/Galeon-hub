@@ -1326,53 +1326,63 @@ app.post('/api/transfer', async (req, res) => {
         })
         .eq('telegram_id', from);
 
-    // Acreditar destino y migrar bono si existe (ahora USD también va al bono)
+    // Acreditar destino según si es nuevo o no
     let updatedTargetCup = parseFloat(targetUser.cup) || 0;
     let updatedTargetUsd = parseFloat(targetUser.usd) || 0;
     let updatedTargetBonus = parseFloat(targetUser.bonus_cup) || 0;
     let bonusMovedCup = 0;
-    let amountInCup = 0;
 
-    const minDepositCUP = await getMinDepositCUP(); 
+    const minDepositCUP = await getMinDepositCUP();
 
-    if (currency === 'CUP') {
-        amountInCup = parsedAmount;
-        updatedTargetBonus += amountInCup;
+    const hasApprovedDep = await userHasApprovedDeposit(targetUserId);
+    const hasMainBalance = (updatedTargetCup > 0) || (updatedTargetUsd > 0);
+    const isFirstTimeReceiver = !hasApprovedDep && !hasMainBalance;
 
-        if (updatedTargetBonus >= minDepositCUP) {
-            updatedTargetCup += updatedTargetBonus;
-            bonusMovedCup = updatedTargetBonus;
-            updatedTargetBonus = 0;
+    if (isFirstTimeReceiver) {
+        if (currency === 'CUP') {
+            const amountInCup = parsedAmount;
+            const existingBonus = updatedTargetBonus || 0;
+            updatedTargetBonus += amountInCup;
+            if (updatedTargetBonus >= minDepositCUP) {
+                updatedTargetCup += amountInCup + existingBonus;
+                bonusMovedCup = existingBonus;               // solo el bono previo
+                updatedTargetBonus = 0;
+            }
+        } else if (currency === 'USD') {
+            const rateUSD = await getExchangeRateUSD();
+            const transferWorthCUP = parsedAmount * rateUSD;
+            const existingBonus = updatedTargetBonus || 0;
+
+            if ((existingBonus + transferWorthCUP) >= minDepositCUP) {
+                updatedTargetUsd += parsedAmount;
+                updatedTargetCup += existingBonus;
+                bonusMovedCup = existingBonus;
+                updatedTargetBonus = 0;
+            } else {
+                updatedTargetBonus += transferWorthCUP;
+            }
         }
-    } else if (currency === 'USD') {
-        // Convertir USD a CUP y sumar al bono
-        const rateUSD = await getExchangeRateUSD();
-        amountInCup = parsedAmount * rateUSD;
-        updatedTargetBonus += amountInCup;
-
-        if (updatedTargetBonus >= minDepositCUP) {
-            updatedTargetCup += updatedTargetBonus;
-            bonusMovedCup = updatedTargetBonus;
-            updatedTargetBonus = 0;
+    } else {
+        // Usuario con historial recibe directamente en la moneda enviada
+        if (currency === 'CUP') {
+            updatedTargetCup += parsedAmount;
+        } else if (currency === 'USD') {
+            updatedTargetUsd += parsedAmount;
         }
-        // El receptor NO recibe USD, todo se convierte a bono en CUP
     }
 
     const targetUpdatePayload = {
         cup: updatedTargetCup,
-        usd: updatedTargetUsd,   // no se modifica porque la transferencia fue a bono
+        usd: updatedTargetUsd,
         bonus_cup: updatedTargetBonus,
         updated_at: new Date()
     };
+    await supabase.from('users').update(targetUpdatePayload).eq('telegram_id', targetUserId);
 
-    await supabase
-        .from('users')
-        .update(targetUpdatePayload)
-        .eq('telegram_id', targetUserId);
-
-    // Intentar notificar al usuario destino vía bot (si está cargado)
+     // Notificar al receptor (formato original adaptado)
     try {
-        const fromName = (userFrom && (userFrom.first_name || userFrom.username)) ? (userFrom.first_name || userFrom.username) : String(from);
+        const fromName = (userFrom?.first_name || userFrom?.username) ? 
+            (userFrom.first_name || userFrom.username) : String(from);
         let message = `🔄 <b>Has recibido una transferencia</b>\n\n` +
             `👤 De: ${escapeHTML(fromName)}\n`;
 
@@ -1382,15 +1392,22 @@ app.post('/api/transfer', async (req, res) => {
             message += `💰 Monto: ${parsedAmount} CUP\n`;
         }
 
-        if (bonusMovedCup > 0) {
-            message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
-        } else if (updatedTargetBonus > 0) {
-            message += `🎁 Han sido añadidos ${amountInCup.toFixed(2)} CUP a tu bono de bienvenida actual.\n`;
+        if (isFirstTimeReceiver) {
+            if (bonusMovedCup > 0) {
+                message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+            } else if (updatedTargetBonus > 0) {
+                if (currency === 'USD') {
+                    const rateUSD = await getExchangeRateUSD();
+                    const addedCUP = (parsedAmount * rateUSD).toFixed(2);
+                    message += `🎁 Han sido añadidos ${addedCUP} CUP a tu bono de bienvenida actual.\n`;
+                } else {
+                    message += `🎁 Han sido añadidos ${parsedAmount} CUP a tu bono de bienvenida actual.\n`;
+                }
+            }
         }
 
         message += `📊 Saldo actualizado.`;
 
-        // Enviar mensaje (usando el bot o axios)
         if (bot && bot.telegram && typeof bot.telegram.sendMessage === 'function') {
             await bot.telegram.sendMessage(targetUserId, message, { parse_mode: 'HTML' });
         } else {
