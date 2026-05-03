@@ -573,7 +573,7 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
                 const cupAmt2 = parseFloat(user.cup) || 0;
                 const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
                 if (bonusAmt2 > 0) {
-                    const minDepCUP = await getMinTransferCUP();
+                    const minDepCUP = await getMinDepositCUP();
                     if (bonusAmt2 >= minDepCUP) {
                         const newCup2 = cupAmt2 + bonusAmt2;
                         await supabase.from('users').update({
@@ -719,6 +719,12 @@ async function getMinDepositUSD() {
         .eq('key', 'min_deposit_usd')
         .single();
     return data ? parseFloat(data.value) : 1.0;
+}
+
+async function getMinDepositCUP() {
+    const minUSD = await getMinDepositUSD(); // esta función ya existe
+    const rate = await getExchangeRateUSD();
+    return minUSD * rate;
 }
 
 async function getMinWithdrawUSD() {
@@ -2312,8 +2318,8 @@ bot.action('adm_view', async (ctx) => {
     const { data: depMethods } = await supabase.from('deposit_methods').select('*');
     const { data: witMethods } = await supabase.from('withdraw_methods').select('*');
     const { data: prices } = await supabase.from('play_prices').select('*');
-    const minTransCup = await getTransferMinCUP();
-    const minTransUsd = await getTransferMinUSD();
+    const minTransCup = await getTransferMin('CUP');
+    const minTransUsd = await getTransferMin('USD');
 
     let text = `💰 <b>Tasas de cambio:</b>\n`;
     text += `MLC/CUP: 1 MLC = ${rates.rate_mlc} CUP\n`;
@@ -3323,7 +3329,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(amountText);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debes escribir el monto earManualOpenExpiryido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
             return;
         }
 
@@ -3967,8 +3973,9 @@ bot.on(message('text'), async (ctx) => {
             }
 
             session.transferTarget = targetUser.telegram_id;
-            // Ahora pedir el monto directamente, mostrando el mínimo del método elegido
-            let minLine = (method && method.min_amount !== null && method.min_amount !== undefined) ? `\nMínimo: ${method.min_amount} ${method.currency}` : '';
+            const currency = session.transferCurrency; // 'CUP' o 'USD'
+            const min = await getTransferMin(currency);
+            let minLine = (min !== null && min > 0) ? `\nMínimo: ${min} ${currency}` : '';
             session.awaitingTransferAmount = true;
             delete session.awaitingTransferTarget;
             await safeEdit(ctx,
@@ -4050,29 +4057,41 @@ bot.on(message('text'), async (ctx) => {
         }
         updates.updated_at = new Date();
         await supabase.from('users').update(updates).eq('telegram_id', uid);
-        // 5. Acreditar destino y migrar bono si corresponde
         let updatedTargetCup = parseFloat(targetUser.cup) || 0;
         let updatedTargetUsd = parseFloat(targetUser.usd) || 0;
-        let targetBonusCup = parseFloat(targetUser.bonus_cup) || 0;
+        let updatedTargetBonus = parseFloat(targetUser.bonus_cup) || 0;
         let bonusMovedCup = 0;
+
+        const minDepositCUP = await getMinDepositCUP(); // mínimo de depósito en CUP
+
         if (currency === 'CUP') {
-            updatedTargetCup += amount;
+            // El monto se suma al bono del receptor
+            updatedTargetBonus += amount;
+
+            // Si el bono total alcanza el mínimo de depósito, se migra completo a saldo principal
+            if (updatedTargetBonus >= minDepositCUP) {
+                updatedTargetCup += updatedTargetBonus;
+                bonusMovedCup = updatedTargetBonus;
+                updatedTargetBonus = 0;
+            }
         } else if (currency === 'USD') {
+            // El monto en USD va directo al saldo USD
             updatedTargetUsd += amount;
+
+            // Verificar si el bono preexistente (sin la transferencia) ya alcanza el mínimo de depósito
+            if (targetBonusCup > 0 && targetBonusCup >= minDepositCUP) {
+                updatedTargetCup += targetBonusCup;
+                bonusMovedCup = targetBonusCup;
+                updatedTargetBonus = 0;
+            }
         }
-        // Migrar bono si corresponde
-        const hadNoMainBalance = (parseFloat(targetUser.cup) === 0 && parseFloat(targetUser.usd) === 0);
-        const hadApprovedDeposit = false; // No se consulta aquí por simplicidad
-        if (targetBonusCup > 0 && hadNoMainBalance && !hadApprovedDeposit) {
-            updatedTargetCup += targetBonusCup;
-            bonusMovedCup = targetBonusCup;
-        }
+
         let targetUpdate = {
             cup: updatedTargetCup,
             usd: updatedTargetUsd,
+            bonus_cup: updatedTargetBonus,
             updated_at: new Date()
         };
-        if (bonusMovedCup > 0) targetUpdate.bonus_cup = 0;
         await supabase.from('users').update(targetUpdate).eq('telegram_id', targetUserId);
         // 6. Notificar a ambos usuarios
         // Mensaje de éxito personalizado
@@ -4094,6 +4113,10 @@ bot.on(message('text'), async (ctx) => {
             }
             if (bonusMovedCup > 0) {
                 message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+            }
+            else if (currency === 'CUP' && updatedTargetBonus > 0)
+            {
+                message += `🎁 Han sido añadidos ${updatedTargetBonus.toFixed(2)} a tu bono de bienvenida actual.\n`;
             }
             message += `📊 Saldo actualizado.`;
             await bot.telegram.sendMessage(targetUserId, message, { parse_mode: 'HTML' });

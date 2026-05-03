@@ -463,7 +463,7 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
             const cupAmt2 = parseFloat(user.cup) || 0;
             const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
             if (bonusAmt2 > 0) {
-                const minDepCUP = await getMinTransferCUP();
+                const minDepCUP = await getMinDepositCUP();
                 if (bonusAmt2 >= minDepCUP) {
                     const newCup2 = cupAmt2 + bonusAmt2;
                     await supabase.from('users').update({
@@ -613,6 +613,12 @@ async function setTransferMins(minCup, minUsd) {
             .from('app_config')
             .upsert({ key: 'transfer_min_usd', value: minUsd.toString() }, { onConflict: 'key' });
     }
+}
+
+async function getMinDepositCUP() {
+    const minUSD = await getMinDepositUSD(); // esta función ya existe
+    const rate = await getExchangeRateUSD();
+    return minUSD * rate;
 }
 
 async function getMinDepositUSD() {
@@ -1327,35 +1333,39 @@ app.post('/api/transfer', async (req, res) => {
 
     let updatedTargetCup = targetCup;
     let updatedTargetUsd = targetUsd;
+    let updatedTargetBonus = targetBonusCup;
     let bonusMovedCup = 0;
 
-    if (currency === 'CUP') {
-        updatedTargetCup += parsedAmount;
-    } else if (currency === 'USD') {
-        updatedTargetUsd += parsedAmount;
-    } else {
-        updatedTargetCup += debitPlan.amountCUP;
-    }
+    const minDepositCUP = await getMinDepositCUP(); 
 
-    // Mover bono SOLO si el usuario no tenía saldo principal y no tuvo depósitos aprobados antes
-    try {
-        const hadNoMainBalance = (targetCup === 0 && targetUsd === 0);
-        const hadApprovedDeposit = await userHasApprovedDeposit(targetUserId);
-        if (targetBonusCup > 0 && hadNoMainBalance && !hadApprovedDeposit) {
+    if (currency === 'CUP') {
+        // Todo a CUP: el monto transferido se suma al bono
+        updatedTargetBonus += parsedAmount;
+
+        // Si el bono total alcanza el mínimo de depósito, se migra completo a saldo principal
+        if (updatedTargetBonus >= minDepositCUP) {
+            updatedTargetCup += updatedTargetBonus;
+            bonusMovedCup = updatedTargetBonus;
+            updatedTargetBonus = 0;
+        }
+    } else if (currency === 'USD') {
+        // El monto en USD va directo al saldo USD
+        updatedTargetUsd += parsedAmount;
+
+        // Verificar si el bono preexistente (sin la transferencia) ya alcanza el mínimo de depósito
+        if (targetBonusCup > 0 && targetBonusCup >= minDepositCUP) {
             updatedTargetCup += targetBonusCup;
             bonusMovedCup = targetBonusCup;
+            updatedTargetBonus = 0;
         }
-    } catch (e) {
-        // En caso de error al verificar depósitos aprobados, no mover el bono por seguridad
-        console.warn('Error verificando depósitos aprobados para migrar bono:', e?.message || e);
     }
 
     const targetUpdatePayload = {
         cup: updatedTargetCup,
         usd: updatedTargetUsd,
+        bonus_cup: updatedTargetBonus,
         updated_at: new Date()
     };
-    if (bonusMovedCup > 0) targetUpdatePayload.bonus_cup = 0;
 
     await supabase
         .from('users')
@@ -1373,6 +1383,10 @@ app.post('/api/transfer', async (req, res) => {
         }
         if (bonusMovedCup > 0) {
             message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+        }
+        else if (currency === 'CUP' && updatedTargetBonus > 0)
+        {
+            message += `🎁 Han sido añadidos ${updatedTargetBonus.toFixed(2)} CUP a tu bono de bienvenida actual.\n`;
         }
         message += `📊 Saldo actualizado.`;
 
