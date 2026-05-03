@@ -4290,8 +4290,8 @@ bot.on(message('text'), async (ctx) => {
                             if (hasMainBalance) {
                                 newCup += commissionCUP;
                             } else if (hasOnlyBonus) {
-                                const minTransferCUP = await getMinTransferCUP();
-                                if ((newBonus + commissionCUP) >= minTransferCUP) {
+                                const minDepositCUP = await getMinDepositCUP();
+                                if ((newBonus + commissionCUP) >= minDepositCUP) {
                                     newCup += newBonus + commissionCUP;
                                     bonusMovedCup = newBonus;
                                     newBonus = 0;

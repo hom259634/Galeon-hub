@@ -1613,8 +1613,8 @@ app.post('/api/bets', async (req, res) => {
                 if (hasMainBalance) {
                     newCup += newCommissionCUP;
                 } else if (hasOnlyBonus) {
-                    const minTransferCUP = await getMinTransferCUP();
-                    if ((newBonus + newCommissionCUP) >= minTransferCUP) {
+                    const minDepositCUP = await getMinDepositCUP();
+                    if ((newBonus + newCommissionCUP) >= minDepositCUP) {
                         newCup += newBonus + newCommissionCUP;
                         bonusMovedCup = newBonus;
                         newBonus = 0;
@@ -1829,8 +1829,8 @@ app.post('/api/bets', async (req, res) => {
                         newCup += commissionCUP;
                         destination = 'cup';
                     } else if (hasOnlyBonus) {
-                        const minTransferCUP = await getMinTransferCUP();
-                        if ((newBonus + commissionCUP) >= minTransferCUP) {
+                        const minDepositCUP = await getMinDepositCUP();
+                        if ((newBonus + commissionCUP) >= minDepositCUP) {
                             newCup += newBonus + commissionCUP;
                             bonusMovedCup = newBonus;
                             newBonus = 0;
