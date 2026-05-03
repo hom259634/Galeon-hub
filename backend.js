@@ -459,25 +459,25 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
         }
         
         // Migrar bono automáticamente si alcanza el mínimo de depósito en CUP
-        // try {
-        //     const cupAmt2 = parseFloat(user.cup) || 0;
-        //     const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
-        //     if (bonusAmt2 > 0) {
-        //         const minDepCUP = await getMinDepositCUP();
-        //         if (bonusAmt2 >= minDepCUP) {
-        //             const newCup2 = cupAmt2 + bonusAmt2;
-        //             await supabase.from('users').update({
-        //                 cup: newCup2,
-        //                 bonus_cup: 0,
-        //                 updated_at: new Date()
-        //             }).eq('telegram_id', telegramId);
-        //             user.cup = newCup2;
-        //             user.bonus_cup = 0;
-        //         }
-        //     }
-        // } catch (e) {
-        //     console.error('Error migrando bono por umbral mínimo:', e);
-        // }
+        try {
+            const cupAmt2 = parseFloat(user.cup) || 0;
+            const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
+            if (bonusAmt2 > 0) {
+                const minDepCUP = await getMinDepositCUP();
+                if (bonusAmt2 >= minDepCUP) {
+                    const newCup2 = cupAmt2 + bonusAmt2;
+                    await supabase.from('users').update({
+                        cup: newCup2,
+                        bonus_cup: 0,
+                        updated_at: new Date()
+                    }).eq('telegram_id', telegramId);
+                    user.cup = newCup2;
+                    user.bonus_cup = 0;
+                }
+            }
+        } catch (e) {
+            console.error('Error migrando bono por umbral mínimo:', e);
+        }
 
         if (user && typeof user === 'object') {
             user.__isNewUser = isNewUser;
@@ -1326,7 +1326,7 @@ app.post('/api/transfer', async (req, res) => {
         })
         .eq('telegram_id', from);
 
-    // Acreditar destino según si es nuevo o no
+    // ---------- ACREDITAR AL RECEPTOR (NUEVA LÓGICA CON MIGRACIÓN UNIVERSAL) ----------
     const { data: freshTarget } = await supabase
         .from('users')
         .select('*')
@@ -1336,44 +1336,28 @@ app.post('/api/transfer', async (req, res) => {
 
     let updatedTargetCup = parseFloat(freshTargetData.cup) || 0;
     let updatedTargetUsd = parseFloat(freshTargetData.usd) || 0;
-    // Lectura null-safe: bonus_cup puede ser null en BD si el usuario es antiguo
-    const rawBonus = freshTargetData.bonus_cup;
-    let updatedTargetBonus = (rawBonus !== null && rawBonus !== undefined && !isNaN(parseFloat(rawBonus)))
-        ? parseFloat(rawBonus)
-        : 0;
-    let bonusMovedCup = 0;
+    let updatedTargetBonus = (() => {
+        const raw = freshTargetData.bonus_cup;
+        return (raw !== null && raw !== undefined && !isNaN(parseFloat(raw))) ? parseFloat(raw) : 0;
+    })();
+    let bonusMovedCup = 0;  // solo para notificaciones
 
+    const rateUSD = await getExchangeRateUSD();
     const minDepositCUP = await getMinDepositCUP();
-
     const hasApprovedDep = await userHasApprovedDeposit(targetUserId);
     const hasMainBalance = (updatedTargetCup > 0) || (updatedTargetUsd > 0);
-    const isFirstTimeReceiver = !hasApprovedDep && !hasMainBalance;
 
-    if (isFirstTimeReceiver) {
+    // 1. Decidir dónde colocar el importe transferido (sólo para destinatarios sin saldo ni depósitos)
+    if (!hasApprovedDep && !hasMainBalance) {
+        // Usuario completamente nuevo: el importe va al bono
         if (currency === 'CUP') {
-            const existingBonus = updatedTargetBonus; // bono previo real (ya null-safe)
-            updatedTargetBonus += parsedAmount;       // acumula bono previo + transferencia
-            if (updatedTargetBonus >= minDepositCUP) {
-                updatedTargetCup += updatedTargetBonus; // mueve el total al saldo principal
-                bonusMovedCup = existingBonus;          // solo el bono previo (para notificacion)
-                updatedTargetBonus = 0;
-            }
+            updatedTargetBonus += parsedAmount;
         } else if (currency === 'USD') {
-            const rateUSD = await getExchangeRateUSD();
             const transferWorthCUP = parsedAmount * rateUSD;
-            const existingBonus = updatedTargetBonus;
-
-            if ((existingBonus + transferWorthCUP) >= minDepositCUP) {
-                updatedTargetUsd += parsedAmount;
-                updatedTargetCup += existingBonus;
-                bonusMovedCup = existingBonus;
-                updatedTargetBonus = 0;
-            } else {
-                updatedTargetBonus += transferWorthCUP;
-            }
+            updatedTargetBonus += transferWorthCUP;
         }
     } else {
-        // Usuario con historial recibe directamente en la moneda enviada
+        // Usuario con historial: se acredita directamente en la moneda enviada
         if (currency === 'CUP') {
             updatedTargetCup += parsedAmount;
         } else if (currency === 'USD') {
@@ -1381,15 +1365,32 @@ app.post('/api/transfer', async (req, res) => {
         }
     }
 
+    // 2. Migración universal del bono (independiente de lo anterior)
+    //    siempre que el total equivalente en CUP alcance el mínimo de depósito.
+    if (updatedTargetBonus > 0) {
+        const totalEquivalentCUP = updatedTargetCup
+            + (updatedTargetUsd * rateUSD)
+            + updatedTargetBonus;
+
+        if (totalEquivalentCUP >= minDepositCUP) {
+            updatedTargetCup += updatedTargetBonus;   // convertir bono a saldo real
+            bonusMovedCup = updatedTargetBonus;       // registro para notificación
+            updatedTargetBonus = 0;
+        }
+    }
+
+    // 3. Guardar los nuevos saldos del destinatario
     const targetUpdatePayload = {
         cup: updatedTargetCup,
         usd: updatedTargetUsd,
         bonus_cup: updatedTargetBonus,
         updated_at: new Date()
     };
-    await supabase.from('users').update(targetUpdatePayload).eq('telegram_id', targetUserId);
+    await supabase.from('users')
+        .update(targetUpdatePayload)
+        .eq('telegram_id', targetUserId);
 
-     // Notificar al receptor (formato original adaptado)
+    // Notificar al receptor (formato original adaptado)
     try {
         const fromName = (userFrom?.first_name || userFrom?.username) ? 
             (userFrom.first_name || userFrom.username) : String(from);
