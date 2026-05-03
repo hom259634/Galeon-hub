@@ -4057,38 +4057,40 @@ bot.on(message('text'), async (ctx) => {
         }
         updates.updated_at = new Date();
         await supabase.from('users').update(updates).eq('telegram_id', uid);
+
+        // 5. Acreditar al receptor con la nueva lógica unificada
         let updatedTargetCup = parseFloat(targetUser.cup) || 0;
         let updatedTargetUsd = parseFloat(targetUser.usd) || 0;
         let updatedTargetBonus = parseFloat(targetUser.bonus_cup) || 0;
         let bonusMovedCup = 0;
+        let amountInCup = 0;   // equivalencia en CUP del monto transferido
 
-        const minDepositCUP = await getMinDepositCUP(); // mínimo de depósito en CUP
+        const minDepositCUP = await getMinDepositCUP();
 
         if (currency === 'CUP') {
-            // El monto se suma al bono del receptor
-            updatedTargetBonus += amount;
+            amountInCup = amount;
+            updatedTargetBonus += amountInCup;
 
-            // Si el bono total alcanza el mínimo de depósito, se migra completo a saldo principal
             if (updatedTargetBonus >= minDepositCUP) {
                 updatedTargetCup += updatedTargetBonus;
                 bonusMovedCup = updatedTargetBonus;
                 updatedTargetBonus = 0;
             }
         } else if (currency === 'USD') {
-            // El monto en USD va directo al saldo USD
-            updatedTargetUsd += amount;
+            const rate = await getExchangeRateUSD();
+            amountInCup = amount * rate;
+            updatedTargetBonus += amountInCup;
 
-            // Verificar si el bono preexistente (sin la transferencia) ya alcanza el mínimo de depósito
-            if (targetBonusCup > 0 && targetBonusCup >= minDepositCUP) {
-                updatedTargetCup += targetBonusCup;
-                bonusMovedCup = targetBonusCup;
+            if (updatedTargetBonus >= minDepositCUP) {
+                updatedTargetCup += updatedTargetBonus;
+                bonusMovedCup = updatedTargetBonus;
                 updatedTargetBonus = 0;
             }
         }
 
-        let targetUpdate = {
+        const targetUpdate = {
             cup: updatedTargetCup,
-            usd: updatedTargetUsd,
+            usd: updatedTargetUsd,   // el USD nunca se acredita como USD, se convirtió a CUP
             bonus_cup: updatedTargetBonus,
             updated_at: new Date()
         };
@@ -4104,23 +4106,28 @@ bot.on(message('text'), async (ctx) => {
             `👤 A: ${receiverName}`,
             getMainKeyboard(ctx)
         );
+        // 6. Notificar al receptor
         try {
             let message = `🔄 <b>Has recibido una transferencia</b>\n\n` +
-                `👤 De: ${escapeHTML(ctx.from.first_name || ctx.from.username || String(uid))}\n` +
-                `💰 Monto: ${amount} ${currency}\n`;
+                `👤 De: ${escapeHTML(ctx.from.first_name || ctx.from.username || String(uid))}\n`;
+
             if (currency === 'USD') {
-                message += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+                message += `💰 Monto: ${amount} USD\n`;
+            } else {
+                message += `💰 Monto: ${amount} CUP\n`;
             }
+
             if (bonusMovedCup > 0) {
                 message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+            } else if (updatedTargetBonus > 0) {
+                message += `🎁 Han sido añadidos ${amountInCup.toFixed(2)} CUP a tu bono de bienvenida actual.\n`;
             }
-            else if (currency === 'CUP' && updatedTargetBonus > 0)
-            {
-                message += `🎁 Han sido añadidos ${updatedTargetBonus.toFixed(2)} a tu bono de bienvenida actual.\n`;
-            }
+
             message += `📊 Saldo actualizado.`;
             await bot.telegram.sendMessage(targetUserId, message, { parse_mode: 'HTML' });
-        } catch (e) {/* Silenciar error de notificación */}
+        } catch (e) {
+            // Silenciar error de notificación
+        }
         // 7. Limpiar sesión
         delete session.awaitingTransferAmount;
         delete session.transferTarget;

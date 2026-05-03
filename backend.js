@@ -1326,43 +1326,41 @@ app.post('/api/transfer', async (req, res) => {
         })
         .eq('telegram_id', from);
 
-    // Acreditar destino y migrar bono si existe (comportamiento igual al bot)
-    const targetCup = parseFloat(targetUser.cup) || 0;
-    const targetUsd = parseFloat(targetUser.usd) || 0;
-    const targetBonusCup = parseFloat(targetUser.bonus_cup) || 0;
-
-    let updatedTargetCup = targetCup;
-    let updatedTargetUsd = targetUsd;
-    let updatedTargetBonus = targetBonusCup;
+    // Acreditar destino y migrar bono si existe (ahora USD también va al bono)
+    let updatedTargetCup = parseFloat(targetUser.cup) || 0;
+    let updatedTargetUsd = parseFloat(targetUser.usd) || 0;
+    let updatedTargetBonus = parseFloat(targetUser.bonus_cup) || 0;
     let bonusMovedCup = 0;
+    let amountInCup = 0;
 
     const minDepositCUP = await getMinDepositCUP(); 
 
     if (currency === 'CUP') {
-        // Todo a CUP: el monto transferido se suma al bono
-        updatedTargetBonus += parsedAmount;
+        amountInCup = parsedAmount;
+        updatedTargetBonus += amountInCup;
 
-        // Si el bono total alcanza el mínimo de depósito, se migra completo a saldo principal
         if (updatedTargetBonus >= minDepositCUP) {
             updatedTargetCup += updatedTargetBonus;
             bonusMovedCup = updatedTargetBonus;
             updatedTargetBonus = 0;
         }
     } else if (currency === 'USD') {
-        // El monto en USD va directo al saldo USD
-        updatedTargetUsd += parsedAmount;
+        // Convertir USD a CUP y sumar al bono
+        const rateUSD = await getExchangeRateUSD();
+        amountInCup = parsedAmount * rateUSD;
+        updatedTargetBonus += amountInCup;
 
-        // Verificar si el bono preexistente (sin la transferencia) ya alcanza el mínimo de depósito
-        if (targetBonusCup > 0 && targetBonusCup >= minDepositCUP) {
-            updatedTargetCup += targetBonusCup;
-            bonusMovedCup = targetBonusCup;
+        if (updatedTargetBonus >= minDepositCUP) {
+            updatedTargetCup += updatedTargetBonus;
+            bonusMovedCup = updatedTargetBonus;
             updatedTargetBonus = 0;
         }
+        // El receptor NO recibe USD, todo se convierte a bono en CUP
     }
 
     const targetUpdatePayload = {
         cup: updatedTargetCup,
-        usd: updatedTargetUsd,
+        usd: updatedTargetUsd,   // no se modifica porque la transferencia fue a bono
         bonus_cup: updatedTargetBonus,
         updated_at: new Date()
     };
@@ -1376,20 +1374,23 @@ app.post('/api/transfer', async (req, res) => {
     try {
         const fromName = (userFrom && (userFrom.first_name || userFrom.username)) ? (userFrom.first_name || userFrom.username) : String(from);
         let message = `🔄 <b>Has recibido una transferencia</b>\n\n` +
-            `👤 De: ${escapeHTML(fromName)}\n` +
-            `💰 Monto: ${parsedAmount} ${currency}\n`;
+            `👤 De: ${escapeHTML(fromName)}\n`;
+
         if (currency === 'USD') {
-            message += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+            message += `💰 Monto: ${parsedAmount} USD\n`;
+        } else {
+            message += `💰 Monto: ${parsedAmount} CUP\n`;
         }
+
         if (bonusMovedCup > 0) {
             message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+        } else if (updatedTargetBonus > 0) {
+            message += `🎁 Han sido añadidos ${amountInCup.toFixed(2)} CUP a tu bono de bienvenida actual.\n`;
         }
-        else if (currency === 'CUP' && updatedTargetBonus > 0)
-        {
-            message += `🎁 Han sido añadidos ${updatedTargetBonus.toFixed(2)} CUP a tu bono de bienvenida actual.\n`;
-        }
+
         message += `📊 Saldo actualizado.`;
 
+        // Enviar mensaje (usando el bot o axios)
         if (bot && bot.telegram && typeof bot.telegram.sendMessage === 'function') {
             await bot.telegram.sendMessage(targetUserId, message, { parse_mode: 'HTML' });
         } else {
@@ -1405,7 +1406,7 @@ app.post('/api/transfer', async (req, res) => {
         console.warn('No se pudo enviar notificación de transferencia via bot:', e?.message || e);
     }
 
-    res.json({ success: true, bonusMovedCup: bonusMovedCup, creditedCupEquivalent: currency === 'CUP' || currency === 'USD' ? null : debitPlan.amountCUP });
+    res.json({ success: true, bonusMovedCup, creditedCup: amountInCup });
 });
 
 // --- Registro de apuestas ---
