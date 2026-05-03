@@ -459,25 +459,25 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
         }
         
         // Migrar bono automáticamente si alcanza el mínimo de depósito en CUP
-        try {
-            const cupAmt2 = parseFloat(user.cup) || 0;
-            const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
-            if (bonusAmt2 > 0) {
-                const minDepCUP = await getMinDepositCUP();
-                if (bonusAmt2 >= minDepCUP) {
-                    const newCup2 = cupAmt2 + bonusAmt2;
-                    await supabase.from('users').update({
-                        cup: newCup2,
-                        bonus_cup: 0,
-                        updated_at: new Date()
-                    }).eq('telegram_id', telegramId);
-                    user.cup = newCup2;
-                    user.bonus_cup = 0;
-                }
-            }
-        } catch (e) {
-            console.error('Error migrando bono por umbral mínimo:', e);
-        }
+        // try {
+        //     const cupAmt2 = parseFloat(user.cup) || 0;
+        //     const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
+        //     if (bonusAmt2 > 0) {
+        //         const minDepCUP = await getMinDepositCUP();
+        //         if (bonusAmt2 >= minDepCUP) {
+        //             const newCup2 = cupAmt2 + bonusAmt2;
+        //             await supabase.from('users').update({
+        //                 cup: newCup2,
+        //                 bonus_cup: 0,
+        //                 updated_at: new Date()
+        //             }).eq('telegram_id', telegramId);
+        //             user.cup = newCup2;
+        //             user.bonus_cup = 0;
+        //         }
+        //     }
+        // } catch (e) {
+        //     console.error('Error migrando bono por umbral mínimo:', e);
+        // }
 
         if (user && typeof user === 'object') {
             user.__isNewUser = isNewUser;
@@ -1423,7 +1423,7 @@ app.post('/api/transfer', async (req, res) => {
         console.warn('No se pudo enviar notificación de transferencia via bot:', e?.message || e);
     }
 
-    res.json({ success: true, bonusMovedCup, creditedCup: amountInCup });
+    res.json({ success: true, bonusMovedCup });
 });
 
 // --- Registro de apuestas ---

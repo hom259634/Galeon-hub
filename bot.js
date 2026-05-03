@@ -569,25 +569,25 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
             }
 
             // Migrar bono automáticamente si alcanza el mínimo de depósito en CUP
-            try {
-                const cupAmt2 = parseFloat(user.cup) || 0;
-                const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
-                if (bonusAmt2 > 0) {
-                    const minDepCUP = await getMinDepositCUP();
-                    if (bonusAmt2 >= minDepCUP) {
-                        const newCup2 = cupAmt2 + bonusAmt2;
-                        await supabase.from('users').update({
-                            cup: newCup2,
-                            bonus_cup: 0,
-                            updated_at: new Date()
-                        }).eq('telegram_id', telegramId);
-                        user.cup = newCup2;
-                        user.bonus_cup = 0;
-                    }
-                }
-            } catch (e) {
-                console.error('Error migrando bono por umbral mínimo (bot):', e);
-            }
+            // try {
+            //     const cupAmt2 = parseFloat(user.cup) || 0;
+            //     const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
+            //     if (bonusAmt2 > 0) {
+            //         const minDepCUP = await getMinDepositCUP();
+            //         if (bonusAmt2 >= minDepCUP) {
+            //             const newCup2 = cupAmt2 + bonusAmt2;
+            //             await supabase.from('users').update({
+            //                 cup: newCup2,
+            //                 bonus_cup: 0,
+            //                 updated_at: new Date()
+            //             }).eq('telegram_id', telegramId);
+            //             user.cup = newCup2;
+            //             user.bonus_cup = 0;
+            //         }
+            //     }
+            // } catch (e) {
+            //     console.error('Error migrando bono por umbral mínimo (bot):', e);
+            // }
             return user;
         }
 
@@ -4127,7 +4127,7 @@ bot.on(message('text'), async (ctx) => {
         // 6. Notificar al receptor
                // 6. Notificar al receptor (formato original adaptado)
         try {
-            const senderName = escapeHTML(ctx.from.first_name || ctx.from.username || String(uid));
+            // const senderName = escapeHTML(ctx.from.first_name || ctx.from.username || String(uid));
             let message = `🔄 <b>Has recibido una transferencia</b>\n\n` +
                 `👤 De: ${senderName}\n`;
 
