@@ -4058,10 +4058,22 @@ bot.on(message('text'), async (ctx) => {
         updates.updated_at = new Date();
         await supabase.from('users').update(updates).eq('telegram_id', uid);
 
-                // 5. Acreditar al receptor con la lógica definitiva
-        let updatedTargetCup = parseFloat(targetUser.cup) || 0;
-        let updatedTargetUsd = parseFloat(targetUser.usd) || 0;
-        let updatedTargetBonus = parseFloat(targetUser.bonus_cup) || 0;
+        // 5. Acreditar al receptor con la lógica definitiva
+
+        const { data: freshTarget } = await supabase
+            .from('users')
+            .select('*')
+            .eq('telegram_id', targetUserId)
+            .single();
+        const freshTargetData = freshTarget || targetUser;
+
+        let updatedTargetCup = parseFloat(freshTargetData.cup) || 0;
+        let updatedTargetUsd = parseFloat(freshTargetData.usd) || 0;
+        
+        const rawBonus = freshTargetData.bonus_cup;
+        let updatedTargetBonus = (rawBonus !== null && rawBonus !== undefined && !isNaN(parseFloat(rawBonus)))
+            ? parseFloat(rawBonus)
+            : 0;
         let bonusMovedCup = 0;
 
         const minDepositCUP = await getMinDepositCUP();
@@ -4074,19 +4086,17 @@ bot.on(message('text'), async (ctx) => {
         if (isFirstTimeReceiver) {
             // Usuario completamente nuevo
             if (currency === 'CUP') {
-                const amountInCup = amount;
-                const existingBonus = updatedTargetBonus || 0;   // bono previo (CUP)
-                updatedTargetBonus += amountInCup;         
+                const existingBonus = updatedTargetBonus; // bono previo real (ya null-safe)
+                updatedTargetBonus += amount;             // acumula bono previo + transferencia
                 if (updatedTargetBonus >= minDepositCUP) {
-                    updatedTargetCup += amountInCup + existingBonus;
-                    bonusMovedCup = existingBonus;               // solo el bono previo, sin la transferencia
+                    updatedTargetCup += updatedTargetBonus; // mueve el total al saldo principal
+                    bonusMovedCup = existingBonus;           // solo el bono previo (para notificacion)
                     updatedTargetBonus = 0;
                 }
             } else if (currency === 'USD') {
                 const rate = await getExchangeRateUSD();
                 const transferWorthCUP = amount * rate;
                 const existingBonus = updatedTargetBonus || 0;
-
                 if ((existingBonus + transferWorthCUP) >= minDepositCUP) {
                     // ¡Alcanza el umbral! USD se queda en USD, bono migra a CUP
                     updatedTargetUsd += amount;

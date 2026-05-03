@@ -1327,9 +1327,20 @@ app.post('/api/transfer', async (req, res) => {
         .eq('telegram_id', from);
 
     // Acreditar destino según si es nuevo o no
-    let updatedTargetCup = parseFloat(targetUser.cup) || 0;
-    let updatedTargetUsd = parseFloat(targetUser.usd) || 0;
-    let updatedTargetBonus = parseFloat(targetUser.bonus_cup) || 0;
+    const { data: freshTarget } = await supabase
+        .from('users')
+        .select('*')
+        .eq('telegram_id', targetUserId)
+        .single();
+    const freshTargetData = freshTarget || targetUser;
+
+    let updatedTargetCup = parseFloat(freshTargetData.cup) || 0;
+    let updatedTargetUsd = parseFloat(freshTargetData.usd) || 0;
+    // Lectura null-safe: bonus_cup puede ser null en BD si el usuario es antiguo
+    const rawBonus = freshTargetData.bonus_cup;
+    let updatedTargetBonus = (rawBonus !== null && rawBonus !== undefined && !isNaN(parseFloat(rawBonus)))
+        ? parseFloat(rawBonus)
+        : 0;
     let bonusMovedCup = 0;
 
     const minDepositCUP = await getMinDepositCUP();
@@ -1340,18 +1351,17 @@ app.post('/api/transfer', async (req, res) => {
 
     if (isFirstTimeReceiver) {
         if (currency === 'CUP') {
-            const amountInCup = parsedAmount;
-            const existingBonus = updatedTargetBonus || 0;
-            updatedTargetBonus += amountInCup;
+            const existingBonus = updatedTargetBonus; // bono previo real (ya null-safe)
+            updatedTargetBonus += parsedAmount;       // acumula bono previo + transferencia
             if (updatedTargetBonus >= minDepositCUP) {
-                updatedTargetCup += amountInCup + existingBonus;
-                bonusMovedCup = existingBonus;               // solo el bono previo
+                updatedTargetCup += updatedTargetBonus; // mueve el total al saldo principal
+                bonusMovedCup = existingBonus;          // solo el bono previo (para notificacion)
                 updatedTargetBonus = 0;
             }
         } else if (currency === 'USD') {
             const rateUSD = await getExchangeRateUSD();
             const transferWorthCUP = parsedAmount * rateUSD;
-            const existingBonus = updatedTargetBonus || 0;
+            const existingBonus = updatedTargetBonus;
 
             if ((existingBonus + transferWorthCUP) >= minDepositCUP) {
                 updatedTargetUsd += parsedAmount;
