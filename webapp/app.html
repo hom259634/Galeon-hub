@@ -2636,23 +2636,125 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const res = await fetch('/api/deposit-methods');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const methods = await res.json();
+
+                // Obtener mínimos globales para mostrarlos
+                let globalMinUSD = 0, globalMinCUP = 0;
+                try {
+                    const configRes = await fetch('/api/config/min-deposit');
+                    if (configRes.ok) {
+                        const cfg = await configRes.json();
+                        globalMinUSD = cfg.usd || 0;
+                        globalMinCUP = cfg.cup || 0;
+                    }
+                } catch (e) {}
+
                 let html = `<h4 class="text-xl font-semibold mb-4">✏️ Editar método de DEPÓSITO</h4>`;
+
+                // Bloque de mínimos globales
+                html += `
+                    <div class="bg-gray-800/40 p-3 rounded-xl mb-4 border border-gray-600">
+                        <p class="text-sm font-bold mb-2">🌐 Mínimos globales de depósito</p>
+                        <p class="text-xs mb-1">💵 USD: <span class="text-cyan-300 font-mono">${globalMinUSD.toFixed(2)}</span></p>
+                        <p class="text-xs mb-2">🇨🇺 CUP: <span class="text-cyan-300 font-mono">${globalMinCUP.toFixed(2)}</span></p>
+                        <button onclick="openEditGlobalMinDeposit()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm transition">
+                            <i class="fas fa-edit mr-1"></i> Editar globales
+                        </button>
+                    </div>
+                `;
+
                 if (methods.length === 0) {
                     html += `<p class="text-gray-400">No hay métodos.</p>`;
                 } else {
                     methods.forEach(m => {
                         html += `<div class="bg-gray-800/70 p-3 rounded-xl mb-2 flex justify-between items-center">
-                            <div><span class="font-bold">${escapeHTML(m.name)}</span><br><small>${escapeHTML(m.card)} / ${escapeHTML(m.confirm)} (${m.currency}) Mín: ${m.min_amount !== null ? m.min_amount : '-'} Máx: ${m.max_amount !== null ? m.max_amount : '-'}</small></div>
-                            <button onclick="openEditDepositModal(${m.id})" class="method-edit-btn"><i class="fas fa-edit"></i> Editar</button>
+                            <div>
+                                <span class="font-bold">${escapeHTML(m.name)}</span><br>
+                                <small>${escapeHTML(m.card)} / ${escapeHTML(m.confirm)} (${m.currency}) 
+                                Mín: ${m.min_amount !== null ? m.min_amount : '-'} 
+                                Máx: ${m.max_amount !== null ? m.max_amount : '-'}</small>
+                            </div>
+                            <button onclick="openEditDepositModal(${m.id})" class="method-edit-btn">
+                                <i class="fas fa-edit"></i> Editar
+                            </button>
                         </div>`;
                     });
                 }
+
                 adminViewContainer.innerHTML = html;
-            } catch (e) { 
+            } catch (e) {
                 console.error(e);
                 adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar métodos. Verifique la conexión con el backend.</p>';
             }
         }
+
+        window.openEditGlobalMinDeposit = async () => {
+            try {
+                const res = await fetch('/api/config/min-deposit');
+                if (!res.ok) throw new Error('No se pudieron cargar los mínimos');
+                const { usd, cup } = await res.json();
+
+                modalBody.innerHTML = `
+                    <h4 class="text-xl font-bold mb-4">Configurar mínimos globales de depósito</h4>
+                    <p class="text-sm text-gray-300 mb-4">
+                        Estos valores determinan cuándo se migra el bono de bienvenida al saldo principal.<br>
+                        Se recomienda mantenerlos alineados con los métodos de pago.
+                    </p>
+                    <div class="mb-3">
+                        <label class="block text-sm mb-1">Mínimo en USD</label>
+                        <input type="number" id="globalMinUSD" value="${usd || ''}" step="0.01" min="0.01" 
+                            class="w-full p-2 rounded bg-gray-700 text-white border border-blue-500">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm mb-1">Mínimo en CUP</label>
+                        <input type="number" id="globalMinCUP" value="${cup || ''}" step="0.01" min="0.01" 
+                            class="w-full p-2 rounded bg-gray-700 text-white border border-blue-500">
+                    </div>
+                    <button onclick="saveGlobalMinDeposit()" class="w-full bg-green-600 py-2 rounded-lg mb-2 hover:bg-green-700">
+                        Guardar
+                    </button>
+                    <button onclick="document.getElementById('adminModal').classList.add('hidden')" 
+                            class="w-full bg-gray-600 py-2 rounded-lg hover:bg-gray-700">
+                        Cancelar
+                    </button>
+                `;
+                adminModal.classList.remove('hidden');
+            } catch (e) {
+                iziToast.error({ message: 'Error al cargar los mínimos actuales.' });
+            }
+        };
+
+        window.saveGlobalMinDeposit = async () => {
+            const usdEl = document.getElementById('globalMinUSD');
+            const cupEl = document.getElementById('globalMinCUP');
+            if (!usdEl || !cupEl) return;
+
+            const usd = parseFloat(usdEl.value);
+            const cup = parseFloat(cupEl.value);
+
+            if (isNaN(usd) || usd <= 0 || isNaN(cup) || cup <= 0) {
+                iziToast.warning({ message: 'Ambos valores deben ser números positivos.' });
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/admin/min-deposit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usd, cup, userId: currentUser.telegram_id })
+                });
+                if (res.ok) {
+                    iziToast.success({ message: 'Mínimos globales actualizados correctamente.' });
+                    adminModal.classList.add('hidden');
+                    // Refrescar la vista de editar depósitos para reflejar los cambios
+                    renderEditDepositView();
+                } else {
+                    const err = await res.json();
+                    iziToast.error({ message: err.error || 'Error al guardar.' });
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión.' });
+            }
+        };
 
         window.openEditDepositModal = async (methodId) => {
             try {
