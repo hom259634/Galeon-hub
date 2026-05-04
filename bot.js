@@ -718,7 +718,7 @@ async function getMinDepositUSD() {
         .select('value')
         .eq('key', 'min_deposit_usd')
         .single();
-    return data ? parseFloat(data.value) : 1.0;
+    return data ? parseFloat(data.value) : 0;
 }
 
 async function getMinDepositCUP() {
@@ -4142,7 +4142,6 @@ bot.on(message('text'), async (ctx) => {
             getMainKeyboard(ctx)
         );
         // 6. Notificar al receptor
-               // 6. Notificar al receptor (formato original adaptado)
         try {
             // const senderName = escapeHTML(ctx.from.first_name || ctx.from.username || String(uid));
             let message = `🔄 <b>Has recibido una transferencia</b>\n\n` +
@@ -4150,7 +4149,7 @@ bot.on(message('text'), async (ctx) => {
 
             // Mostrar el monto y moneda como en el formato original
             if (currency === 'USD') {
-                message += `💰 Monto: ${amount} USD\n`;
+                message += `💰 Monto: ${amount} USD\n ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
             } else {
                 message += `💰 Monto: ${amount} CUP\n`;
             }

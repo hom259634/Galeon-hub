@@ -616,9 +616,24 @@ async function setTransferMins(minCup, minUsd) {
 }
 
 async function getMinDepositCUP() {
-    const minUSD = await getMinDepositUSD(); // esta función ya existe
-    const rate = await getExchangeRateUSD();
-    return minUSD * rate;
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'min_deposit_cup')
+        .single();
+    // fallback: si no existe, calcular a partir del mínimo en USD
+    if (!data) {
+        const minUSD = await getMinDepositUSD();
+        const rate = await getExchangeRateUSD();
+        return minUSD * rate;
+    }
+    return parseFloat(data.value);
+}
+
+async function setMinDepositCUP(value) {
+    await supabase
+        .from('app_config')
+        .upsert({ key: 'min_deposit_cup', value: value.toString() }, { onConflict: 'key' });
 }
 
 async function getMinDepositUSD() {
@@ -627,7 +642,7 @@ async function getMinDepositUSD() {
         .select('value')
         .eq('key', 'min_deposit_usd')
         .single();
-    return data ? parseFloat(data.value) : 1.0;
+    return data ? parseFloat(data.value) : 0;
 }
 
 async function getMinWithdrawUSD() {
@@ -971,8 +986,9 @@ app.get('/api/exchange-rates', async (req, res) => {
 
 // --- Mínimo depósito ---
 app.get('/api/config/min-deposit', async (req, res) => {
-    const value = await getMinDepositUSD();
-    res.json({ value });
+    const usd = await getMinDepositUSD();
+    const cup = await getMinDepositCUP();
+    res.json({ usd, cup });
 });
 
 // --- Mínimo retiro ---
@@ -2519,9 +2535,13 @@ app.get('/api/admin/min-deposit', requireAdmin, async (req, res) => {
 });
 
 app.post('/api/admin/min-deposit', requireAdmin, async (req, res) => {
-    const { value } = req.body;
-    if (!value || value <= 0) return res.status(400).json({ error: 'Valor inválido' });
-    await setMinDepositUSD(value);
+    const { usd, cup } = req.body;
+    if (usd !== undefined && !isNaN(parseFloat(usd)) && parseFloat(usd) > 0) {
+        await setMinDepositUSD(parseFloat(usd));
+    }
+    if (cup !== undefined && !isNaN(parseFloat(cup)) && parseFloat(cup) > 0) {
+        await setMinDepositCUP(parseFloat(cup));
+    }
     res.json({ success: true });
 });
 
