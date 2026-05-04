@@ -1326,64 +1326,82 @@ app.post('/api/transfer', async (req, res) => {
         })
         .eq('telegram_id', from);
 
-    // ---------- ACREDITAR AL RECEPTOR (NUEVA LÓGICA CON MIGRACIÓN UNIVERSAL) ----------
+    // ---------- ACREDITAR AL RECEPTOR (LÓGICA ROBUSTA) ----------
     const { data: freshTarget } = await supabase
         .from('users')
         .select('*')
         .eq('telegram_id', targetUserId)
         .single();
-    const freshTargetData = freshTarget || targetUser;
+    const targetBefore = freshTarget || targetUser;
 
-    let updatedTargetCup = parseFloat(freshTargetData.cup) || 0;
-    let updatedTargetUsd = parseFloat(freshTargetData.usd) || 0;
-    let updatedTargetBonus = (() => {
-        const raw = freshTargetData.bonus_cup;
+    // Valores reales de la BD antes de cualquier cambio
+    const targetCupBefore = parseFloat(targetBefore.cup) || 0;
+    const targetUsdBefore = parseFloat(targetBefore.usd) || 0;
+    let targetBonus = (() => {
+        const raw = targetBefore.bonus_cup;
         return (raw !== null && raw !== undefined && !isNaN(parseFloat(raw))) ? parseFloat(raw) : 0;
     })();
-    let bonusMovedCup = 0;  // solo para notificaciones
+
+    const hasMainBalanceBefore = (targetCupBefore > 0) || (targetUsdBefore > 0);
+    const hasApprovedDep = await userHasApprovedDeposit(targetUserId);
+    const isCompletelyNew = !hasApprovedDep && !hasMainBalanceBefore;
 
     const rateUSD = await getExchangeRateUSD();
     const minDepositCUP = await getMinDepositCUP();
-    const hasApprovedDep = await userHasApprovedDeposit(targetUserId);
-    const hasMainBalance = (updatedTargetCup > 0) || (updatedTargetUsd > 0);
 
-    // 1. Decidir dónde colocar el importe transferido (sólo para destinatarios sin saldo ni depósitos)
-    if (!hasApprovedDep && !hasMainBalance) {
-        // Usuario completamente nuevo: el importe va al bono
+    let finalCup = targetCupBefore;
+    let finalUsd = targetUsdBefore;
+    let finalBonus = targetBonus;
+    let bonusMovedCup = 0; // Para notificación
+
+    // Paso 1: Ubicar el monto transferido
+    if (isCompletelyNew) {
+        // El importe va al bono, convertido a CUP
         if (currency === 'CUP') {
-            updatedTargetBonus += parsedAmount;
+            finalBonus += parsedAmount;
         } else if (currency === 'USD') {
-            const transferWorthCUP = parsedAmount * rateUSD;
-            updatedTargetBonus += transferWorthCUP;
+            finalBonus += parsedAmount * rateUSD;
         }
     } else {
-        // Usuario con historial: se acredita directamente en la moneda enviada
+        // Ya tiene saldo → acreditar en la moneda enviada
         if (currency === 'CUP') {
-            updatedTargetCup += parsedAmount;
+            finalCup += parsedAmount;
         } else if (currency === 'USD') {
-            updatedTargetUsd += parsedAmount;
+            finalUsd += parsedAmount;
         }
     }
 
-    // 2. Migración universal del bono (independiente de lo anterior)
-    //    siempre que el total equivalente en CUP alcance el mínimo de depósito.
-    if (updatedTargetBonus > 0) {
-        const totalEquivalentCUP = updatedTargetCup
-            + (updatedTargetUsd * rateUSD)
-            + updatedTargetBonus;
+    // Paso 2: Migración del bono (si el total en CUP alcanza el mínimo)
+    if (finalBonus > 0) {
+        const totalEquivalentCUP = finalCup
+            + (finalUsd * rateUSD)
+            + finalBonus;
 
         if (totalEquivalentCUP >= minDepositCUP) {
-            updatedTargetCup += updatedTargetBonus;   // convertir bono a saldo real
-            bonusMovedCup = updatedTargetBonus;       // registro para notificación
-            updatedTargetBonus = 0;
+            // Determinar cuánto bono proviene de esta transferencia (si la hubo)
+            if (isCompletelyNew && currency === 'USD') {
+                // Transferencia en USD a un nuevo: revertir la conversión a CUP
+                // y dejar la transferencia en USD, el resto del bono (si había) pasa a CUP
+                const transferWorthCUP = parsedAmount * rateUSD;
+                const originalBonus = finalBonus - transferWorthCUP; // bono anterior
+                finalUsd += parsedAmount;            // la transferencia en USD
+                finalCup += originalBonus;           // bono anterior → CUP
+                bonusMovedCup = originalBonus;       // notificación
+                finalBonus = 0;
+            } else {
+                // Caso general: todo el bono pasa a CUP
+                finalCup += finalBonus;
+                bonusMovedCup = finalBonus;
+                finalBonus = 0;
+            }
         }
     }
 
-    // 3. Guardar los nuevos saldos del destinatario
+    // Guardar en BD
     const targetUpdatePayload = {
-        cup: updatedTargetCup,
-        usd: updatedTargetUsd,
-        bonus_cup: updatedTargetBonus,
+        cup: finalCup,
+        usd: finalUsd,
+        bonus_cup: finalBonus,
         updated_at: new Date()
     };
     await supabase.from('users')
@@ -1403,16 +1421,15 @@ app.post('/api/transfer', async (req, res) => {
             message += `💰 Monto: ${parsedAmount} CUP\n`;
         }
 
-        if (isFirstTimeReceiver) {
+        if (isCompletelyNew) {
             if (bonusMovedCup > 0) {
                 message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
-            } else if (updatedTargetBonus > 0) {
+            } else if (finalBonus > 0) {
                 if (currency === 'USD') {
-                    const rateUSD = await getExchangeRateUSD();
                     const addedCUP = (parsedAmount * rateUSD).toFixed(2);
                     message += `🎁 Han sido añadidos ${addedCUP} CUP a tu bono de bienvenida actual.\n`;
                 } else {
-                    message += `🎁 Han sido añadidos ${parsedAmount} CUP a tu bono de bienvenida actual.\n`;
+                    message += `🎁 Han sido añadidos ${parsedAmount.toFixed(2)} CUP a tu bono de bienvenida actual.\n`;
                 }
             }
         }

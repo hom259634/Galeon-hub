@@ -3979,7 +3979,7 @@ bot.on(message('text'), async (ctx) => {
             session.awaitingTransferAmount = true;
             delete session.awaitingTransferTarget;
             await safeEdit(ctx,
-                `📥 <b>Por favor, envía el monto que deseas transferir</b> (ej: <code>500 cup</code> o <code>10 usd</code>).` + minLine,
+                `📥 <b>Por favor, envía el monto que deseas transferir</b> (ej: <code>500 cup</code> o <code>10 usd</code>).`,
                 null
             );
             return;
@@ -4058,62 +4058,74 @@ bot.on(message('text'), async (ctx) => {
         updates.updated_at = new Date();
         await supabase.from('users').update(updates).eq('telegram_id', uid);
 
-        // 5. Acreditar al receptor con la lógica definitiva
-
-        // 5. Acreditar al receptor (LÓGICA REFORZADA)
+        // 5. Acreditar al receptor (LÓGICA CORREGIDA)
         const { data: freshTarget } = await supabase
             .from('users')
             .select('*')
             .eq('telegram_id', targetUserId)
             .single();
-        const freshTargetData = freshTarget || targetUser;
+        const targetBefore = freshTarget || targetUser;
 
-        let updatedTargetCup = parseFloat(freshTargetData.cup) || 0;
-        let updatedTargetUsd = parseFloat(freshTargetData.usd) || 0;
-        let updatedTargetBonus = (() => {
-            const raw = freshTargetData.bonus_cup;
+        const targetCupBefore = parseFloat(targetBefore.cup) || 0;
+        const targetUsdBefore = parseFloat(targetBefore.usd) || 0;
+        let targetBonus = (() => {
+            const raw = targetBefore.bonus_cup;
             return (raw !== null && raw !== undefined && !isNaN(parseFloat(raw))) ? parseFloat(raw) : 0;
         })();
-        let bonusMovedCup = 0;
+
+        const hasMainBalanceBefore = (targetCupBefore > 0) || (targetUsdBefore > 0);
+        const hasApprovedDep = await userHasApprovedDeposit(targetUserId);
+        const isCompletelyNew = !hasApprovedDep && !hasMainBalanceBefore;
 
         const rateUSD = await getExchangeRateUSD();
         const minDepositCUP = await getMinDepositCUP();
-        const hasApprovedDep = await userHasApprovedDeposit(targetUser.telegram_id);
-        const hasMainBalance = (updatedTargetCup > 0) || (updatedTargetUsd > 0);
 
-        // Colocación del importe transferido
-        if (!hasApprovedDep && !hasMainBalance) {
+        let finalCup = targetCupBefore;
+        let finalUsd = targetUsdBefore;
+        let finalBonus = targetBonus;
+        let bonusMovedCup = 0;
+
+        // Colocación del importe
+        if (isCompletelyNew) {
             if (currency === 'CUP') {
-                updatedTargetBonus += amount;
+                finalBonus += amount;
             } else if (currency === 'USD') {
-                const transferWorthCUP = amount * rateUSD;
-                updatedTargetBonus += transferWorthCUP;
+                finalBonus += amount * rateUSD;
             }
         } else {
             if (currency === 'CUP') {
-                updatedTargetCup += amount;
+                finalCup += amount;
             } else if (currency === 'USD') {
-                updatedTargetUsd += amount;
+                finalUsd += amount;
             }
         }
 
-        // Migración universal
-        if (updatedTargetBonus > 0) {
-            const totalEquivalentCUP = updatedTargetCup
-                + (updatedTargetUsd * rateUSD)
-                + updatedTargetBonus;
+        // Migración
+        if (finalBonus > 0) {
+            const totalEquivalentCUP = finalCup
+                + (finalUsd * rateUSD)
+                + finalBonus;
             if (totalEquivalentCUP >= minDepositCUP) {
-                updatedTargetCup += updatedTargetBonus;
-                bonusMovedCup = updatedTargetBonus;
-                updatedTargetBonus = 0;
+                if (isCompletelyNew && currency === 'USD') {
+                    const transferWorthCUP = amount * rateUSD;
+                    const originalBonus = finalBonus - transferWorthCUP;
+                    finalUsd += amount;
+                    finalCup += originalBonus;
+                    bonusMovedCup = originalBonus;
+                    finalBonus = 0;
+                } else {
+                    finalCup += finalBonus;
+                    bonusMovedCup = finalBonus;
+                    finalBonus = 0;
+                }
             }
         }
 
         // Guardar en BD
         const targetUpdate = {
-            cup: updatedTargetCup,
-            usd: updatedTargetUsd,
-            bonus_cup: updatedTargetBonus,
+            cup: finalCup,
+            usd: finalUsd,
+            bonus_cup: finalBonus,
             updated_at: new Date()
         };
         await supabase.from('users').update(targetUpdate).eq('telegram_id', targetUserId);
@@ -4144,18 +4156,17 @@ bot.on(message('text'), async (ctx) => {
             }
 
             // Lógica de bono migrado o acumulado (solo para isFirstTimeReceiver)
-            if (isFirstTimeReceiver) {
+            if (isCompletelyNew) {
                 if (bonusMovedCup > 0) {
                     // El bono completo se migró a CUP
                     message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
-                } else if (updatedTargetBonus > 0) {
+                } else if (finalBonus > 0) {
                     // No migró, se acumuló en el bono
                     if (currency === 'USD') {
-                        const rate = await getExchangeRateUSD();
-                        const addedCUP = (amount * rate).toFixed(2);
+                        const addedCUP = (amount * rateUSD).toFixed(2);
                         message += `🎁 Han sido añadidos ${addedCUP} CUP a tu bono de bienvenida actual.\n`;
                     } else {
-                        message += `🎁 Han sido añadidos ${amount} CUP a tu bono de bienvenida actual.\n`;
+                        message += `🎁 Han sido añadidos  ${amount.toFixed(2)} CUP a tu bono de bienvenida actual.\n`;
                     }
                 }
             } else {
