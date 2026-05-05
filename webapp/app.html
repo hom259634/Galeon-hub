@@ -1942,7 +1942,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             if (!method) return;
 
             if (method.currency !== parsed.currency) {
-                iziToast.warning({ message: `Este método es en ${method.currency}, no coincide con el monto.` });
+                iziToast.warning({ message: `❌ La moneda del monto solicitado no coincide con la del método. Por favor, envía el monto en ${method.currency}.`});
                 return;
             }
 
