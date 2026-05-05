@@ -3932,8 +3932,9 @@ bot.on(message('text'), async (ctx) => {
             session.awaitingTransferAmount = true;
             delete session.awaitingTransferTarget;
 
+            const example = session.transferCurrency === 'USD' ? '10 usd' : '500 cup';
             await safeEdit(ctx,
-                `📥 <b>Por favor, envía el monto que deseas transferir</b> (ej: <code>500 cup</code> o <code>10 usd</code>).`,
+                `📥 <b>Por favor, envía el monto que deseas transferir</b> (ej: <code>${example}</code>).`,
                 null
             );
             return;
@@ -3950,8 +3951,6 @@ bot.on(message('text'), async (ctx) => {
 
     // --- Flujo: transferencia - monto ---
     if (session.awaitingTransferAmount) {
-        const amount = parsed.amount;
-        const currency = parsed.currency;
         const parsed = parseAmountWithCurrency(text);
 
         if (!parsed) {
@@ -3961,13 +3960,16 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-    if (currency !== session.transferCurrency) {
-        await ctx.reply(
-            `❌ La moneda del monto solicitado no coincide con la del método. Por favor, envía el monto en ${session.transferCurrency}.`,
-            getMainKeyboard(ctx)
-        );
-        return; // Se mantiene el flujo, el usuario puede reintentar
-    }
+        const amount = parsed.amount;
+        const currency = parsed.currency;
+
+        if (currency !== session.transferCurrency) {
+            await ctx.reply(
+                `❌ La moneda del monto solicitado no coincide con la del método. Por favor, envía el monto en ${session.transferCurrency}.`,
+                getMainKeyboard(ctx)
+            );
+            return; // Se mantiene el flujo, el usuario puede reintentar
+        }
         
         // Obtener mínimo de transferencia (configuración admin o fallback)
         const transferMin = await getTransferMin(currency);

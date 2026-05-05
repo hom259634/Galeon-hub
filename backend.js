@@ -1431,7 +1431,7 @@ app.post('/api/transfer', async (req, res) => {
             `👤 De: ${escapeHTML(fromName)}\n`;
 
         if (currency === 'USD') {
-            message += `💰 Monto: ${parsedAmount} USD\n`;
+            message += `💰 Monto: ${parsedAmount} USD\n` + `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
         } else {
             message += `💰 Monto: ${parsedAmount} CUP\n`;
         }
@@ -1625,6 +1625,19 @@ app.post('/api/bets', async (req, res) => {
         let finalBonus = beforeBonus + oldBonusUsed;
         let finalUsd = beforeUsd + oldCostUsd;
 
+        // ---------- VALIDACIÓN DE SALDO SUFICIENTE (NUEVA) ----------
+        if (totalCUP > 0) {
+            const availableCup = finalCup + finalBonus;
+            if (availableCup < totalCUP) {
+                return res.status(400).json({ error: '❌Saldo CUP insuficiente. Por favor, recarga.' });
+            }
+        }
+        if (totalUSD > 0) {
+            if (finalUsd < totalUSD) {
+                return res.status(400).json({ error: '❌Saldo USD insuficiente. Por favor, recarga.' });
+            }
+        }
+
         // ---------- CALCULAR NUEVA COMISIÓN (SOLO CUP) ----------
         let newCommissionData = null;
         const { data: userWithRef } = await supabase
@@ -1704,11 +1717,13 @@ app.post('/api/bets', async (req, res) => {
                     bonusMovedCup: bonusMovedCup
                 };
 
+                const bettorName = user.first_name || user.username || `ID ${userId}`;
+
                 // --- Notificación ÚNICA al referidor ---
                 if (bonusMovedCup > 0) {
                     // Con migración de bono
                     const bonusMovedStr = bonusMovedCup.toFixed(2);
-                    const notifyMsg = `ℹ️ Tu referido ha editado el monto de una apuesta. Tu saldo actual ha cambiado. Por favor, consulta.\n🎁 Tu bono de bienvenida de ${bonusMovedStr} CUP se ha movido a tu saldo principal.\n📊 Saldo actualizado.`;
+                    const notifyMsg = `ℹ️ Tu referido <b>${escapeHTML(bettorName)}</b> ha editado el monto de una apuesta. Tu saldo actual ha cambiado. Por favor, consulta.\n🎁 Tu bono de bienvenida de ${bonusMovedStr} CUP se ha movido a tu saldo principal.\n📊 Saldo actualizado.`;
                     try {
                         if (bot && bot.telegram) {
                             await bot.telegram.sendMessage(newReferrerId, notifyMsg, { parse_mode: 'HTML' });
@@ -1723,7 +1738,7 @@ app.post('/api/bets', async (req, res) => {
                 } else {
                     // Sin migración, solo aviso genérico
                     try {
-                        const genericMsg = `ℹ️ Tu referido ha editado el monto de una apuesta. Tu saldo actual ha cambiado. Por favor, consulta.`;
+                        const genericMsg = `ℹ️ Tu referido <b>${escapeHTML(bettorName)}</b> ha editado el monto de una apuesta. Tu saldo actual ha cambiado. Por favor, consulta.`;
                         if (bot && bot.telegram) {
                             await bot.telegram.sendMessage(newReferrerId, genericMsg, { parse_mode: 'HTML' });
                         } else {
@@ -2051,10 +2066,16 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
 
             // Notificar al referidor (mantener lógica existente o usar la simplificada)
             try {
+                const bettorName = user.first_name || user.username || `ID ${userId}`;
                 const userName = user.first_name || user.username || `ID ${userId}`;
+
+                const referralRate = await getReferralCommissionRate();
+                const percent = referralRate * 100;
+                // Formateo limpio: sin decimales si es entero, o hasta 2 decimales
+                const percentStr = (percent % 1 === 0 ? percent.toFixed(0) : percent.toFixed(2)) + '%';
                 await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     chat_id: referrerId,
-                    text: `⚠️ Tu referido ha removido una apuesta. Ha sido restado de tu saldo actual el 5 % del monto retirado en la apuesta removida.`,
+                    text: `⚠️ Tu referido <b>${escapeHTML(bettorName)}</b> ha removido una apuesta. Ha sido restado de tu saldo actual el ${percentStr} del monto retirado en la apuesta removida.`,
                     parse_mode: 'HTML'
                 });
             } catch (e) {}
@@ -3138,7 +3159,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
             `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
 
         if (request.currency === 'USD') {
-            text += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+            text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
         }
 
         if (bonusMovedCup > 0) {
