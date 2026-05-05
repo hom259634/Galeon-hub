@@ -617,32 +617,45 @@ async function setTransferMins(minCup, minUsd) {
 
 async function getMinDepositCUP() {
     const { data } = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', 'min_deposit_cup')
-        .single();
-    // fallback: si no existe, calcular a partir del mínimo en USD
-    if (!data) {
-        const minUSD = await getMinDepositUSD();
-        const rate = await getExchangeRateUSD();
-        return minUSD * rate;
+        .from('deposit_methods')
+        .select('min_amount')
+        .eq('currency', 'CUP')
+        .not('min_amount', 'is', null)
+        .order('min_amount', { ascending: true })
+        .limit(1);
+    if (data && data.length > 0 && data[0].min_amount !== null) {
+        return parseFloat(data[0].min_amount);
     }
-    return parseFloat(data.value);
-}
-
-async function setMinDepositCUP(value) {
-    await supabase
-        .from('app_config')
-        .upsert({ key: 'min_deposit_cup', value: value.toString() }, { onConflict: 'key' });
+    return 0;
 }
 
 async function getMinDepositUSD() {
+    // Buscar primero el método específico "Tarjeta Clásica" (moneda USD)
+    const { data: preferred } = await supabase
+        .from('deposit_methods')
+        .select('min_amount')
+        .eq('currency', 'USD')
+        .eq('name', 'Tarjeta Clásica')
+        .maybeSingle();
+
+    if (preferred && preferred.min_amount !== null) {
+        return parseFloat(preferred.min_amount);
+    }
+
+    // Si no existe, usar el menor mínimo entre todos los métodos USD
     const { data } = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', 'min_deposit_usd')
-        .single();
-    return data ? parseFloat(data.value) : 0;
+        .from('deposit_methods')
+        .select('min_amount')
+        .eq('currency', 'USD')
+        .not('min_amount', 'is', null)
+        .order('min_amount', { ascending: true })
+        .limit(1);
+
+    if (data && data.length > 0 && data[0].min_amount !== null) {
+        return parseFloat(data[0].min_amount);
+    }
+
+    return 0;
 }
 
 async function getMinWithdrawUSD() {
@@ -652,12 +665,6 @@ async function getMinWithdrawUSD() {
         .eq('key', 'min_withdraw_usd')
         .single();
     return data ? parseFloat(data.value) : 1.0;
-}
-
-async function setMinDepositUSD(value) {
-    await supabase
-        .from('app_config')
-        .upsert({ key: 'min_deposit_usd', value: value.toString() }, { onConflict: 'key' });
 }
 
 async function setMinWithdrawUSD(value) {
@@ -1262,23 +1269,10 @@ app.post('/api/transfer', async (req, res) => {
         minByCurrency = await getTransferMinUSD();
     }
 
-    // Si no está configurado, usar el fallback del método de depósito
+    // Si no está configurado un mínimo de transferencia explícito, usar el mínimo global de depósito
     if (minByCurrency === null) {
-        try {
-            const { data: allMethods } = await supabase
-                .from('deposit_methods')
-                .select('*')
-                .order('id', { ascending: true });
-            const methods = (allMethods || []).filter(m => ((m.currency || '').toString().trim().toUpperCase()) === currency);
-            if (methods && methods.length > 0) {
-                const method = methods.reduce((a, b) => (a.id > b.id ? a : b));
-                if (method && method.min_amount !== null && method.min_amount !== undefined) {
-                    minByCurrency = parseFloat(method.min_amount);
-                }
-            }
-        } catch (e) {
-            console.error('Error obteniendo métodos de depósito para mínimo de transferencia:', e);
-        }
+        if (currency === 'CUP') minByCurrency = await getMinDepositCUP();
+        else if (currency === 'USD') minByCurrency = await getMinDepositUSD();
     }
 
     // Si después de todo no hay mínimo (o es 0), no validamos mínimo
@@ -1364,6 +1358,11 @@ app.post('/api/transfer', async (req, res) => {
 
     const rateUSD = await getExchangeRateUSD();
     const minDepositCUP = await getMinDepositCUP();
+    const minDepositUSD = await getMinDepositUSD();
+
+    const thresholdForBonusMigration = currency === 'USD'
+    ? minDepositUSD * rateUSD
+    : minDepositCUP;
 
     let finalCup = targetCupBefore;
     let finalUsd = targetUsdBefore;
@@ -1393,7 +1392,7 @@ app.post('/api/transfer', async (req, res) => {
             + (finalUsd * rateUSD)
             + finalBonus;
 
-        if (totalEquivalentCUP >= minDepositCUP) {
+        if (totalEquivalentCUP >= thresholdForBonusMigration) {
             // Determinar cuánto bono proviene de esta transferencia (si la hubo)
             if (isCompletelyNew && currency === 'USD') {
                 // Transferencia en USD a un nuevo: revertir la conversión a CUP
@@ -2524,24 +2523,6 @@ app.put('/api/admin/play-prices/:betType', requireAdmin, async (req, res) => {
         .update(updateData)
         .eq('bet_type', betType);
     if (error) return res.status(500).json({ error: error.message });
-    res.json({ success: true });
-});
-
-// --- Configurar mínimo depósito ---
-
-app.get('/api/admin/min-deposit', requireAdmin, async (req, res) => {
-    const value = await getMinDepositUSD();
-    res.json({ value });
-});
-
-app.post('/api/admin/min-deposit', requireAdmin, async (req, res) => {
-    const { usd, cup } = req.body;
-    if (usd !== undefined && !isNaN(parseFloat(usd)) && parseFloat(usd) > 0) {
-        await setMinDepositUSD(parseFloat(usd));
-    }
-    if (cup !== undefined && !isNaN(parseFloat(cup)) && parseFloat(cup) > 0) {
-        await setMinDepositCUP(parseFloat(cup));
-    }
     res.json({ success: true });
 });
 

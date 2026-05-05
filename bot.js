@@ -640,67 +640,14 @@ async function getTransferMin(currency) {
         .eq('key', key)
         .single();
     if (cfg && cfg.value !== null && !isNaN(parseFloat(cfg.value))) {
-        const val = parseFloat(cfg.value);
-        return val; // puede ser 0
+        return parseFloat(cfg.value);
     }
 
-    // Fallback: método de depósito más reciente de esa moneda
-    const { data: allMethods } = await supabase
-        .from('deposit_methods')
-        .select('*')
-        .order('id', { ascending: true });
-    const methods = (allMethods || []).filter(m => ((m.currency || '').toString().trim().toUpperCase()) === currency);
-    if (methods.length > 0) {
-        const method = methods.reduce((a, b) => (a.id > b.id ? a : b));
-        if (method && method.min_amount !== null && !isNaN(parseFloat(method.min_amount))) {
-            return parseFloat(method.min_amount);
-        }
-    }
+    // Fallback: usar el mínimo global de depósito (ya derivado de los métodos)
+    if (currency === 'CUP') return await getMinDepositCUP();
+    if (currency === 'USD') return await getMinDepositUSD();
 
-    return null; // sin mínimo definido
-}
-
-async function getMinTransferCUP() {
-    try {
-        const { data: allMethods } = await supabase
-            .from('deposit_methods')
-            .select('*')
-            .order('id', { ascending: true });
-        const cupMethods = (allMethods || []).filter(m => 
-            (m.currency || '').toUpperCase() === 'CUP'
-        );
-        if (cupMethods.length > 0) {
-            // Elegir el método más reciente (mayor id)
-            const method = cupMethods.reduce((a, b) => (a.id > b.id ? a : b));
-            if (method && method.min_amount !== null && method.min_amount !== undefined) {
-                return parseFloat(method.min_amount);
-            }
-        }
-    } catch (e) {
-        console.error('Error obteniendo mínimo de transferencia CUP:', e);
-    }
-    return 1.0
-}
-
-async function getMinTransferUSD() {
-    try {
-        const { data: allMethods } = await supabase
-            .from('deposit_methods')
-            .select('*')
-            .order('id', { ascending: true });
-        const usdMethods = (allMethods || []).filter(m => 
-            (m.currency || '').toUpperCase() === 'USD'
-        );
-        if (usdMethods.length > 0) {
-            const method = usdMethods.reduce((a, b) => (a.id > b.id ? a : b));
-            if (method && method.min_amount !== null && method.min_amount !== undefined) {
-                return parseFloat(method.min_amount);
-            }
-        }
-    } catch (e) {
-        console.error('Error obteniendo mínimo de transferencia USD:', e);
-    }
-    return 1.0
+    return null;
 }
 
 async function getReferralCommissionRate() {
@@ -712,19 +659,47 @@ async function getReferralCommissionRate() {
     return data ? parseFloat(data.value) : 0;
 }
 
-async function getMinDepositUSD() {
+async function getMinDepositCUP() {
     const { data } = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', 'min_deposit_usd')
-        .single();
-    return data ? parseFloat(data.value) : 0;
+        .from('deposit_methods')
+        .select('min_amount')
+        .eq('currency', 'CUP')
+        .not('min_amount', 'is', null)
+        .order('min_amount', { ascending: true })
+        .limit(1);
+    if (data && data.length > 0 && data[0].min_amount !== null) {
+        return parseFloat(data[0].min_amount);
+    }
+    return 0;
 }
 
-async function getMinDepositCUP() {
-    const minUSD = await getMinDepositUSD(); // esta función ya existe
-    const rate = await getExchangeRateUSD();
-    return minUSD * rate;
+async function getMinDepositUSD() {
+    // Buscar primero el método específico "Tarjeta Clásica" (moneda USD)
+    const { data: preferred } = await supabase
+        .from('deposit_methods')
+        .select('min_amount')
+        .eq('currency', 'USD')
+        .eq('name', 'Tarjeta Clásica')
+        .maybeSingle();
+
+    if (preferred && preferred.min_amount !== null) {
+        return parseFloat(preferred.min_amount);
+    }
+
+    // Si no existe, usar el menor mínimo entre todos los métodos USD
+    const { data } = await supabase
+        .from('deposit_methods')
+        .select('min_amount')
+        .eq('currency', 'USD')
+        .not('min_amount', 'is', null)
+        .order('min_amount', { ascending: true })
+        .limit(1);
+
+    if (data && data.length > 0 && data[0].min_amount !== null) {
+        return parseFloat(data[0].min_amount);
+    }
+
+    return 0;
 }
 
 async function getMinWithdrawUSD() {
@@ -734,12 +709,6 @@ async function getMinWithdrawUSD() {
         .eq('key', 'min_withdraw_usd')
         .single();
     return data ? parseFloat(data.value) : 1.0;
-}
-
-async function setMinDepositUSD(value) {
-    await supabase
-        .from('app_config')
-        .upsert({ key: 'min_deposit_usd', value: value.toString() }, { onConflict: 'key' });
 }
 
 async function setMinWithdrawUSD(value) {
@@ -2247,14 +2216,6 @@ bot.action('adm_set_referral_rate', async (ctx) => {
     await ctx.answerCbQuery();
 });
 
-bot.action('adm_min_deposit', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const current = await getMinDepositUSD();
-    ctx.session.adminAction = 'set_min_deposit';
-    await ctx.reply(`💰 <b>Mínimo de depósito actual:</b> ${current} USD (equivale a ${(current * await getExchangeRateUSD()).toFixed(2)} CUP)\n\nEnvía el nuevo mínimo en USD (solo número, ej: 5):`, { parse_mode: 'HTML' });
-    await ctx.answerCbQuery();
-});
-
 bot.action('adm_min_withdraw', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     const current = await getMinWithdrawUSD();
@@ -3116,20 +3077,6 @@ bot.on(message('text'), async (ctx) => {
         return;
     }
 
-    // --- Admin: configurar mínimo depósito ---
-    if (isAdmin(uid) && session.adminAction === 'set_min_deposit') {
-        const value = parseFloat(text.replace(',', '.'));
-        if (isNaN(value) || value <= 0) {
-            await ctx.reply('❌ Número inválido. Envía un número positivo (ej: 5).');
-            return;
-        }
-        await setMinDepositUSD(value);
-        await ctx.reply(`✅ Mínimo de depósito actualizado a: ${value} USD (equivale a ${(value * await getExchangeRateUSD()).toFixed(2)} CUP)`, { parse_mode: 'HTML' });
-        delete session.adminAction;
-        await safeEdit(ctx, '🔧 <b>Panel de administración</b>', adminPanelKbd());
-        return;
-    }
-
     // --- Admin: configurar mínimo retiro ---
     if (isAdmin(uid) && session.adminAction === 'set_min_withdraw') {
         const value = parseFloat(text.replace(',', '.'));
@@ -3962,22 +3909,32 @@ bot.on(message('text'), async (ctx) => {
             }
 
             if (!targetUser) {
-                await ctx.reply('❌ Usuario no encontrado. Asegúrate de que el nombre de usuario sea correcto o de que el ID numérico esté registrado.\nPor favor, vuelve a iniciar la operación', getMainKeyboard(ctx));
-                delete session.awaitingTransferTarget;
+                await ctx.reply(
+                    '❌ Usuario no encontrado. Asegúrate de que el nombre de usuario o ID sea correcto.\n\n' +
+                    'Inténtalo de nuevo o cancela con el botón ❌ Cancelar.',
+                    getMainKeyboard(ctx)
+                );
+                // ⚠️ NO borramos session.awaitingTransferTarget, así el usuario sigue en el flujo
                 return;
             }
             if (targetUser.telegram_id === uid) {
-                await ctx.reply('❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.\nPor favor, vuelve a iniciar la operación', getMainKeyboard(ctx));
-                delete session.awaitingTransferTarget;
+                await ctx.reply(
+                    '❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.\n\n' +
+                    'Inténtalo de nuevo o cancela con el botón ❌ Cancelar.',
+                    getMainKeyboard(ctx)
+                );
+                // ⚠️ Tampoco borramos la sesión aquí
                 return;
             }
 
+            // Usuario válido – avanzar al siguiente paso
             session.transferTarget = targetUser.telegram_id;
             const currency = session.transferCurrency; // 'CUP' o 'USD'
             const min = await getTransferMin(currency);
             let minLine = (min !== null && min > 0) ? `\nMínimo: ${min} ${currency}` : '';
             session.awaitingTransferAmount = true;
             delete session.awaitingTransferTarget;
+
             await safeEdit(ctx,
                 `📥 <b>Por favor, envía el monto que deseas transferir</b> (ej: <code>500 cup</code> o <code>10 usd</code>).`,
                 null
@@ -3985,8 +3942,11 @@ bot.on(message('text'), async (ctx) => {
             return;
         } catch (e) {
             console.error('Error inesperado en transferencia destino:', e);
-            await ctx.reply('❌ Error inesperado al buscar el usuario destino. Por favor, intenta de nuevo o contacta soporte.', getMainKeyboard(ctx));
-            delete session.awaitingTransferTarget;
+            await ctx.reply(
+                '❌ Ocurrió un error inesperado al buscar el usuario destino. Inténtalo de nuevo o cancela.',
+                getMainKeyboard(ctx)
+            );
+            // Tampoco se borra session.awaitingTransferTarget para permitir reintento
             return;
         }
     }
@@ -4079,6 +4039,11 @@ bot.on(message('text'), async (ctx) => {
 
         const rateUSD = await getExchangeRateUSD();
         const minDepositCUP = await getMinDepositCUP();
+        const minDepositUSD = await getMinDepositUSD();
+
+        const thresholdForBonusMigration = currency === 'USD'
+        ? minDepositUSD * rateUSD
+        : minDepositCUP;
 
         let finalCup = targetCupBefore;
         let finalUsd = targetUsdBefore;
@@ -4105,7 +4070,7 @@ bot.on(message('text'), async (ctx) => {
             const totalEquivalentCUP = finalCup
                 + (finalUsd * rateUSD)
                 + finalBonus;
-            if (totalEquivalentCUP >= minDepositCUP) {
+            if (totalEquivalentCUP >= thresholdForBonusMigration) {
                 if (isCompletelyNew && currency === 'USD') {
                     const transferWorthCUP = amount * rateUSD;
                     const originalBonus = finalBonus - transferWorthCUP;
