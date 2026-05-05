@@ -990,8 +990,7 @@ function playTypeKbd() {
 
 function myMoneyKbd() {
     const buttons = [
-        [Markup.button.callback('📥 Recargar', 'recharge')],
-        [Markup.button.callback('📤 Retirar', 'withdraw')],
+        [Markup.button.callback('📤 Retirar', 'withdraw'), Markup.button.callback('📥 Recargar', 'recharge')],
         [Markup.button.callback('🔄 Transferir', 'transfer')],
         [Markup.button.callback('◀ Volver', 'main')]
     ];
@@ -1466,7 +1465,7 @@ bot.action('my_money', async (ctx) => {
         `🇨🇺 <b>CUP:</b> ${cup.toFixed(2)} (principal)\n` +
         `💵 <b>USD:</b> ${usd.toFixed(2)} (aprox. ${usdToCup} CUP)\n`;
         if (bonusCup > 0) {
-        text += `🎁 <b>Bono (no transferible ni retirable):</b>${bonusCup.toFixed(2)} CUP\n`;
+        text += `🎁 <b>Bono (no transferible ni retirable):</b> ${bonusCup.toFixed(2)} CUP\n`;
         }
         text += `\n¿Qué deseas hacer?`;
     await safeEdit(ctx, text, myMoneyKbd());
@@ -3334,12 +3333,12 @@ bot.on(message('text'), async (ctx) => {
 
         const cardPattern = /^[\d\s\-_]+$/;
         if (!cardPattern.test(card)) {
-            await ctx.reply('❌ Solo se permiten números, espacios, guiones (-) y guiones bajos (_). Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
+            await ctx.reply('❌ Error inesperado al buscar el usuario destino. Por favor, intenta de nuevo o contacta soporte.', getMainKeyboard(ctx));
             return;
         }
 
         if (card.length > 20) {
-            await ctx.reply('❌ El dato no puede exceder los 20 caracteres. Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
+            await ctx.reply('❌ Error inesperado al buscar el usuario destino. Por favor, intenta de nuevo o contacta soporte.', getMainKeyboard(ctx));
             return;
         }
         session.withdrawAccountCard = card;
@@ -3388,7 +3387,7 @@ bot.on(message('text'), async (ctx) => {
         }
 
          if (!/^\d{8}$/.test(mobile)) {
-            await ctx.reply('❌ El número de móvil debe contener exactamente 8 dígitos (solo números). Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
+            await ctx.reply('❌ Ingresa un número de móvil válido. Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
             return;
         }
 
