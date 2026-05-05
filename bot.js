@@ -213,7 +213,7 @@ function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, cred
         `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
 
     if (includeUsdFollowup) {
-        text += `ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+        text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
     }
 
     if (bonusMovedCup > 0) {
@@ -1088,7 +1088,7 @@ bot.command('start', async (ctx) => {
     const me = await ctx.telegram.getMe().catch(() => ({}));
     const botName = me.first_name || 'el Bot';
 
-    if (refParam) {
+    if (refParam && ctx.session?.isNewUser) {
         const refId = parseInt(refParam);
         if (refId && refId !== uid) {
             if (!ctx.dbUser || ctx.dbUser.ref_by === null) {
@@ -3917,8 +3917,7 @@ bot.on(message('text'), async (ctx) => {
             }
             if (targetUser.telegram_id === uid) {
                 await ctx.reply(
-                    '❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.\n\n' +
-                    'Inténtalo de nuevo o cancela con el botón ❌ Cancelar.',
+                    '❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.\n\n',
                     getMainKeyboard(ctx)
                 );
                 // ⚠️ Tampoco borramos la sesión aquí
@@ -4112,7 +4111,7 @@ bot.on(message('text'), async (ctx) => {
 
             // Mostrar el monto y moneda como en el formato original
             if (currency === 'USD') {
-                message += `💰 Monto: ${amount} USD\n ℹ️Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+                message += `💰 Monto: ${amount} USD\nℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
             } else {
                 message += `💰 Monto: ${amount} CUP\n`;
             }
