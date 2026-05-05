@@ -3280,7 +3280,7 @@ bot.on(message('text'), async (ctx) => {
         }
 
         if (parsed.currency !== method.currency) {
-            await ctx.reply(`❌ La moneda del monto (${parsed.currency}) no coincide con la del método (${method.currency}). Por favor, envía el monto en ${method.currency}.`, getMainKeyboard(ctx));
+            await ctx.reply(`❌ La moneda del monto solicitado no coincide con la del método. Por favor, envía el monto en ${method.currency}.`, getMainKeyboard(ctx));
             return;
         }
 
@@ -3950,14 +3950,25 @@ bot.on(message('text'), async (ctx) => {
 
     // --- Flujo: transferencia - monto ---
     if (session.awaitingTransferAmount) {
-        const parsed = parseAmountWithCurrency(text);
-        if (!parsed) {
-            // Si el usuario pone un monto inválido, NO limpiar la sesión, solo pedir de nuevo
-            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: 500 cup o 10 usd).', getMainKeyboard(ctx));
-            return;
-        }
         const amount = parsed.amount;
         const currency = parsed.currency;
+        const parsed = parseAmountWithCurrency(text);
+
+        if (!parsed) {
+            const example = session.transferCurrency === 'USD' ? '10 usd' : '500 cup';
+            // Si el usuario pone un monto inválido, NO limpiar la sesión, solo pedir de nuevo
+            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: ${example}).', getMainKeyboard(ctx));
+            return;
+        }
+
+    if (currency !== session.transferCurrency) {
+        await ctx.reply(
+            `❌ La moneda del monto solicitado no coincide con la del método. Por favor, envía el monto en ${session.transferCurrency}.`,
+            getMainKeyboard(ctx)
+        );
+        return; // Se mantiene el flujo, el usuario puede reintentar
+    }
+        
         // Obtener mínimo de transferencia (configuración admin o fallback)
         const transferMin = await getTransferMin(currency);
         if (transferMin !== null && transferMin > 0 && amount < transferMin) {
