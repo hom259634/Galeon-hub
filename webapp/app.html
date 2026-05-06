@@ -1267,7 +1267,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     resetBetEditMode(true, true);
                     showSection('home');
                 } else {
-                    iziToast.error({ title: 'Error', message: data.error || 'No se pudo registrar' });
+                    iziToast.error({ message: data.error || 'No se pudo registrar' });
                 }
             } catch (e) {
                 console.error(e);
