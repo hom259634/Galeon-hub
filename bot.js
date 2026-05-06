@@ -4043,6 +4043,8 @@ bot.on(message('text'), async (ctx) => {
             return (raw !== null && raw !== undefined && !isNaN(parseFloat(raw))) ? parseFloat(raw) : 0;
         })();
 
+        const originalTargetBonus = targetBonus;
+
         const hasMainBalanceBefore = (targetCupBefore > 0) || (targetUsdBefore > 0);
         const hasApprovedDep = await userHasApprovedDeposit(targetUserId);
         const isCompletelyNew = !hasApprovedDep && !hasMainBalanceBefore;
@@ -4083,14 +4085,13 @@ bot.on(message('text'), async (ctx) => {
             if (totalEquivalentCUP >= thresholdForBonusMigration) {
                 if (isCompletelyNew && currency === 'USD') {
                     const transferWorthCUP = amount * rateUSD;
-                    const originalBonus = finalBonus - transferWorthCUP;
                     finalUsd += amount;
-                    finalCup += originalBonus;
-                    bonusMovedCup = originalBonus;
-                    finalBonus = 0;
+                    finalCup += originalTargetBonus;
+                    bonusMovedCup = originalTargetBonus; // ✅ solo el bono previo
+                    finalBonus = 0
                 } else {
                     finalCup += finalBonus;
-                    bonusMovedCup = finalBonus;
+                    bonusMovedCup = originalTargetBonus;
                     finalBonus = 0;
                 }
             }
@@ -4133,7 +4134,7 @@ bot.on(message('text'), async (ctx) => {
             if (isCompletelyNew) {
                 if (bonusMovedCup > 0) {
                     // El bono completo se migró a CUP
-                    message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+                    message += `🎁 Tu bono de bienvenida de ${originalTargetBonus.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
                 } else if (finalBonus > 0) {
                     // No migró, se acumuló en el bono
                     if (currency === 'USD') {

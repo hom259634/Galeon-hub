@@ -1352,6 +1352,8 @@ app.post('/api/transfer', async (req, res) => {
         return (raw !== null && raw !== undefined && !isNaN(parseFloat(raw))) ? parseFloat(raw) : 0;
     })();
 
+    const originalTargetBonus = targetBonus; // Bono real antes de la transferencia
+
     const hasMainBalanceBefore = (targetCupBefore > 0) || (targetUsdBefore > 0);
     const hasApprovedDep = await userHasApprovedDeposit(targetUserId);
     const isCompletelyNew = !hasApprovedDep && !hasMainBalanceBefore;
@@ -1398,15 +1400,15 @@ app.post('/api/transfer', async (req, res) => {
                 // Transferencia en USD a un nuevo: revertir la conversión a CUP
                 // y dejar la transferencia en USD, el resto del bono (si había) pasa a CUP
                 const transferWorthCUP = parsedAmount * rateUSD;
-                const originalBonus = finalBonus - transferWorthCUP; // bono anterior
+
                 finalUsd += parsedAmount;            // la transferencia en USD
                 finalCup += originalBonus;           // bono anterior → CUP
-                bonusMovedCup = originalBonus;       // notificación
+                bonusMovedCup = originalTargetBonus; // ✅ solo el bono previo
                 finalBonus = 0;
             } else {
                 // Caso general: todo el bono pasa a CUP
                 finalCup += finalBonus;
-                bonusMovedCup = finalBonus;
+                bonusMovedCup = originalTargetBonus; // ✅ solo el bono previo
                 finalBonus = 0;
             }
         }
@@ -1438,7 +1440,7 @@ app.post('/api/transfer', async (req, res) => {
 
         if (isCompletelyNew) {
             if (bonusMovedCup > 0) {
-                message += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+                message += `🎁 Tu bono de bienvenida de ${originalTargetBonus.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
             } else if (finalBonus > 0) {
                 if (currency === 'USD') {
                     const addedCUP = (parsedAmount * rateUSD).toFixed(2);
@@ -1609,12 +1611,6 @@ app.post('/api/bets', async (req, res) => {
                     }
                 }
 
-                // Aplicar estado revertido en BD
-                await supabase
-                    .from('users')
-                    .update({ cup: cupAfter, usd: usdAfter, bonus_cup: bonusAfter, updated_at: new Date() })
-                    .eq('telegram_id', oldReferrerId);
-
                 referrerStateAfterRevert = { cup: cupAfter, usd: usdAfter, bonus_cup: bonusAfter };
                 // ❗️ NO se envía notificación aquí
             }
@@ -1629,12 +1625,12 @@ app.post('/api/bets', async (req, res) => {
         if (totalCUP > 0) {
             const availableCup = finalCup + finalBonus;
             if (availableCup < totalCUP) {
-                return res.status(400).json({ error: '❌Saldo CUP insuficiente. Por favor, recarga.' });
+                return res.status(400).json({ error: '❌Saldo CUP insuficiente para la edición. Por favor, recarga.' });
             }
         }
         if (totalUSD > 0) {
             if (finalUsd < totalUSD) {
-                return res.status(400).json({ error: '❌Saldo USD insuficiente. Por favor, recarga.' });
+                return res.status(400).json({ error: '❌Saldo USD insuficiente para la edición. Por favor, recarga.' });
             }
         }
 
@@ -1704,17 +1700,15 @@ app.post('/api/bets', async (req, res) => {
                 if (newCup !== (parseFloat(newReferrer.cup) || 0)) updatePayload.cup = newCup;
                 if (newBonus !== (parseFloat(newReferrer.bonus_cup) || 0)) updatePayload.bonus_cup = newBonus;
 
-                await supabase
-                    .from('users')
-                    .update(updatePayload)
-                    .eq('telegram_id', newReferrerId);
-
                 newCommissionData = {
                     referrer_id: newReferrerId,
                     commission_amount: newCommissionCUP,
                     commission_currency: 'CUP',
                     commission_destination: destination,
-                    bonusMovedCup: bonusMovedCup
+                    bonusMovedCup: bonusMovedCup,
+                    // Guardamos los saldos finales para escribirlos después
+                    referrer_cup: newCup,
+                    referrer_bonus_cup: newBonus
                 };
 
                 const bettorName = user.first_name || user.username || `ID ${userId}`;
@@ -1751,6 +1745,29 @@ app.post('/api/bets', async (req, res) => {
                     } catch (e) {}
                 }
             }
+        }
+
+        // ========== PERSISTIR CAMBIOS DE COMISIÓN (SOLO SI LA VALIDACIÓN FUE EXITOSA) ==========
+        if (newCommissionData && newCommissionData.referrer_id) {
+            await supabase
+                .from('users')
+                .update({
+                    cup: newCommissionData.referrer_cup,
+                    bonus_cup: newCommissionData.referrer_bonus_cup,
+                    updated_at: new Date()
+                })
+                .eq('telegram_id', newCommissionData.referrer_id);
+        } else if (oldReferrerId) {
+            // No hay nueva comisión, pero sí se revirtió una anterior: persistir la reversión
+            await supabase
+                .from('users')
+                .update({
+                    cup: referrerStateAfterRevert.cup,
+                    usd: referrerStateAfterRevert.usd,
+                    bonus_cup: referrerStateAfterRevert.bonus_cup,
+                    updated_at: new Date()
+                })
+                .eq('telegram_id', oldReferrerId);
         }
 
         // ---------- DESCONTAR NUEVA APUESTA ----------
