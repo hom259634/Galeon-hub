@@ -549,6 +549,7 @@
                 <div class="glass-card p-5">
                     <h3 class="text-2xl font-bold mb-4 flex items-center"><i class="fas fa-crown text-yellow-400 mr-2"></i>Panel Admin</h3>
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+                        <button data-admin-view="userManager" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-user-cog mr-1"></i>Gestor Usuarios</button>
                         <button data-admin-view="sessions" class="admin-nav-btn bg-indigo-600/80 p-3 rounded-xl hover:bg-indigo-700"><i class="fas fa-calendar-alt mr-1"></i> Sesiones</button>
                         <button data-admin-view="publishWinning" class="admin-nav-btn bg-teal-600/80 p-3 rounded-xl hover:bg-teal-700"><i class="fas fa-trophy mr-1"></i> Publicar Ganadores</button>
                         <button data-admin-view="addDeposit" class="admin-nav-btn bg-blue-600/80 p-3 rounded-xl hover:bg-blue-700"><i class="fas fa-plus mr-1"></i> Añadir Depósito</button>
@@ -3350,6 +3351,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 else if (view === 'setBonus') renderSetBonusView();
                 else if (view === 'setWithdrawHours') renderSetWithdrawHoursView();
                 else if (view === 'transferMins') renderTransferMinsView();
+                else if (view === 'userManager') renderUserManagerView();
             });
         });
 
@@ -3394,6 +3396,122 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const key = String(betType || '').toLowerCase();
             if (!key) return 'N/D';
             return labels[key] || (key.charAt(0).toUpperCase() + key.slice(1));
+        }
+
+        async function renderUserManagerView() {
+            adminViewContainer.innerHTML = `
+                <h4 class="text-xl font-semibold mb-4">👤 Gestor de Usuarios</h4>
+                <div class="flex gap-2 mb-3">
+                    <input type="number" id="userSearchId" placeholder="ID de Telegram del usuario"
+                        class="flex-1 p-3 rounded-xl bg-gray-800 text-white border border-cyan-500">
+                    <button id="searchUserBtn" class="bg-cyan-600 px-6 py-3 rounded-xl hover:bg-cyan-700 font-bold">
+                        🔍 Buscar
+                    </button>
+                </div>
+                <div id="userManagerResult"></div>
+            `;
+
+            document.getElementById('searchUserBtn').addEventListener('click', async () => {
+                const userId = document.getElementById('userSearchId').value.trim();
+                if (!userId) {
+                    iziToast.warning({ message: 'Introduce un ID de Telegram' });
+                    return;
+                }
+
+                const resultDiv = document.getElementById('userManagerResult');
+                resultDiv.innerHTML = '<div class="loader"></div> Cargando...';
+
+                try {
+                    const res = await fetch(`/api/admin/user/${userId}?userId=${currentUser.telegram_id}`);
+                    if (!res.ok) {
+                        const err = await res.json();
+                        resultDiv.innerHTML = `<p class="text-red-400">${err.error || 'Usuario no encontrado'}</p>`;
+                        return;
+                    }
+
+                    const data = await res.json();
+                    const u = data.user;
+                    const bets = data.bets;
+                    const ref = data.referrals;
+
+                    // Formatear balances
+                    const cup = parseFloat(u.cup).toFixed(2);
+                    const usd = parseFloat(u.usd).toFixed(2);
+                    const bonus = parseFloat(u.bonus_cup).toFixed(2);
+
+                    // Tabla de apuestas
+                    let betsHtml = '';
+                    if (bets.length === 0) {
+                        betsHtml = '<p class="text-gray-400">No tiene apuestas registradas.</p>';
+                    } else {
+                        betsHtml = '<div class="space-y-2">';
+                        bets.forEach(b => {
+                            const date = new Date(b.placed_at).toLocaleString();
+                            betsHtml += `
+                                <div class="bg-gray-800/60 p-2 rounded-lg">
+                                    <div class="flex justify-between text-sm">
+                                        <span><b>${escapeHTML(b.lottery)}</b> - ${escapeHTML(formatBetTypeLabel(b.bet_type))}</span>
+                                        <span class="text-cyan-300">${parseFloat(b.cost_cup).toFixed(2)} CUP / ${parseFloat(b.cost_usd).toFixed(2)} USD</span>
+                                    </div>
+                                    <div class="text-xs text-gray-400 mt-1">${escapeHTML(b.raw_text)} — ${date}</div>
+                                </div>`;
+                        });
+                        betsHtml += '</div>';
+                    }
+
+                    // Tabla de referidos
+                    let refHtml = `<p><b>Total referidos:</b> ${ref.count}</p>`;
+                    if (ref.count > 0) {
+                        refHtml += `<p class="text-sm mt-1">💰 <b>Comisión total generada:</b> ${ref.totalEarnedCUP.toFixed(2)} CUP</p>`;
+                        refHtml += '<div class="space-y-1 mt-2">';
+                        ref.list.forEach(r => {
+                            refHtml += `<div class="bg-gray-800/40 p-2 rounded text-sm flex justify-between">
+                                <span>${escapeHTML(r.name)}</span>
+                                <span class="text-cyan-300">${r.totalCUP.toFixed(2)} CUP</span>
+                            </div>`;
+                        });
+                        refHtml += '</div>';
+                    } else {
+                        refHtml += '<p class="text-gray-400">Este usuario no ha referido a nadie.</p>';
+                    }
+
+                    resultDiv.innerHTML = `
+                        <div class="glass-card p-4 mb-4">
+                            <h5 class="text-lg font-bold mb-2">📋 Datos del usuario</h5>
+                            <p><b>ID:</b> ${u.telegram_id}</p>
+                            <p><b>Nombre:</b> ${escapeHTML(u.first_name || 'N/A')}</p>
+                            <p><b>Username:</b> ${u.username ? '@' + escapeHTML(u.username) : 'N/A'}</p>
+                            <p><b>Referido por:</b> ${u.ref_by || 'Nadie'}</p>
+                            <div class="mt-3 grid grid-cols-3 gap-2">
+                                <div class="bg-gray-800/50 p-2 rounded text-center">
+                                    <span class="block text-xs text-gray-300">CUP</span>
+                                    <span class="text-cyan-300 font-bold">${cup}</span>
+                                </div>
+                                <div class="bg-gray-800/50 p-2 rounded text-center">
+                                    <span class="block text-xs text-gray-300">USD</span>
+                                    <span class="text-cyan-300 font-bold">${usd}</span>
+                                </div>
+                                <div class="bg-gray-800/50 p-2 rounded text-center">
+                                    <span class="block text-xs text-gray-300">Bono</span>
+                                    <span class="text-cyan-300 font-bold">${bonus}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <h5 class="text-lg font-bold mb-2">🎲 Últimas 20 apuestas</h5>
+                            ${betsHtml}
+                        </div>
+
+                        <div>
+                            <h5 class="text-lg font-bold mb-2">👥 Referidos</h5>
+                            ${refHtml}
+                        </div>
+                    `;
+                } catch (e) {
+                    resultDiv.innerHTML = '<p class="text-red-400">Error de conexión</p>';
+                }
+            });
         }
 
         async function renderTransferMinsView() {
