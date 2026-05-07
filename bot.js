@@ -1172,87 +1172,56 @@ bot.command('mis_jugadas', async (ctx) => {
 //---------- Cambios hechos por Luis David ----------//
 
 bot.command('referidos', async (ctx) => {
-    const uid = ctx.from.id;
-    const botInfo = await ctx.telegram.getMe();
-    const link = `https://t.me/${botInfo.username}?start=${uid}`;
-
     try {
-        // Obtener lista de referidos (usuarios que tienen ref_by = uid)
-        const { data: referidos, error: refError } = await supabase
+        const uid = ctx.from.id;
+        const botInfo = await ctx.telegram.getMe();
+        const link = `https://t.me/${botInfo.username}?start=${uid}`;
+
+        // Obtener lista de referidos
+        const { data: referidos } = await supabase
             .from('users')
             .select('telegram_id, first_name, username')
             .eq('ref_by', uid);
 
-        if (refError) {
-            console.error('Error al obtener referidos:', refError);
-            await ctx.reply('❌ Ocurrió un error al consultar tus referidos. Intenta más tarde.');
-            return;
-        }
-
         const totalReferidos = referidos?.length || 0;
         let totalAportadoCUP = 0;
         let referidosList = '';
+        const referralRate = await getReferralCommissionRate();
 
         if (totalReferidos > 0) {
-            // Consultar comisiones generadas por referidos (datos reales ya acreditados)
-            const { data: comisiones, error: comError } = await supabase
+            const { data: comisiones } = await supabase
                 .from('bets')
                 .select('user_id, commission_amount, commission_currency')
                 .eq('referrer_id', uid)
                 .gt('commission_amount', 0);
 
-            if (comError) {
-                console.error('Error al obtener comisiones:', comError);
-                // Continuamos con la lista, pero sin montos
-            }
-
-            // Mapa para acumular aporte por cada referido
-            const aportePorUsuario = new Map(); // key: telegram_id, value: { totalCUP, nombre }
-
-            // Inicializar con todos los referidos (incluso los que aún no han generado comisión)
+            const aportePorUsuario = new Map();
             for (const ref of referidos) {
                 const nombreMostrar = ref.username ? `@${ref.username}` : (ref.first_name || `ID ${ref.telegram_id}`);
                 aportePorUsuario.set(ref.telegram_id, { totalCUP: 0, nombre: nombreMostrar });
             }
 
-            // Procesar comisiones
             if (comisiones && comisiones.length > 0) {
                 const tasaUSD = await getExchangeRateUSD();
-                const referralRate = await getReferralCommissionRate(); 
                 for (const com of comisiones) {
                     const userId = com.user_id;
                     const amount = parseFloat(com.commission_amount) || 0;
-                    const currency = com.commission_currency;
-                    let amountCUP = 0;
-                    if (currency === 'USD') {
-                        amountCUP = amount * tasaUSD;
-                    } else { // CUP
-                        amountCUP = amount;
-                    }
+                    let amountCUP = (com.commission_currency === 'USD') ? amount * tasaUSD : amount;
                     const entry = aportePorUsuario.get(userId);
-                    if (entry) {
-                        entry.totalCUP += amountCUP;
-                    }
+                    if (entry) entry.totalCUP += amountCUP;
                 }
             }
 
-            // Convertir a array, ordenar por mayor aporte y limitar a 30
-            const listado = Array.from(aportePorUsuario.entries())
-                .map(([id, data]) => ({ id, nombre: data.nombre, totalCUP: data.totalCUP }))
-                .sort((a, b) => b.totalCUP - a.totalCUP);
+            const listado = Array.from(aportePorUsuario.values())
+                .sort((a, b) => b.totalCUP - a.totalCUP)
+                .slice(0, 30);
 
-            const maxItems = 30;
-            const itemsToShow = listado.slice(0, maxItems);
-            for (const item of itemsToShow) {
+            for (const item of listado) {
                 referidosList += `• ${escapeHTML(item.nombre)} 👉 ${item.totalCUP.toFixed(2)} CUP\n`;
                 totalAportadoCUP += item.totalCUP;
             }
-            if (listado.length > maxItems) {
-                referidosList += `… y ${listado.length - maxItems} más.`;
-            }
         }
 
-        // Construir mensaje final
         let mensaje = `💸 <b>¡GANA DINERO EXTRA INVITANDO AMIGOS! 💰</b>\n\n` +
             `🎯 <b>¿Cómo funciona?</b>\n` +
             `1️⃣ Comparte tu enlace personal con amigos\n` +

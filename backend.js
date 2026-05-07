@@ -3211,6 +3211,7 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
     if (fetchError || !request) {
         return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
+});
 
 // --- Gestor de usuarios (admin) ---
 app.get('/api/admin/user/:targetUserId', requireAdmin, async (req, res) => {
@@ -3308,6 +3309,9 @@ app.get('/api/admin/user/:targetUserId', requireAdmin, async (req, res) => {
     }
 });
 
+
+
+
     // Marcar como rechazada
     const { error: updateError } = await supabase
         .from('deposit_requests')
@@ -3328,7 +3332,6 @@ app.get('/api/admin/user/:targetUserId', requireAdmin, async (req, res) => {
     } catch (e) {}
 
     res.json({ success: true });
-});
 
 // --- Listar solicitudes de retiro pendientes ---
 app.get('/api/admin/pending-withdraws', requireAdmin, async (req, res) => {
