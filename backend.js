@@ -3211,6 +3211,33 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
     if (fetchError || !request) {
         return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
+
+    // Marcar como rechazada
+    const { error: updateError } = await supabase
+        .from('deposit_requests')
+        .update({
+            status: 'rejected',
+            processed_at: new Date(),
+            processed_by: parseInt(userId)
+        })
+        .eq('id', id);
+
+    if (updateError) {
+        return res.status(500).json({ error: updateError.message });
+    }
+
+    // Notificar al usuario
+    try {
+        await bot.telegram.sendMessage(
+            request.user_id,
+            `❌ Depósito rechazado\n\n📌 La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.`,
+            { parse_mode: 'HTML' }
+        );
+    } catch (e) {
+        console.error('Error notificando rechazo de depósito:', e);
+    }
+
+    res.json({ success: true });
 });
 
 // --- Gestor de usuarios (admin) ---
@@ -3308,30 +3335,6 @@ app.get('/api/admin/user/:targetUserId', requireAdmin, async (req, res) => {
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
-
-
-
-
-    // Marcar como rechazada
-    const { error: updateError } = await supabase
-        .from('deposit_requests')
-        .update({ status: 'rejected', processed_at: new Date(), processed_by: parseInt(userId) })
-        .eq('id', id);
-
-    if (updateError) {
-        return res.status(500).json({ error: updateError.message });
-    }
-
-    // Notificar al usuario
-    try {
-        await bot.telegram.sendMessage(
-            request.user_id,
-            `❌ Depósito rechazado\n\n📌La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.`,
-            { parse_mode: 'HTML' }
-        );
-    } catch (e) {}
-
-    res.json({ success: true });
 
 // --- Listar solicitudes de retiro pendientes ---
 app.get('/api/admin/pending-withdraws', requireAdmin, async (req, res) => {
