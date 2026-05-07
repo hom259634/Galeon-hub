@@ -349,7 +349,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency) {
                 rateUSD,
                 cupDebit: 0,
                 usdDebit: 0,
-                errorMessage: `❌Saldo USD insuficiente. Por favor, recarga.`
+                errorMessage: `❌ Saldo USD insuficiente. Por favor, recarga.`
             };
         }
 
@@ -1538,7 +1538,7 @@ app.post('/api/bets', async (req, res) => {
         const userBonusCup = parseFloat(user.bonus_cup) || 0;
         const availableCupNow = userCup + userBonusCup;
         if (totalCUP > 0 && availableCupNow < totalCUP) {
-            return res.status(400).json({ error: '❌Saldo CUP insuficiente. Por favor, recarga', debug: { userCup, userBonusCup, availableCupNow, totalCUP, parsed } });
+            return res.status(400).json({ error: '❌ Saldo CUP insuficiente. Por favor, recarga', debug: { userCup, userBonusCup, availableCupNow, totalCUP, parsed } });
         }
     }
 
@@ -1625,12 +1625,12 @@ app.post('/api/bets', async (req, res) => {
         if (totalCUP > 0) {
             const availableCup = finalCup + finalBonus;
             if (availableCup < totalCUP) {
-                return res.status(400).json({ error: '❌Saldo CUP insuficiente para la edición. Por favor, recarga.' });
+                return res.status(400).json({ error: '❌ Saldo CUP insuficiente para la edición. Por favor, recarga.' });
             }
         }
         if (totalUSD > 0) {
             if (finalUsd < totalUSD) {
-                return res.status(400).json({ error: '❌Saldo USD insuficiente para la edición. Por favor, recarga.' });
+                return res.status(400).json({ error: '❌ Saldo USD insuficiente para la edición. Por favor, recarga.' });
             }
         }
 
@@ -1844,14 +1844,14 @@ app.post('/api/bets', async (req, res) => {
     let newCup = safe(user.cup);
 
     if (totalUSD > 0) {
-        if (newUsd < totalUSD) return res.status(400).json({ error: '❌Saldo USD insuficiente. Por favor, recarga.' });
+        if (newUsd < totalUSD) return res.status(400).json({ error: '❌ Saldo USD insuficiente. Por favor, recarga.' });
         newUsd -= totalUSD;
     }
 
     if (totalCUP > 0) {
         // Permitir usar bono en CUP además del saldo CUP
         const availableCupTotal = newCup + newBonus;
-        if (availableCupTotal < totalCUP) return res.status(400).json({ error: '❌Saldo CUP insuficiente. Por favor, recarga' });
+        if (availableCupTotal < totalCUP) return res.status(400).json({ error: '❌ Saldo CUP insuficiente. Por favor, recarga' });
         if (newCup >= totalCUP) {
             newCup -= totalCUP;
         } else {
@@ -3211,6 +3211,102 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
     if (fetchError || !request) {
         return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
+
+// --- Gestor de usuarios (admin) ---
+app.get('/api/admin/user/:targetUserId', requireAdmin, async (req, res) => {
+    const targetUserId = parseInt(req.params.targetUserId);
+    if (isNaN(targetUserId)) {
+        return res.status(400).json({ error: 'ID de usuario inválido' });
+    }
+
+    try {
+        // Obtener datos del usuario
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('telegram_id', targetUserId)
+            .single();
+
+        if (userError || !user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Obtener últimas 20 apuestas
+        const { data: bets } = await supabase
+            .from('bets')
+            .select('*')
+            .eq('user_id', targetUserId)
+            .order('placed_at', { ascending: false })
+            .limit(20);
+
+        // Obtener estadísticas de referidos (igual lógica que /api/user/:userId/referrals)
+        const { data: referidos } = await supabase
+            .from('users')
+            .select('telegram_id, first_name, username')
+            .eq('ref_by', targetUserId);
+
+        let referralCount = referidos?.length || 0;
+        let totalEarnedCUP = 0;
+        let referredUsersList = [];
+
+        if (referralCount > 0) {
+            // Comisiones generadas
+            const { data: comisiones } = await supabase
+                .from('bets')
+                .select('user_id, commission_amount, commission_currency')
+                .eq('referrer_id', targetUserId)
+                .gt('commission_amount', 0);
+
+            // Mapa de aportes por referido
+            const aportePorUsuario = new Map();
+            for (const ref of referidos) {
+                const nombre = ref.username
+                    ? `@${ref.username}`
+                    : (ref.first_name || `ID ${ref.telegram_id}`);
+                aportePorUsuario.set(ref.telegram_id, { name: nombre, totalCUP: 0 });
+            }
+
+            const tasaUSD = await getExchangeRateUSD();
+            for (const com of comisiones || []) {
+                const uid = com.user_id;
+                const amount = parseFloat(com.commission_amount) || 0;
+                const amountCUP =
+                    com.commission_currency === 'USD'
+                        ? amount * tasaUSD
+                        : amount;
+                const entry = aportePorUsuario.get(uid);
+                if (entry) entry.totalCUP += amountCUP;
+            }
+
+            referredUsersList = Array.from(aportePorUsuario.values())
+                .sort((a, b) => b.totalCUP - a.totalCUP);
+
+            totalEarnedCUP = referredUsersList.reduce((sum, u) => sum + u.totalCUP, 0);
+        }
+
+        res.json({
+            user: {
+                telegram_id: user.telegram_id,
+                first_name: user.first_name,
+                username: user.username,
+                cup: user.cup,
+                usd: user.usd,
+                bonus_cup: user.bonus_cup,
+                ref_by: user.ref_by,
+                created_at: user.created_at,
+            },
+            bets: bets || [],
+            referrals: {
+                count: referralCount,
+                totalEarnedCUP,
+                list: referredUsersList,
+            },
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
 
     // Marcar como rechazada
     const { error: updateError } = await supabase
