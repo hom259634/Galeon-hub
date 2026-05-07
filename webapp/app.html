@@ -549,7 +549,6 @@
                 <div class="glass-card p-5">
                     <h3 class="text-2xl font-bold mb-4 flex items-center"><i class="fas fa-crown text-yellow-400 mr-2"></i>Panel Admin</h3>
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                        <button data-admin-view="userManager" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-user-cog mr-1"></i>Gestor Usuarios</button>
                         <button data-admin-view="sessions" class="admin-nav-btn bg-indigo-600/80 p-3 rounded-xl hover:bg-indigo-700"><i class="fas fa-calendar-alt mr-1"></i> Sesiones</button>
                         <button data-admin-view="publishWinning" class="admin-nav-btn bg-teal-600/80 p-3 rounded-xl hover:bg-teal-700"><i class="fas fa-trophy mr-1"></i> Publicar Ganadores</button>
                         <button data-admin-view="addDeposit" class="admin-nav-btn bg-blue-600/80 p-3 rounded-xl hover:bg-blue-700"><i class="fas fa-plus mr-1"></i> Añadir Depósito</button>
@@ -564,6 +563,7 @@
                         <button data-admin-view="setReferralRate" class="admin-nav-btn bg-orange-400/80 p-3 rounded-xl hover:bg-orange-500"><i class="fas fa-percent mr-1"></i>% Referidos</button>
                         <button data-admin-view="setWithdrawHours" class="admin-nav-btn bg-purple-400/80 p-3 rounded-xl hover:bg-purple-500"><i class="fas fa-clock mr-1"></i> Horario Retiros</button>
                         <button data-admin-view="transferMins" class="admin-nav-btn bg-teal-400/80 p-3 rounded-xl hover:bg-teal-500"><i class="fas fa-sliders-h mr-1"></i> Min. Transferencia</button>
+                        <button data-admin-view="userManager" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-user-cog mr-1"></i>Estadísticas de Usuarios</button>
                         <button data-admin-view="pendingRequests" class="admin-nav-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700"><i class="fas fa-clock mr-1"></i> Solicitudes Pendientes</button>
                         <button data-admin-view="viewData" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-eye mr-1"></i> Ver Datos</button>
                         
@@ -1226,11 +1226,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 let availableCup = (parseFloat(currentUser?.cup) || 0) + (parseFloat(currentUser?.bonus_cup) || 0);
                 let availableUsd = parseFloat(currentUser?.usd) || 0;
                 if (newTotalCUP > 0 && availableCup < newTotalCUP) {
-                    iziToast.error({ message: `❌Saldo CUP insuficiente. Por favor, recarga` });
+                    iziToast.error({ message: `❌ Saldo CUP insuficiente. Por favor, recarga` });
                     return;
                 }
                 if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
-                    iziToast.error({ message: `❌Saldo USD insuficiente. Por favor, recarga` });
+                    iziToast.error({ message: `❌ Saldo USD insuficiente. Por favor, recarga` });
                     return;
                 }
             }
@@ -1692,6 +1692,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 ${b.cost_cup}&nbsp;CUP${(b.cost_usd !== undefined && b.cost_usd !== null && parseFloat(b.cost_usd) > 0) ? ' / ' + b.cost_usd + '&nbsp;USD' : ''}
                             </span>
                         </div>
+                    </div>
+                    <div class="mt-2 text-center text-blue-400 font-medium text-sm">
+                        Ver Detalles
                     </div>
                 </div>`;
             });
@@ -3403,7 +3406,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 <h4 class="text-xl font-semibold mb-4">👤 Gestor de Usuarios</h4>
                 <div class="flex gap-2 mb-3">
                     <input type="number" id="userSearchId" placeholder="ID de Telegram del usuario"
-                        class="flex-1 p-3 rounded-xl bg-gray-800 text-white border border-cyan-500">
+                        class="w-44 md:w-56 p-3 rounded-xl bg-gray-800 text-white border border-cyan-500">
                     <button id="searchUserBtn" class="bg-cyan-600 px-6 py-3 rounded-xl hover:bg-cyan-700 font-bold">
                         🔍 Buscar
                     </button>
