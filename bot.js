@@ -874,7 +874,7 @@ async function broadcastToAllUsers(message, parseMode = 'HTML') {
     for (const u of users || []) {
         try {
             await bot.telegram.sendMessage(u.telegram_id, message, { parse_mode: parseMode });
-            await new Promise(resolve => setTimeout(resolve, 30));
+            await new Promise(resolve => setTimeout(resolve, 10));
         } catch (e) {
             const errorMessage = (e?.message || '').toLowerCase();
             if (!deliveryErrorsToIgnore.some(frag => errorMessage.includes(frag))) {
@@ -894,7 +894,7 @@ async function broadcastPhotoToAllUsers(photoPath) {
 
     for (const u of users || []) {
         try {
-            await bot.telegram.sendPhoto(u.telegram_id, { source: photoPath });
+            await bot.telegram.sendPhoto(u.telegram_id, { source: photoPath }, { protect_content: true });
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
             const errorMessage = (e?.message || '').toLowerCase();
@@ -4912,12 +4912,35 @@ async function withdrawNotifications() {
     const endStr   = formatHour12(end);
 
     // Notificar APERTURA justo a la hora de inicio
-    if (currentHour === startHour && currentMinute === startMinute) {
-        await broadcastToAllUsers(
-            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-        );
+    if (currentHour === endHour && currentMinute === endMinute) {
+        if (currentlyAvailable) {
+            const { data: changedFlag } = await supabase
+                .from('app_config')
+                .select('value')
+                .eq('key', 'withdraw_schedule_changed')
+                .single();
+            const isChanged = changedFlag?.value === 'true';
+
+            const nowForMessage = moment.tz(TIMEZONE);
+            const todayStart = nowForMessage.clone().startOf('day').add(start, 'hours');
+            const nextOpeningIsToday = nowForMessage.isBefore(todayStart);
+            const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
+
+            let message;
+            if (isChanged) {
+                message = `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+                    `La ventana ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`;
+                // Limpiar la marca para que mañana sea el mensaje normal
+                await supabase
+                    .from('app_config')
+                    .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
+            } else {
+                message = `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+                    `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`;
+            }
+
+            await broadcastToAllUsers(message);
+        }
     }
 
     // Notificar CIERRE justo a la hora de fin
