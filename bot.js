@@ -884,6 +884,50 @@ async function broadcastToAllUsers(message, parseMode = 'HTML') {
     }
 }
 
+// Enviar una foto local a todos los usuarios sin caption
+async function broadcastPhotoToAllUsers(photoPath) {
+    const { data: users } = await supabase.from('users').select('telegram_id');
+    const deliveryErrorsToIgnore = [
+        'chat not found', 'bot was blocked by the user',
+        'user is deactivated', 'forbidden: bot was blocked by the user'
+    ];
+
+    for (const u of users || []) {
+        try {
+            await bot.telegram.sendPhoto(u.telegram_id, { source: photoPath });
+            await new Promise(resolve => setTimeout(resolve, 30));
+        } catch (e) {
+            const errorMessage = (e?.message || '').toLowerCase();
+            if (!deliveryErrorsToIgnore.some(frag => errorMessage.includes(frag))) {
+                console.warn(`Error enviando foto broadcast a ${u.telegram_id}:`, e.message);
+            }
+        }
+    }
+}
+
+// Obtener la ruta de la imagen según lotería, turno y estado
+function getSessionImagePath(lottery, timeSlot, status) {
+    const lotteryFolder = lottery === 'Nueva York' ? 'Nueva_York' : lottery;
+    const slotKey = timeSlot
+        .replace(/[🌅☀️🌙]/g, '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    const basePath = `Assets/${lotteryFolder}/${lotteryFolder.toLowerCase()}_${slotKey}`;
+
+    if (status === 'open') {
+        if (lottery === 'Nueva York' && slotKey === 'manana') {
+            const dayOfMonth = new Date().getDate();
+            const imageIndex = (dayOfMonth % 2 === 0) ? '' : '1';
+            return `${basePath}${imageIndex}_open.jpg`;
+        }
+        return `${basePath}_open.jpg`;
+    } else {
+        return `${basePath}_closed.jpg`;
+    }
+}
+
 // Broadcast personalizado para el admin (no se envía a sí mismo)
 async function adminBroadcast(ctx, messageText = null) {
     const { data: users } = await supabase.from('users').select('telegram_id');
@@ -4739,13 +4783,8 @@ async function closeExpiredSessions() {
                 .eq('id', session.id);
 
             const region = regionMap[session.lottery];
-            await broadcastToAllUsers(
-                `🔴 <b>SESIÓN CERRADA</b>\n\n` +
-                `🎰 ${region?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> - Turno <b>${escapeHTML(session.time_slot)}</b>\n` +
-                `📅 Fecha: ${session.date}\n\n` +
-                `❌ Ya no se reciben más apuestas para esta sesión.\n` +
-                `🔢 Pronto anunciaremos el número ganador. ¡Mantente atento!`
-            );
+            const photoPath = getSessionImagePath(session.lottery, session.time_slot, 'closed');
+            await broadcastPhotoToAllUsers(photoPath);
         }
     } catch (e) {
         console.error('Error cerrando sesiones:', e);
@@ -4788,13 +4827,8 @@ async function openScheduledSessions() {
                                     end_time: endTime.toISOString()
                                 });
 
-                            await broadcastToAllUsers(
-                                `🎲 <b>¡SESIÓN ABIERTA!</b> 🎲\n\n` +
-                                `✨ La región ${region.emoji} <b>${escapeHTML(lottery)}</b> ha abierto su turno de <b>${escapeHTML(slot.name)}</b>.\n` +
-                                `💎 ¡Es tu momento! Realiza tus apuestas y llévate grandes premios.\n\n` +
-                                `⏰ Cierre: ${moment(endTime).tz(TIMEZONE).format('HH:mm')} (hora Cuba)\n` +
-                                `🍀 ¡La suerte te espera!`
-                            );
+                            const photoPath = getSessionImagePath(lottery, slot.name, 'open');
+                            await broadcastPhotoToAllUsers(photoPath);
                         }
                     }
                 }
@@ -4895,10 +4929,24 @@ async function withdrawNotifications() {
     }
 }
 
-cron.schedule('* * * * *', () => {
-    closeExpiredSessions();
-    openScheduledSessions();
-    withdrawNotifications();
+// Después de todo el código, antes del module.exports
+let cronRunning = false;
+
+cron.schedule('* * * * *', async () => {
+    // Si la tanda anterior aún no terminó, saltamos esta ejecución
+    if (cronRunning) return;
+    cronRunning = true;
+    try {
+        // Ahora sí esperamos a que cada tarea termine
+        await closeExpiredSessions();
+        await openScheduledSessions();
+        await withdrawNotifications();
+    } catch (e) {
+        console.error('Error en el cron:', e);
+    } finally {
+        // Siempre liberar, incluso si algo falla
+        cronRunning = false;
+    }
 }, { timezone: TIMEZONE });
 
 //----------Cambios hechos por Luis David -----------//
