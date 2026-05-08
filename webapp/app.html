@@ -3403,9 +3403,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         async function renderUserManagerView() {
             adminViewContainer.innerHTML = `
-                <h4 class="text-xl font-semibold mb-4">👤 Gestor de Usuarios</h4>
+                <h4 class="text-xl font-semibold mb-4">👤 Estadísticas</h4>
                 <div class="flex gap-2 mb-3">
-                    <input type="number" id="userSearchId" placeholder="ID de Telegram del usuario"
+                    <input type="number" id="userSearchId" placeholder="ID de Telegram"
                         class="w-44 md:w-56 p-3 rounded-xl bg-gray-800 text-white border border-cyan-500">
                     <button id="searchUserBtn" class="bg-cyan-600 px-6 py-3 rounded-xl hover:bg-cyan-700 font-bold">
                         🔍 Buscar
@@ -3436,6 +3436,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const u = data.user;
                     const bets = data.bets;
                     const ref = data.referrals;
+
+                    const deposits = data.deposits || [];
+                    const withdraws = data.withdraws || [];
 
                     // Formatear balances
                     const cup = parseFloat(u.cup).toFixed(2);
@@ -3478,13 +3481,47 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         refHtml += '<p class="text-gray-400">Este usuario no ha referido a nadie.</p>';
                     }
 
+                    // Depósitos
+                    let depositsHtml = '<h5 class="text-lg font-bold mb-2">📥 Últimos depósitos</h5>';
+                    if (deposits.length === 0) {
+                        depositsHtml += '<p class="text-gray-400">No hay depósitos registrados.</p>';
+                    } else {
+                        depositsHtml += '<div class="space-y-1">';
+                        deposits.forEach(d => {
+                            const date = new Date(d.created_at).toLocaleString();
+                            depositsHtml += `
+                                <div class="bg-gray-800/40 p-2 rounded text-sm flex justify-between">
+                                    <span>${d.amount} ${d.currency} · ${escapeHTML(d.deposit_methods?.name || '?')}</span>
+                                    <span class="${d.status === 'approved' ? 'text-green-400' : d.status === 'rejected' ? 'text-red-400' : 'text-yellow-400'}">${d.status}</span>
+                                </div>`;
+                        });
+                        depositsHtml += '</div>';
+                    }
+
+                    // Retiros
+                    let withdrawsHtml = '<h5 class="text-lg font-bold mb-2 mt-4">📤 Últimos retiros</h5>';
+                    if (withdraws.length === 0) {
+                        withdrawsHtml += '<p class="text-gray-400">No hay retiros registrados.</p>';
+                    } else {
+                        withdrawsHtml += '<div class="space-y-1">';
+                        withdraws.forEach(w => {
+                            const date = new Date(w.created_at).toLocaleString();
+                            withdrawsHtml += `
+                                <div class="bg-gray-800/40 p-2 rounded text-sm flex justify-between">
+                                    <span>${w.amount} ${w.currency} · ${escapeHTML(w.withdraw_methods?.name || '?')}</span>
+                                    <span class="${w.status === 'approved' ? 'text-green-400' : w.status === 'rejected' ? 'text-red-400' : 'text-yellow-400'}">${w.status}</span>
+                                </div>`;
+                        });
+                        withdrawsHtml += '</div>';
+                    }
+
                     resultDiv.innerHTML = `
                         <div class="glass-card p-4 mb-4">
                             <h5 class="text-lg font-bold mb-2">📋 Datos del usuario</h5>
                             <p><b>ID:</b> ${u.telegram_id}</p>
                             <p><b>Nombre:</b> ${escapeHTML(u.first_name || 'N/A')}</p>
                             <p><b>Username:</b> ${u.username ? '@' + escapeHTML(u.username) : 'N/A'}</p>
-                            <p><b>Referido por:</b> ${u.ref_by || 'Nadie'}</p>
+                            <p><b>Refiriendo a:</b> ${u.ref_by || 'Nadie'}</p>
                             <div class="mt-3 grid grid-cols-3 gap-2">
                                 <div class="bg-gray-800/50 p-2 rounded text-center">
                                     <span class="block text-xs text-gray-300">CUP</span>
@@ -3509,6 +3546,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <div>
                             <h5 class="text-lg font-bold mb-2">👥 Referidos</h5>
                             ${refHtml}
+                        </div>
+                        <div class="mt-4">
+                            <h5 class="text-lg font-bold mb-2">👥 Depósitos</h5>
+                            ${depositsHtml}
+                        </div>
+                        <div class="mt-4">
+                            <h5 class="text-lg font-bold mb-2">👥 Retiros</h5>
+                            ${withdrawsHtml}
                         </div>
                     `;
                 } catch (e) {
