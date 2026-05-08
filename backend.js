@@ -3267,6 +3267,22 @@ app.get('/api/admin/user/:targetUserId', requireAdmin, async (req, res) => {
             .order('placed_at', { ascending: false })
             .limit(20);
 
+        // Depósitos (últimos 20)
+        const { data: deposits } = await supabase
+            .from('deposit_requests')
+            .select('id, amount, currency, status, created_at, method_id, deposit_methods(name)')
+            .eq('user_id', targetUserId)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        // Retiros (últimos 20)
+        const { data: withdraws } = await supabase
+            .from('withdraw_requests')
+            .select('id, amount, currency, status, created_at, method_id, withdraw_methods(name)')
+            .eq('user_id', targetUserId)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
         // Obtener estadísticas de referidos (igual lógica que /api/user/:userId/referrals)
         const { data: referidos } = await supabase
             .from('users')
@@ -3304,7 +3320,7 @@ app.get('/api/admin/user/:targetUserId', requireAdmin, async (req, res) => {
                         : amount;
                 const entry = aportePorUsuario.get(uid);
                 if (entry) entry.totalCUP += amountCUP;
-            }
+x            }
 
             referredUsersList = Array.from(aportePorUsuario.values())
                 .sort((a, b) => b.totalCUP - a.totalCUP);
@@ -3329,6 +3345,8 @@ app.get('/api/admin/user/:targetUserId', requireAdmin, async (req, res) => {
                 totalEarnedCUP,
                 list: referredUsersList,
             },
+            deposits: deposits || [],
+            withdraws: withdraws || []
         });
     } catch (e) {
         console.error(e);
