@@ -19,6 +19,7 @@ let bot;
 let botInfo = { username: 'bot', first_name: 'Bot' };
 
 // ========== CONFIGURACIÓN DESDE .ENV ==========
+const SECURITY = process.env.AUTH;
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id.trim())) : [];
@@ -884,7 +885,7 @@ async function broadcastToAllUsers(message, parseMode = 'HTML') {
 
 // ========== MIDDLEWARE DE ADMIN ==========
 async function requireAdmin(req, res, next) {
-    let userId = req.body.userId || req.query.userId || req.headers['x-telegram-id'];
+    let userId = req.verifiedTelegramId || req.body.userId || req.query.userId || req.headers['x-telegram-id'];
     if (!userId) {
         return res.status(403).json({ error: 'No autorizado: falta userId' });
     }
@@ -893,6 +894,28 @@ async function requireAdmin(req, res, next) {
     }
     next();
 }
+
+// ========== MIDDLEWARE DE SEGURIDAD: verifica initData en cada petición ==========
+app.use(async (req, res, next) => {
+    const initData = req.headers['x-telegram-init-data'];
+    if (!initData) return next(); // endpoints públicos pueden seguir sin él
+
+    const decoded = decodeURIComponent(initData);
+    const verified = verifyTelegramWebAppData(decoded, BOT_TOKEN);
+    if (!verified) {
+        return res.status(401).json({ error: 'Firma de Telegram inválida' });
+    }
+
+    const params = new URLSearchParams(decoded);
+    const userStr = params.get('user');
+    if (userStr) {
+        try {
+            const tgUser = JSON.parse(userStr);
+            req.verifiedTelegramId = tgUser.id;   // <-- ID confiable
+        } catch (e) {}
+    }
+    next();
+});
 
 // ========== ENDPOINTS PÚBLICOS ==========
 
@@ -1065,7 +1088,8 @@ app.get('/api/lottery-sessions/:id', async (req, res) => {
 
 // --- Solicitud de depósito ---
 app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) => {
-    const { methodId, userId, amount, currency } = req.body;
+    const { methodId, amount, currency } = req.body;
+    const userId = req.verifiedTelegramId || req.body.userId;
     const file = req.file;
     if (!methodId || !userId || !file || !amount || !currency) {
         return res.status(400).json({ error: 'Faltan datos' });
@@ -1154,7 +1178,8 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
 // --- Solicitud de retiro ---
 app.post('/api/withdraw-requests', async (req, res) => {
 
-    const { methodId, amount, currency, userId, accountInfo } = req.body;
+    const { methodId, amount, currency, accountInfo } = req.body;
+    const userId = req.verifiedTelegramId || req.body.userId;
     if (!methodId || !amount || !currency || !userId || !accountInfo) {
         return res.status(400).json({ error: 'Faltan datos' });
     }
@@ -1250,7 +1275,8 @@ app.post('/api/withdraw-requests', async (req, res) => {
 
 // --- Transferencia entre usuarios ---
 app.post('/api/transfer', async (req, res) => {
-    const { from, to, amount, currency } = req.body;
+    const { to, amount, currency } = req.body;
+    const from = req.verifiedTelegramId || req.body.from;
     const selfTransferErrorMessage = '❌ No puedes transferirte saldo a ti mismo. Elige otro usuario.\nPor favor, vuelve a iniciar la operación';
     if (!from || !to || !amount || !currency || amount <= 0) {
         return res.status(400).json({ error: 'Datos inválidos' });
@@ -1473,7 +1499,8 @@ app.post('/api/transfer', async (req, res) => {
 
 // --- Registro de apuestas ---
 app.post('/api/bets', async (req, res) => {
-    const { userId, lottery, betType, rawText, sessionId, betId } = req.body;
+    const { lottery, betType, rawText, sessionId, betId } = req.body;
+    const userId = req.verifiedTelegramId || req.body.userId;
     if (!userId || !lottery || !betType || !rawText) {
         return res.status(400).json({ error: 'Faltan datos' });
     }
@@ -1996,7 +2023,7 @@ app.post('/api/bets', async (req, res) => {
 // --- Cancelar jugada ---
 app.post('/api/bets/:id/cancel', async (req, res) => {
     const { id } = req.params;
-    const { userId } = req.body;
+    const userId = req.verifiedTelegramId || req.body.userId;
     if (!userId) return res.status(400).json({ error: 'Falta userId' });
 
     const { data: bet } = await supabase
@@ -3320,7 +3347,7 @@ app.get('/api/admin/user/:targetUserId', requireAdmin, async (req, res) => {
                         : amount;
                 const entry = aportePorUsuario.get(uid);
                 if (entry) entry.totalCUP += amountCUP;
-x            }
+            }
 
             referredUsersList = Array.from(aportePorUsuario.values())
                 .sort((a, b) => b.totalCUP - a.totalCUP);
