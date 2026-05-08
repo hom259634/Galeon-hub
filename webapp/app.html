@@ -603,6 +603,18 @@
         TG.ready();
         TG.expand();
 
+        // Sobrescribir fetch para añadir initData a todas las peticiones a nuestro servidor
+        const originalFetch = window.fetch;
+        window.fetch = function(url, options = {}) {
+            // Solo peticiones a nuestra API
+            if (typeof url === 'string' && url.startsWith('/api')) {
+                const headers = new Headers(options.headers || {});
+                headers.set('X-Telegram-Init-Data', TG.initData);
+                return originalFetch.call(this, url, { ...options, headers });
+            }
+            return originalFetch.call(this, url, options);
+        };
+
         // ---------- CONFIGURACIÓN DE HORARIOS POR LOTERÍA (hora de Cuba) ----------
         const LOTTERY_SCHEDULES = {
             'Florida': [
@@ -3403,7 +3415,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         async function renderUserManagerView() {
             adminViewContainer.innerHTML = `
-                <h4 class="text-xl font-semibold mb-4">👤 Estadísticas</h4>
+                <h4 class="text-xl font-semibold mb-4">👤 Estadísticas de Usuarios</h4>
                 <div class="flex gap-2 mb-3">
                     <input type="number" id="userSearchId" placeholder="ID de Telegram"
                         class="w-44 md:w-56 p-3 rounded-xl bg-gray-800 text-white border border-cyan-500">
@@ -3478,7 +3490,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         });
                         refHtml += '</div>';
                     } else {
-                        refHtml += '<p class="text-gray-400">Este usuario no ha referido a nadie.</p>';
+                        refHtml += '<p class="text-gray-400"> Este usuario no ha sido referido.</p>';
                     }
 
                     // Depósitos
@@ -3499,7 +3511,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     }
 
                     // Retiros
-                    let withdrawsHtml = '<h5 class="text-lg font-bold mb-2 mt-4">📤 Últimos retiros</h5>';
+                    let withdrawsHtml = '<h5 class="text-lg font-bold mb-2">📤 Últimos retiros</h5>';
                     if (withdraws.length === 0) {
                         withdrawsHtml += '<p class="text-gray-400">No hay retiros registrados.</p>';
                     } else {
