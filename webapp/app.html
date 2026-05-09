@@ -564,6 +564,7 @@
                         <button data-admin-view="setWithdrawHours" class="admin-nav-btn bg-purple-400/80 p-3 rounded-xl hover:bg-purple-500"><i class="fas fa-clock mr-1"></i> Horario Retiros</button>
                         <button data-admin-view="transferMins" class="admin-nav-btn bg-teal-400/80 p-3 rounded-xl hover:bg-teal-500"><i class="fas fa-sliders-h mr-1"></i> Min. Transferencia</button>
                         <button data-admin-view="userManager" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-user-cog mr-1"></i>Estadísticas de Usuarios</button>
+                        <button data-admin-view="manageUsers" class="admin-nav-btn bg-emerald-600/80 p-3 rounded-xl hover:bg-emerald-700"><i class="fas fa-user-edit mr-1"></i> Gestión de Usuarios</button>
                         <button data-admin-view="pendingRequests" class="admin-nav-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700"><i class="fas fa-clock mr-1"></i> Solicitudes Pendientes</button>
                         <button data-admin-view="viewData" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-eye mr-1"></i> Ver Datos</button>
                         
@@ -3367,6 +3368,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 else if (view === 'setWithdrawHours') renderSetWithdrawHoursView();
                 else if (view === 'transferMins') renderTransferMinsView();
                 else if (view === 'userManager') renderUserManagerView();
+                else if (view === 'manageUsers') renderManageUsersView();
             });
         });
 
@@ -3413,6 +3415,209 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             return labels[key] || (key.charAt(0).toUpperCase() + key.slice(1));
         }
 
+        // Añadir las funciones renderManageUsersView, searchUserByNameOrId y openBalanceModal
+        async function renderManageUsersView() {
+            adminViewContainer.innerHTML = `<div class="loader"></div> Cargando usuarios...`;
+            try {
+                const res = await fetch(`/api/admin/users?userId=${currentUser.telegram_id}`);
+                if (!res.ok) throw new Error('Error al cargar usuarios');
+                const users = await res.json();
+
+                // Guardar los usuarios en una variable accesible para el filtrado
+                window._allUsers = users;
+
+                let html = `<h4 class="text-xl font-semibold mb-4">👥 Gestión de Usuarios</h4>
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="userSearchInput" placeholder="Buscar por ID o nombre..." class="flex-1 p-3 rounded-xl bg-gray-800 text-white border border-cyan-500">
+                        <button id="searchUserBtn2" class="bg-cyan-600 px-4 py-3 rounded-xl hover:bg-cyan-700"><i class="fas fa-search"></i></button>
+                    </div>
+                    <div class="flex flex-wrap gap-2 mb-4">
+                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-filter="all">Todos</button>
+                        <button class="filter-btn bg-gray-600 px-3 py-1 rounded-full text-sm" data-filter="withMainBalance">Con saldo principal</button>
+                        <button class="filter-btn bg-purple-600 px-3 py-1 rounded-full text-sm" data-filter="withBonus">Con bono</button>
+                        <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="empty">Sin saldo ni bono</button>
+                        <button class="filter-btn bg-yellow-600 px-3 py-1 rounded-full text-sm" data-filter="withReferrals">Con referidos</button>
+                        <button class="filter-btn bg-blue-600 px-3 py-1 rounded-full text-sm" data-filter="referred">Refiriendo</button>
+                        <button class="filter-btn bg-cyan-600 px-3 py-1 rounded-full text-sm" data-filter="withBets">Con jugadas</button>
+                    </div>
+                    <div id="usersGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto pr-1">`;
+
+                function renderUserCards(filteredUsers) {
+                    let cardsHtml = '';
+                    filteredUsers.forEach(u => {
+                        const cup = parseFloat(u.cup) || 0;
+                        const usd = parseFloat(u.usd) || 0;
+                        const bonus = parseFloat(u.bonus_cup) || 0;
+                        cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-pointer hover:bg-gray-700/60 transition user-card" data-userid="${u.telegram_id}" onclick="openBalanceModal(${u.telegram_id}, '${escapeHTML(u.first_name || 'Sin nombre')}', ${cup}, ${usd}, ${bonus})">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''}</p>
+                                    <p class="text-xs text-gray-400">ID: ${u.telegram_id}</p>
+                                </div>
+                                <div class="text-right text-sm">
+                                    <p>CUP: <span class="text-cyan-300">${cup.toFixed(2)}</span></p>
+                                    <p>USD: <span class="text-yellow-300">${usd.toFixed(2)}</span></p>
+                                    ${bonus > 0 ? `<p><span class="text-purple-300">🎁 ${bonus.toFixed(2)}</span></p>` : ''}
+                                </div>
+                            </div>
+                        </div>`;
+                    });
+                    return cardsHtml;
+                }
+
+                html += renderUserCards(users);
+                html += `</div>`;
+                adminViewContainer.innerHTML = html;
+
+                // Función de filtrado
+                function applyFilter(filter) {
+                    const searchText = document.getElementById('userSearchInput').value.trim().toLowerCase();
+                    const cards = document.querySelectorAll('#usersGrid .user-card');
+                    cards.forEach(card => {
+                        const userId = parseInt(card.dataset.userid);
+                        const user = window._allUsers.find(u => u.telegram_id === userId);
+                        if (!user) { card.style.display = 'none'; return; }
+
+                        // Filtro de búsqueda por texto
+                        const textMatch = card.textContent.toLowerCase().includes(searchText);
+                        if (!textMatch) { card.style.display = 'none'; return; }
+
+                        // Filtro por categoría
+                        let categoryMatch = true;
+                        switch (filter) {
+                            case 'all': break;
+                            case 'withMainBalance':
+                                categoryMatch = (parseFloat(user.cup) > 0 || parseFloat(user.usd) > 0);
+                                break;
+                            case 'withBonus':
+                                categoryMatch = (parseFloat(user.bonus_cup) > 0);
+                                break;
+                            case 'empty':
+                                categoryMatch = (
+                                    parseFloat(user.cup) === 0 &&
+                                    parseFloat(user.usd) === 0 &&
+                                    parseFloat(user.bonus_cup) === 0
+                                );
+                                break;
+                            case 'withReferrals':
+                                categoryMatch = (user.referral_count > 0);
+                                break;
+                            case 'referred':
+                                categoryMatch = (user.is_referred === true);
+                                break;
+                            case 'withBets':
+                                categoryMatch = (user.has_bets === true);
+                                break;
+                        }
+                        card.style.display = categoryMatch ? '' : 'none';
+                    });
+                }
+
+                // Eventos de búsqueda
+                document.getElementById('searchUserBtn2').addEventListener('click', () => {
+                    const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+                    applyFilter(activeFilter);
+                });
+                document.getElementById('userSearchInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+                        applyFilter(activeFilter);
+                    }
+                });
+
+                // Eventos de filtros
+                document.querySelectorAll('.filter-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active', 'bg-emerald-600'));
+                        this.classList.add('active', 'bg-emerald-600');
+                        applyFilter(this.dataset.filter);
+                    });
+                });
+            } catch (e) {
+                adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar usuarios.</p>';
+            }
+        }
+
+        window.openBalanceModal = (telegramId, name, cup, usd, bonus) => {
+            modalBody.innerHTML = `
+                <h4 class="text-xl font-bold mb-4">Editar saldo de ${escapeHTML(name)} (ID: ${telegramId})</h4>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm mb-1">CUP</label>
+                        <div class="flex gap-2">
+                            <button onclick="adjustBalance(${telegramId}, 'cup', -10)" class="bg-red-600 px-3 rounded-lg">-10</button>
+                            <button onclick="adjustBalance(${telegramId}, 'cup', -1)" class="bg-red-700 px-3 rounded-lg">-1</button>
+                            <input type="number" id="editCup" value="${cup}" step="0.01" class="flex-1 p-2 rounded bg-gray-700 text-white">
+                            <button onclick="adjustBalance(${telegramId}, 'cup', 1)" class="bg-green-700 px-3 rounded-lg">+1</button>
+                            <button onclick="adjustBalance(${telegramId}, 'cup', 10)" class="bg-green-600 px-3 rounded-lg">+10</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1">USD</label>
+                        <div class="flex gap-2">
+                            <button onclick="adjustBalance(${telegramId}, 'usd', -5)" class="bg-red-600 px-3 rounded-lg">-5</button>
+                            <button onclick="adjustBalance(${telegramId}, 'usd', -0.5)" class="bg-red-700 px-3 rounded-lg">-0.5</button>
+                            <input type="number" id="editUsd" value="${usd}" step="0.01" class="flex-1 p-2 rounded bg-gray-700 text-white">
+                            <button onclick="adjustBalance(${telegramId}, 'usd', 0.5)" class="bg-green-700 px-3 rounded-lg">+0.5</button>
+                            <button onclick="adjustBalance(${telegramId}, 'usd', 5)" class="bg-green-600 px-3 rounded-lg">+5</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1">🎁 Bono (CUP)</label>
+                        <div class="flex gap-2">
+                            <button onclick="adjustBalance(${telegramId}, 'bonus_cup', -5)" class="bg-red-600 px-3 rounded-lg">-5</button>
+                            <button onclick="adjustBalance(${telegramId}, 'bonus_cup', -1)" class="bg-red-700 px-3 rounded-lg">-1</button>
+                            <input type="number" id="editBonus" value="${bonus}" step="0.01" class="flex-1 p-2 rounded bg-gray-700 text-white">
+                            <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 1)" class="bg-green-700 px-3 rounded-lg">+1</button>
+                            <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 5)" class="bg-green-600 px-3 rounded-lg">+5</button>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">Si el bono supera el mínimo de depósito, se migrará automáticamente a CUP.</p>
+                    </div>
+                </div>
+                <button onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
+                <button onclick="banearUsuario(${telegramId})" class="w-full bg-red-700 py-3 rounded-xl mt-2 font-bold">🚫 Banear usuario</button>
+                <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
+            `;
+            adminModal.classList.remove('hidden');
+        };
+
+        window.adjustBalance = (telegramId, field, amount) => {
+            const input = document.getElementById(field === 'cup' ? 'editCup' : (field === 'usd' ? 'editUsd' : 'editBonus'));
+            if (input) {
+                let current = parseFloat(input.value) || 0;
+                input.value = Math.max(0, current + amount).toFixed(2);
+            }
+        };
+
+        window.saveBalanceEdit = async (telegramId) => {
+            const cup = parseFloat(document.getElementById('editCup').value) || 0;
+            const usd = parseFloat(document.getElementById('editUsd').value) || 0;
+            const bonusCup = parseFloat(document.getElementById('editBonus').value) || 0;
+
+            if (cup < 0 || usd < 0 || bonusCup < 0) {
+                iziToast.warning({ message: 'Los saldos no pueden ser negativos' });
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/admin/users/${telegramId}/balance`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cup, usd, bonus_cup: bonusCup, userId: currentUser.telegram_id })
+                });
+                if (res.ok) {
+                    iziToast.success({ message: 'Saldo actualizado correctamente' });
+                    adminModal.classList.add('hidden');
+                    renderManageUsersView(); // Refrescar vista
+                } else {
+                    const err = await res.json();
+                    iziToast.error({ message: err.error || 'Error al actualizar' });
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+            }
+        };
+
         async function renderUserManagerView() {
             adminViewContainer.innerHTML = `
                 <h4 class="text-xl font-semibold mb-4">👤 Estadísticas de Usuarios</h4>
@@ -3437,6 +3642,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 resultDiv.innerHTML = '<div class="loader"></div> Cargando...';
 
                 try {
+                    
                     const res = await fetch(`/api/admin/user/${userId}?userId=${currentUser.telegram_id}`);
                     if (!res.ok) {
                         const err = await res.json();
@@ -3451,6 +3657,28 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                     const deposits = data.deposits || [];
                     const withdraws = data.withdraws || [];
+
+                    // Calcular totales aprobados
+                    let totalDepCUP = 0, totalDepUSD = 0;
+                    let totalWithCUP = 0, totalWithUSD = 0;
+
+                    deposits.forEach(d => {
+                        if (d.status === 'approved') {
+                            if (d.currency === 'CUP') totalDepCUP += parseFloat(d.amount) || 0;
+                            else if (d.currency === 'USD') totalDepUSD += parseFloat(d.amount) || 0;
+                            // otras monedas se ignoran o podrías convertirlas si deseas
+                        }
+                    });
+
+                    withdraws.forEach(w => {
+                        if (w.status === 'approved') {
+                            if (w.currency === 'CUP') totalWithCUP += parseFloat(w.amount) || 0;
+                            else if (w.currency === 'USD') totalWithUSD += parseFloat(w.amount) || 0;
+                        }
+                    });
+
+                    const approvedDepositCount = deposits.filter(d => d.status === 'approved').length;
+                    const approvedWithdrawCount = withdraws.filter(w => w.status === 'approved').length;
 
                     // Formatear balances
                     const cup = parseFloat(u.cup).toFixed(2);
@@ -3494,7 +3722,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     }
 
                     // Depósitos
-                    let depositsHtml = '<h5 class="text-lg font-bold mb-2">📥 Últimos depósitos</h5>';
+                    let depositsHtml = '<h5 class="text-lg font-bold mb-2">📥 Últimos 20 depósitos</h5>';
                     if (deposits.length === 0) {
                         depositsHtml += '<p class="text-gray-400">No hay depósitos registrados.</p>';
                     } else {
@@ -3511,7 +3739,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     }
 
                     // Retiros
-                    let withdrawsHtml = '<h5 class="text-lg font-bold mb-2">📤 Últimos retiros</h5>';
+                    let withdrawsHtml = '<h5 class="text-lg font-bold mb-2">📤 Últimos 20 retiros</h5>';
                     if (withdraws.length === 0) {
                         withdrawsHtml += '<p class="text-gray-400">No hay retiros registrados.</p>';
                     } else {
@@ -3558,6 +3786,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <div>
                             <h5 class="text-lg font-bold mb-2">👥 Referidos</h5>
                             ${refHtml}
+                        </div>
+                        <div class="mt-4">
+                            <h5 class="text-lg font-bold mb-2">💰 Totales aprobados</h5>
+                            <p>📥 Depósitos: <b>${approvedDepositCount}</b> transacción(es) — ${totalDepCUP.toFixed(2)} CUP / ${totalDepUSD.toFixed(2)} USD</p>
+                            <p>📤 Retiros: <b>${approvedWithdrawCount}</b> transacción(es) — ${totalWithCUP.toFixed(2)} CUP / ${totalWithUSD.toFixed(2)} USD</p>
                         </div>
                         <div class="mt-4">
                             <h5 class="text-lg font-bold mb-2">👥 Depósitos</h5>
@@ -3635,6 +3868,25 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 currency: match[2].toUpperCase()
             };
         }
+
+        window.banearUsuario = async (telegramId) => {
+            if (!confirm(`¿Estás seguro de BANEAR permanentemente al usuario ${telegramId}? Esta acción no se puede deshacer.`)) return;
+            try {
+                const res = await fetch(`/api/admin/users/${telegramId}/ban`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: currentUser.telegram_id })
+                });
+                if (res.ok) {
+                    iziToast.success({ message: 'Usuario baneado permanentemente.' });
+                    adminModal.classList.add('hidden');
+                    renderManageUsersView(); // refrescar la lista
+                } else {
+                    const err = await res.json();
+                    iziToast.error({ message: err.error || 'Error al banear' });
+                }
+            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+        };
     })();
 </script>
 </body>
