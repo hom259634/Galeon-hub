@@ -1949,7 +1949,18 @@ bot.action(/toggle_session_(\d+)_(.+)/, async (ctx) => {
             .single();
 
         const region = regionMap[session.lottery];
-        if (newStatus === 'closed') {
+        if (newStatus === 'open') {
+            const endTimeFormatted = session.end_time
+                ? moment(session.end_time).tz(TIMEZONE).format('HH:mm')
+                : '—';
+            await broadcastToAllUsers(
+                `🎲 <b>¡SESIÓN ABIERTA!</b> 🎲\n\n` +
+                `✨ La región ${region?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> acaba de abrir su turno de <b>${escapeHTML(session.time_slot)}</b>.\n` +
+                `💎 ¡Es tu momento! Realiza tus apuestas y llévate grandes premios.\n\n` +
+                `⏰ Cierre: ${endTimeFormatted} (hora Cuba)\n` +
+                `🍀 ¡La suerte te espera!`
+            );
+        } else if (newStatus === 'closed') {
             await broadcastToAllUsers(
                 `🔴 <b>SESIÓN CERRADA</b>\n\n` +
                 `🎰 ${region?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> - Turno <b>${escapeHTML(session.time_slot)}</b>\n` +
@@ -4913,11 +4924,17 @@ async function withdrawNotifications() {
 
     // ✅ 1. Notificar APERTURA exactamente a la hora de inicio (si aún no está disponible)
     if (currentHour === startHour && currentMinute === startMinute) {
-        await broadcastToAllUsers(
-            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-        );
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
+
+        if (!currentlyAvailable) {
+            await broadcastToAllUsers(
+                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+            );
+        }
     }
 
     // ✅ 2. Notificar CIERRE exactamente a la hora de fin (con manejo de cambio de horario)

@@ -96,74 +96,6 @@ async function isWithdrawTime() {
     return currentHour >= start && currentHour < end;
 }
 
-async function withdrawNotifications() {
-    const now = moment.tz(TIMEZONE);
-    const currentHour = now.hour();
-    const currentMinute = now.minute();
-    const start = await getWithdrawTimeStart();
-    const end   = await getWithdrawTimeEnd();
-
-    const startHour = Math.floor(start);
-    const startMinute = Math.round((start - startHour) * 60);
-    const endHour   = Math.floor(end);
-    const endMinute = Math.round((end - endHour) * 60);
-
-    // --- Revertir cualquier anulación manual temporal si expiró ---
-    const expiry = await getManualOverrideExpiry();
-    if (expiry && now.isAfter(expiry)) {
-        await supabase
-            .from('app_config')
-            .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
-        await clearManualOverrideExpiry();
-    }
-
-    const currentlyAvailable = await isWithdrawTime();
-    const startStr = formatHour12(start);
-    const endStr   = formatHour12(end);
-
-    // Apertura automática: justo en la hora/minuto configurados (solo si está cerrado)
-    if (currentHour === startHour && currentMinute === startMinute) {
-        if (!currentlyAvailable) {
-            await broadcastToAllUsers(
-                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-            );
-        }
-    }
-    // Cierre automático: justo en la hora/minuto configurados (solo si está abierto)
-    if (currentHour === endHour && currentMinute === endMinute) {   
-        if (currentlyAvailable) {
-            const { data: changedFlag } = await supabase
-                .from('app_config')
-                .select('value')
-                .eq('key', 'withdraw_schedule_changed')
-                .single();
-            const isChanged = changedFlag?.value === 'true';
-
-            const nowForMessage = moment.tz(TIMEZONE);
-            const todayStart = nowForMessage.clone().startOf('day').add(start, 'hours');
-            const nextOpeningIsToday = nowForMessage.isBefore(todayStart);
-            const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
-
-            let message;
-            if (isChanged) {
-                message = `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-                    `La ventana ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`;
-                // Limpiar la marca para que mañana sea el mensaje normal
-                await supabase
-                    .from('app_config')
-                    .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
-            } else {
-                message = `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-                    `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`;
-            }
-
-            await broadcastToAllUsers(message);
-        }
-    }
-}
-
 async function getReferralCommissionRate() {
     const { data } = await supabase
         .from('app_config')
@@ -2531,7 +2463,7 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
         const endStrFormatted = formatHour12(end);
         message =
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha finalizado. Se reabrirá ${openingDayStr} en su nuevo horario de ${startStr} a ${endStrFormatted} (hora Cuba).`;
+            `La ventana de retiros ha finalizado. Se reabrirá ${openingDayStr} de ${startStr} a ${endStrFormatted} (hora Cuba).`;
             }
 
             await broadcastToAllUsers(message, 'HTML');
