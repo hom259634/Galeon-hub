@@ -4911,7 +4911,18 @@ async function withdrawNotifications() {
     const startStr = formatHour12(start);
     const endStr   = formatHour12(end);
 
-    // Notificar APERTURA justo a la hora de inicio
+    // ✅ 1. Notificar APERTURA exactamente a la hora de inicio (si aún no está disponible)
+    if (currentHour === startHour && currentMinute === startMinute) {
+        if (!currentlyAvailable) {
+            await broadcastToAllUsers(
+                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+            );
+        }
+    }
+
+    // ✅ 2. Notificar CIERRE exactamente a la hora de fin (con manejo de cambio de horario)
     if (currentHour === endHour && currentMinute === endMinute) {
         if (currentlyAvailable) {
             const { data: changedFlag } = await supabase
@@ -4941,14 +4952,6 @@ async function withdrawNotifications() {
 
             await broadcastToAllUsers(message);
         }
-    }
-
-    // Notificar CIERRE justo a la hora de fin
-    if (currentHour === endHour && currentMinute === endMinute) {
-        await broadcastToAllUsers(
-            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`
-        );
     }
 }
 
