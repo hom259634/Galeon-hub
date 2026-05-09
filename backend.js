@@ -955,6 +955,9 @@ app.post('/api/auth', async (req, res) => {
 
     const tgUser = JSON.parse(userStr);
     const user = await getOrCreateUser(tgUser.id, tgUser.first_name, tgUser.username);
+    if (user && user.is_banned) {
+        return res.status(403).json({ error: 'Tu cuenta ha sido baneada permanentemente.' });
+    }
     const isNewUser = !!user?.__isNewUser;
     if (user && typeof user === 'object' && '__isNewUser' in user) {
         delete user.__isNewUser;
@@ -3533,6 +3536,197 @@ app.post('/api/admin/pending-withdraws/:id/reject', requireAdmin, async (req, re
     } catch (e) {}
 
     res.json({ success: true });
+});
+
+// ========== NUEVO: GESTIÓN DE USUARIOS (ADMIN) ==========
+
+// Obtener todos los usuarios (solo admin) con campos extra para filtros
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+    try {
+        // 1. Obtener todos los usuarios (incluyendo ref_by)
+        const { data: users, error } = await supabase
+            .from('users')
+            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by')
+            .order('first_name', { ascending: true });
+
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        // 2. Obtener IDs de usuarios que tienen al menos una apuesta
+        const { data: betsData } = await supabase
+            .from('bets')
+            .select('user_id');
+
+        const usersWithBets = new Set((betsData || []).map(b => b.user_id));
+
+        // 3. Contar referidos por cada referrer
+        const { data: referrals } = await supabase
+            .from('users')
+            .select('ref_by');
+        const referralCounts = new Map();
+        (referrals || []).forEach(r => {
+            if (r.ref_by) {
+                referralCounts.set(r.ref_by, (referralCounts.get(r.ref_by) || 0) + 1);
+            }
+        });
+
+        // 4. Construir respuesta con los campos extra
+        const enrichedUsers = (users || []).map(u => ({
+            telegram_id: u.telegram_id,
+            first_name: u.first_name,
+            username: u.username,
+            cup: u.cup,
+            usd: u.usd,
+            bonus_cup: u.bonus_cup,
+            is_referred: !!u.ref_by,                // tiene padre referente
+            has_bets: usersWithBets.has(u.telegram_id), // tiene jugadas
+            referral_count: referralCounts.get(u.telegram_id) || 0 // cuántos referidos tiene
+        }));
+
+        res.json(enrichedUsers);
+    } catch (e) {
+        console.error('Error obteniendo usuarios:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Editar saldo de un usuario (admin)
+app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) => {
+    const telegramId = parseInt(req.params.telegramId);
+    if (isNaN(telegramId)) {
+        return res.status(400).json({ error: 'ID de usuario inválido' });
+    }
+
+    let { cup, usd, bonus_cup } = req.body;
+    cup = parseFloat(cup) || 0;
+    usd = parseFloat(usd) || 0;
+    bonus_cup = parseFloat(bonus_cup) || 0;
+
+    if (cup < 0 || usd < 0 || bonus_cup < 0) {
+        return res.status(400).json({ error: 'Los saldos no pueden ser negativos' });
+    }
+
+    try {
+        // Obtener usuario actual para verificar migración del bono
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('cup, usd, bonus_cup')
+            .eq('telegram_id', telegramId)
+            .single();
+
+        if (userError || !user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Lógica de migración de bono: si el bono editado supera el mínimo de depósito, migrar a CUP
+        const minDepositCUP = await getMinDepositCUP();
+        const rateUSD = await getExchangeRateUSD();
+        const totalEquivalentCUP = cup + (usd * rateUSD) + bonus_cup;
+
+        let finalCup = cup;
+        let finalUsd = usd;
+        let finalBonus = bonus_cup;
+        let bonusMovedMsg = '';
+
+        if (bonus_cup > 0 && totalEquivalentCUP >= minDepositCUP) {
+            // Migrar todo el bono a CUP
+            finalCup += bonus_cup;
+            finalBonus = 0;
+            bonusMovedMsg = `🎁 Tu bono de bienvenida de ${bonus_cup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
+        }
+
+        const { error: updateError } = await supabase
+            .from('users')
+            .update({
+                cup: finalCup,
+                usd: finalUsd,
+                bonus_cup: finalBonus,
+                updated_at: new Date()
+            })
+            .eq('telegram_id', telegramId);
+
+        if (updateError) {
+            return res.status(500).json({ error: updateError.message });
+        }
+
+        // Notificar al usuario si el bono se migró
+                // ========== NOTIFICACIONES AL USUARIO ==========
+        const oldCup = parseFloat(user.cup) || 0;
+        const oldUsd = parseFloat(user.usd) || 0;
+        const oldBonus = parseFloat(user.bonus_cup) || 0;
+        const diffCup = finalCup - oldCup;
+        const diffUsd = finalUsd - oldUsd;
+        const diffBonus = finalBonus - oldBonus;
+
+        // 1. Si el bono migró (se envió un monto al bono y se movió a CUP)
+        if (bonus_cup > 0 && finalBonus === 0) {
+            const montoBono = bonus_cup.toFixed(2);
+            try {
+                await bot.telegram.sendMessage(telegramId,
+                    `⚠️ Han sido sumados ${montoBono} CUP a tu bono de bienvenida actual, y este se ha movido a tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`,
+                    { parse_mode: 'HTML' }
+                );
+            } catch (e) {}
+        }
+        // 2. Si el bono aumentó pero NO migró (se queda en la cuenta como bono)
+        else if (diffBonus > 0) {
+            try {
+                await bot.telegram.sendMessage(telegramId,
+                    `⚠️ Han sido sumados ${diffBonus.toFixed(2)} CUP a tu bono de bienvenida actual. Si crees que esto es incorrecto, por favor, contáctanos.`,
+                    { parse_mode: 'HTML' }
+                );
+            } catch (e) {}
+        }
+
+        // 3. Cambios en CUP o USD (si hubo diferencia)
+        if (Math.abs(diffCup) > 0.001 || Math.abs(diffUsd) > 0.001) {
+            const partes = [];
+            if (Math.abs(diffCup) > 0.001) {
+                const verbo = diffCup > 0 ? 'sumados' : 'restados';
+                partes.push(`${verbo} ${Math.abs(diffCup).toFixed(2)} CUP`);
+            }
+            if (Math.abs(diffUsd) > 0.001) {
+                const verbo = diffUsd > 0 ? 'sumados' : 'restados';
+                partes.push(`${verbo} ${Math.abs(diffUsd).toFixed(2)} USD`);
+            }
+            const mensaje = `⚠️ Han sido ${partes.join(' y ')} ${partes.length > 1 ? 'a tu saldo principal' : 'de tu saldo principal'}. Si crees que esto es incorrecto, por favor, contáctanos.`;
+            try {
+                await bot.telegram.sendMessage(telegramId, mensaje, { parse_mode: 'HTML' });
+            } catch (e) {}
+        }
+
+        res.json({ success: true, cup: finalCup, usd: finalUsd, bonus_cup: finalBonus });
+    } catch (e) {
+        console.error('Error editando balance de usuario:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Banear usuario permanentemente
+app.post('/api/admin/users/:telegramId/ban', requireAdmin, async (req, res) => {
+    const telegramId = parseInt(req.params.telegramId);
+    if (isNaN(telegramId)) {
+        return res.status(400).json({ error: 'ID de usuario inválido' });
+    }
+
+    try {
+        // Marcar como baneado (asumiendo que existe la columna is_banned en users)
+        const { error } = await supabase
+            .from('users')
+            .update({ is_banned: true, updated_at: new Date() })
+            .eq('telegram_id', telegramId);
+
+        if (error) {
+            // Si la columna no existe, el error aquí será capturado
+            return res.status(500).json({ error: 'No se pudo banear al usuario. Verifica que la columna is_banned exista en la tabla users.' });
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error('Error baneando usuario:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 
 // ========== SERVIDOR ESTÁTICO ==========

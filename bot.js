@@ -4913,13 +4913,11 @@ async function withdrawNotifications() {
 
     // ✅ 1. Notificar APERTURA exactamente a la hora de inicio (si aún no está disponible)
     if (currentHour === startHour && currentMinute === startMinute) {
-        if (!currentlyAvailable) {
-            await broadcastToAllUsers(
-                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-            );
-        }
+        await broadcastToAllUsers(
+            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+        );
     }
 
     // ✅ 2. Notificar CIERRE exactamente a la hora de fin (con manejo de cambio de horario)
@@ -4958,21 +4956,10 @@ async function withdrawNotifications() {
 // Después de todo el código, antes del module.exports
 let cronRunning = false;
 
-cron.schedule('* * * * *', async () => {
-    // Si la tanda anterior aún no terminó, saltamos esta ejecución
-    if (cronRunning) return;
-    cronRunning = true;
-    try {
-        // Ahora sí esperamos a que cada tarea termine
-        await closeExpiredSessions();
-        await openScheduledSessions();
-        await withdrawNotifications();
-    } catch (e) {
-        console.error('Error en el cron:', e);
-    } finally {
-        // Siempre liberar, incluso si algo falla
-        cronRunning = false;
-    }
+cron.schedule('* * * * *', () => {
+    closeExpiredSessions();
+    openScheduledSessions();
+    withdrawNotifications();
 }, { timezone: TIMEZONE });
 
 //----------Cambios hechos por Luis David -----------//
