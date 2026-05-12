@@ -2410,7 +2410,7 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
         const newStart = withdrawTimeStart !== undefined ? withdrawTimeStart : await getWithdrawTimeStart();
         const newEnd = withdrawTimeEnd !== undefined ? withdrawTimeEnd : await getWithdrawTimeEnd();
 
-        if (currentHour >= newEnd) {
+        if (currentHour < newStart || currentHour >= newEnd) {
             // La nueva ventana ya cerró → enviar aviso de cierre inmediato
             const startStr = formatHour12(newStart);
             const endStr = formatHour12(newEnd);
@@ -2419,7 +2419,7 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
             const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
             await broadcastToAllUsers(
                 `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-                `La ventana ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`
+                `La ventana de retiros ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`
             );
             // No marcamos schedule_changed porque ya se notificó
         } else {
