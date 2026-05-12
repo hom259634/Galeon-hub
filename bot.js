@@ -38,24 +38,24 @@ const broadcastMap = new Map();
 const WITHDRAW_HOURS = { start: 22, end: 23.5};
 
 async function isWithdrawTime() {
-    // Consultar el flag de anulación manual
+    // El horario programado siempre es la prioridad
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
+    const now = moment.tz(TIMEZONE);
+    const currentHour = now.hour() + now.minute() / 60;
+
+    // Si estamos dentro del horario → abierto, siempre (sin importar override)
+    if (currentHour >= start && currentHour < end) return true;
+
+    // Fuera del horario → solo si hay un override manual 'open'
     const { data: overrideData } = await supabase
         .from('app_config')
         .select('value')
         .eq('key', 'withdraw_manual_override')
         .single();
-
     const override = overrideData?.value || 'none';
 
-    if (override === 'open') return true;   // forzar abierto
-    if (override === 'closed') return false; // forzar cerrado
-
-    // Si no hay anulación, usar el horario programado
-    const start = await getWithdrawTimeStart();
-    const end = await getWithdrawTimeEnd();
-    const now = moment.tz(TIMEZONE);
-    const currentHour = now.hour() + now.minute() / 60;
-    return currentHour >= start && currentHour < end;
+    return override === 'open';
 }
 
 function formatHourDecimal(hourDecimal) {
@@ -4909,20 +4909,17 @@ async function withdrawNotifications() {
     const endHour   = Math.floor(end);
     const endMinute = Math.round((end - endHour) * 60);
 
-    // --- Revertir cualquier anulación manual temporal si expiró ---
-    const expiry = await getManualOverrideExpiry();
-    if (expiry && now.isAfter(expiry)) {
+    // --- El horario programado siempre se ejecuta: al llegar start/end se limpia cualquier override ---
+    const startStr = formatHour12(start);
+    const endStr   = formatHour12(end);
+
+    // ✅ 1. APERTURA programada: notificar y limpiar cualquier override manual
+    if (currentHour === startHour && currentMinute === startMinute) {
         await supabase
             .from('app_config')
             .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
         await clearManualOverrideExpiry();
-    }
 
-    const startStr = formatHour12(start);
-    const endStr   = formatHour12(end);
-
-    // ✅ 1. Notificar APERTURA exactamente a la hora de inicio
-    if (currentHour === startHour && currentMinute === startMinute) {
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
             `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
@@ -4930,8 +4927,13 @@ async function withdrawNotifications() {
         );
     }
 
-    // ✅ 2. Notificar CIERRE exactamente a la hora de fin (con manejo de cambio de horario)
+    // ✅ 2. CIERRE programado: notificar y limpiar cualquier override manual
     if (currentHour === endHour && currentMinute === endMinute) {
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
+        await clearManualOverrideExpiry();
+
         const { data: changedFlag } = await supabase
             .from('app_config')
             .select('value')

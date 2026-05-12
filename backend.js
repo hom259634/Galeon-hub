@@ -76,24 +76,24 @@ function formatHourDecimal(hourDecimal) {
 }
 
 async function isWithdrawTime() {
-    // Consultar el flag de anulación manual
+    // El horario programado siempre es la prioridad
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
+    const now = moment.tz(TIMEZONE);
+    const currentHour = now.hour() + now.minute() / 60;
+
+    // Si estamos dentro del horario → abierto, siempre (sin importar override)
+    if (currentHour >= start && currentHour < end) return true;
+
+    // Fuera del horario → solo si hay un override manual 'open'
     const { data: overrideData } = await supabase
         .from('app_config')
         .select('value')
         .eq('key', 'withdraw_manual_override')
         .single();
-
     const override = overrideData?.value || 'none';
 
-    if (override === 'open') return true;   // forzar abierto
-    if (override === 'closed') return false; // forzar cerrado
-
-    // Si no hay anulación, usar el horario programado
-    const start = await getWithdrawTimeStart();
-    const end = await getWithdrawTimeEnd();
-    const now = moment.tz(TIMEZONE);
-    const currentHour = now.hour() + now.minute() / 60;
-    return currentHour >= start && currentHour < end;
+    return override === 'open';
 }
 
 async function getReferralCommissionRate() {
@@ -2396,10 +2396,38 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
         await supabase.from('app_config').upsert({ key: 'withdraw_time_end', value: withdrawTimeEnd.toString() }, { onConflict: 'key' });
     }
     if (withdrawTimeStart !== undefined || withdrawTimeEnd !== undefined) {
-        // Si cambió el horario fijo, marcamos que se notifique un mensaje especial al cerrar
+        // Si cambió el horario fijo, el horario programado es la prioridad:
+        // limpiamos cualquier anulación manual activa para que el nuevo horario rija
         await supabase
             .from('app_config')
-            .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
+            .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
+
+        const now = moment.tz(TIMEZONE);
+        const currentHour = now.hour() + now.minute() / 60;
+        const newStart = withdrawTimeStart !== undefined ? withdrawTimeStart : await getWithdrawTimeStart();
+        const newEnd = withdrawTimeEnd !== undefined ? withdrawTimeEnd : await getWithdrawTimeEnd();
+
+        if (currentHour >= newEnd) {
+            // La nueva ventana ya cerró → enviar aviso de cierre inmediato
+            const startStr = formatHour12(newStart);
+            const endStr = formatHour12(newEnd);
+            const todayStart = now.clone().startOf('day').add(newStart, 'hours');
+            const nextOpeningIsToday = now.isBefore(todayStart);
+            const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
+            await broadcastToAllUsers(
+                `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+                `La ventana ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`
+            );
+            // No marcamos schedule_changed porque ya se notificó
+        } else {
+            // Marcamos que se notifique un mensaje especial al cerrar cuando el cron llegue al end
+            await supabase
+                .from('app_config')
+                .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
+        }
     }
     res.json({ success: true });
 });
@@ -2411,6 +2439,9 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
         return res.status(400).json({ error: 'Acción inválida. Use "open" o "close".' });
     }
 
+    // Estado antes del cambio
+    const before = await isWithdrawTime();
+
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
     const startStr = formatHour12(start);
@@ -2421,6 +2452,18 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
         .from('app_config')
         .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
 
+    // Verificar si el cambio realmente afectó el estado
+    const after = await isWithdrawTime();
+
+    if (before === after) {
+        // Estado no cambió (ej: cerrar dentro del horario programado, o abrir cuando ya está abierto)
+        return res.status(400).json({
+            error: before
+                ? 'La sesión ya está abierta por el horario programado. No se puede cerrar manualmente.'
+                : 'La sesión ya está cerrada fuera del horario programado.'
+        });
+    }
+
     const now = moment.tz(TIMEZONE);
     let expiryDate = null;
 
@@ -2428,19 +2471,16 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
         const currentHour = now.hour() + now.minute() / 60;
         const insideWindow = currentHour >= start && currentHour < end;
         if (insideWindow) {
-            // Expira al final de la ventana actual
             expiryDate = now.clone().startOf('day').add(end, 'hours').toDate();
         } else {
-            // Fuera de ventana: apertura permanente (sin expiración)
             await clearManualOverrideExpiry();
         }
-    } else { // action === 'close'
-        // El cierre manual expira en el PRÓXIMO INICIO de ventana
+    } else {
         const todayStart = now.clone().startOf('day').add(start, 'hours');
         if (now.isBefore(todayStart)) {
-            expiryDate = todayStart.toDate();   // hoy mismo
+            expiryDate = todayStart.toDate();
         } else {
-            expiryDate = todayStart.add(1, 'day').toDate(); // mañana
+            expiryDate = todayStart.add(1, 'day').toDate();
         }
     }
 
@@ -2464,10 +2504,10 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
         message =
             `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
             `La ventana de retiros ha finalizado. Se reabrirá ${openingDayStr} de ${startStr} a ${endStrFormatted} (hora Cuba).`;
-            }
+    }
 
-            await broadcastToAllUsers(message, 'HTML');
-            res.json({ success: true });
+    await broadcastToAllUsers(message, 'HTML');
+    res.json({ success: true });
 });
 
 // ========== ESTADO ACTUAL DE RETIROS ==========
@@ -2633,7 +2673,15 @@ app.post('/api/admin/lottery-sessions/toggle', requireAdmin, async (req, res) =>
     if (error) return res.status(500).json({ error: error.message });
 
     const region = regionMap[data.lottery];
-    if (status === 'closed') {
+    if (status === 'open') {
+        await broadcastToAllUsers(
+            `🎲 <b>¡SESIÓN ABIERTA!</b> 🎲\n\n` +
+            `✨ La región ${region?.emoji || '🎰'} <b>${data.lottery}</b> acaba de abrir su turno de <b>${data.time_slot}</b>.\n` +
+            `💎 ¡Es tu momento! Realiza tus apuestas y llévate grandes premios.\n\n` +
+            `⏰ Cierre: ${moment(data.end_time).tz(TIMEZONE).format('HH:mm')} (hora Cuba)\n` +
+            `🍀 ¡La suerte te espera!`
+        );
+    } else {
         await broadcastToAllUsers(
             `🔴 <b>SESIÓN CERRADA</b>\n\n` +
             `🎰 ${region?.emoji || '🎰'} <b>${data.lottery}</b> - Turno <b>${data.time_slot}</b>\n` +
