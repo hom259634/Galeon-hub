@@ -3428,7 +3428,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 let html = `<h4 class="text-xl font-semibold mb-4">👥 Gestión de Usuarios</h4>
                     <div class="flex gap-2 mb-4">
-                        <input type="text" id="userSearchInput" placeholder="Buscar por ID o nombre..." class="flex-1 p-3 rounded-xl bg-gray-800 text-white border border-cyan-500">
+                        <input type="text" id="userSearchInput" placeholder="Buscar por ID o nombre..." class="w-auto min-w-0 p-3 rounded-xl bg-gray-800 text-white border border-cyan-500" size="22">
                         <button id="searchUserBtn2" class="bg-cyan-600 px-4 py-3 rounded-xl hover:bg-cyan-700"><i class="fas fa-search"></i></button>
                     </div>
                     <div class="flex flex-wrap gap-2 mb-4">
@@ -3547,7 +3547,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <div class="flex gap-2">
                             <button onclick="adjustBalance(${telegramId}, 'cup', -10)" class="bg-red-600 px-3 rounded-lg">-10</button>
                             <button onclick="adjustBalance(${telegramId}, 'cup', -1)" class="bg-red-700 px-3 rounded-lg">-1</button>
-                            <input type="number" id="editCup" value="${cup}" step="0.01" class="flex-1 p-2 rounded bg-gray-700 text-white">
+                            <input type="number" id="editCup" value="${cup}" step="0.01" class="w-24 p-1.5 rounded bg-gray-700 text-white text-sm">
                             <button onclick="adjustBalance(${telegramId}, 'cup', 1)" class="bg-green-700 px-3 rounded-lg">+1</button>
                             <button onclick="adjustBalance(${telegramId}, 'cup', 10)" class="bg-green-600 px-3 rounded-lg">+10</button>
                         </div>
@@ -3557,7 +3557,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <div class="flex gap-2">
                             <button onclick="adjustBalance(${telegramId}, 'usd', -5)" class="bg-red-600 px-3 rounded-lg">-5</button>
                             <button onclick="adjustBalance(${telegramId}, 'usd', -0.5)" class="bg-red-700 px-3 rounded-lg">-0.5</button>
-                            <input type="number" id="editUsd" value="${usd}" step="0.01" class="flex-1 p-2 rounded bg-gray-700 text-white">
+                            <input type="number" id="editUsd" value="${usd}" step="0.01" class="w-24 p-1.5 rounded bg-gray-700 text-white text-sm">
                             <button onclick="adjustBalance(${telegramId}, 'usd', 0.5)" class="bg-green-700 px-3 rounded-lg">+0.5</button>
                             <button onclick="adjustBalance(${telegramId}, 'usd', 5)" class="bg-green-600 px-3 rounded-lg">+5</button>
                         </div>
@@ -3567,15 +3567,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <div class="flex gap-2">
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', -5)" class="bg-red-600 px-3 rounded-lg">-5</button>
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', -1)" class="bg-red-700 px-3 rounded-lg">-1</button>
-                            <input type="number" id="editBonus" value="${bonus}" step="0.01" class="flex-1 p-2 rounded bg-gray-700 text-white">
+                            <input type="number" id="editBonus" value="${bonus}" step="0.01" class="w-24 p-1.5 rounded bg-gray-700 text-white text-sm">
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 1)" class="bg-green-700 px-3 rounded-lg">+1</button>
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 5)" class="bg-green-600 px-3 rounded-lg">+5</button>
                         </div>
                         <p class="text-xs text-gray-400 mt-1">Si el bono supera el mínimo de depósito, se migrará automáticamente a CUP.</p>
                     </div>
                 </div>
-                <button onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
-                <button onclick="banearUsuario(${telegramId})" class="w-full bg-red-700 py-3 rounded-xl mt-2 font-bold">🚫 Banear usuario</button>
+                <button id="saveBalanceBtn" onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
+                <button id="banUserBtn" onclick="banearUsuario(${telegramId})" class="w-full bg-red-700 py-3 rounded-xl mt-2 font-bold">🚫 Banear usuario</button>
                 <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
             `;
             adminModal.classList.remove('hidden');
@@ -3590,12 +3590,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         };
 
         window.saveBalanceEdit = async (telegramId) => {
+            const btn = document.getElementById('saveBalanceBtn');
+            if (!btn || btn.disabled) return;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Guardando...';
             const cup = parseFloat(document.getElementById('editCup').value) || 0;
             const usd = parseFloat(document.getElementById('editUsd').value) || 0;
             const bonusCup = parseFloat(document.getElementById('editBonus').value) || 0;
 
             if (cup < 0 || usd < 0 || bonusCup < 0) {
                 iziToast.warning({ message: 'Los saldos no pueden ser negativos' });
+                btn.disabled = false;
+                btn.innerHTML = '💾 Guardar cambios';
                 return;
             }
 
@@ -3608,13 +3614,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Saldo actualizado correctamente' });
                     adminModal.classList.add('hidden');
-                    renderManageUsersView(); // Refrescar vista
+                    renderManageUsersView();
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error al actualizar' });
+                    btn.disabled = false;
+                    btn.innerHTML = '💾 Guardar cambios';
                 }
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión' });
+                btn.disabled = false;
+                btn.innerHTML = '💾 Guardar cambios';
             }
         };
 
@@ -3658,7 +3668,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const deposits = data.deposits || [];
                     const withdraws = data.withdraws || [];
 
-                    // Calcular totales aprobados
+                    // Calcular totales aprobados para depósitos y retiros
                     let totalDepCUP = 0, totalDepUSD = 0;
                     let totalWithCUP = 0, totalWithUSD = 0;
 
@@ -3666,7 +3676,6 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         if (d.status === 'approved') {
                             if (d.currency === 'CUP') totalDepCUP += parseFloat(d.amount) || 0;
                             else if (d.currency === 'USD') totalDepUSD += parseFloat(d.amount) || 0;
-                            // otras monedas se ignoran o podrías convertirlas si deseas
                         }
                     });
 
@@ -3676,9 +3685,6 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             else if (w.currency === 'USD') totalWithUSD += parseFloat(w.amount) || 0;
                         }
                     });
-
-                    const approvedDepositCount = deposits.filter(d => d.status === 'approved').length;
-                    const approvedWithdrawCount = withdraws.filter(w => w.status === 'approved').length;
 
                     // Formatear balances
                     const cup = parseFloat(u.cup).toFixed(2);
@@ -3737,6 +3743,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         });
                         depositsHtml += '</div>';
                     }
+                    depositsHtml += `<p class="text-sm text-gray-400 mt-1">Total aprobado: ${totalDepCUP.toFixed(2)} CUP / ${totalDepUSD.toFixed(2)} USD</p>`;
 
                     // Retiros
                     let withdrawsHtml = '<h5 class="text-lg font-bold mb-2">📤 Últimos 20 retiros</h5>';
@@ -3754,6 +3761,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         });
                         withdrawsHtml += '</div>';
                     }
+                    withdrawsHtml += `<p class="text-sm text-gray-400 mt-1">Total aprobado: ${totalWithCUP.toFixed(2)} CUP / ${totalWithUSD.toFixed(2)} USD</p>`;
 
                     resultDiv.innerHTML = `
                         <div class="glass-card p-4 mb-4">
@@ -3788,16 +3796,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             ${refHtml}
                         </div>
                         <div class="mt-4">
-                            <h5 class="text-lg font-bold mb-2">💰 Totales aprobados</h5>
-                            <p>📥 Depósitos: <b>${approvedDepositCount}</b> transacción(es) — ${totalDepCUP.toFixed(2)} CUP / ${totalDepUSD.toFixed(2)} USD</p>
-                            <p>📤 Retiros: <b>${approvedWithdrawCount}</b> transacción(es) — ${totalWithCUP.toFixed(2)} CUP / ${totalWithUSD.toFixed(2)} USD</p>
-                        </div>
-                        <div class="mt-4">
-                            <h5 class="text-lg font-bold mb-2">👥 Depósitos</h5>
+                            <h5 class="text-lg font-bold mb-2">📥 Depósitos</h5>
                             ${depositsHtml}
                         </div>
                         <div class="mt-4">
-                            <h5 class="text-lg font-bold mb-2">👥 Retiros</h5>
+                            <h5 class="text-lg font-bold mb-2">📤 Retiros</h5>
                             ${withdrawsHtml}
                         </div>
                     `;
@@ -3870,7 +3873,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }
 
         window.banearUsuario = async (telegramId) => {
+            const btn = document.getElementById('banUserBtn');
+            if (!btn || btn.disabled) return;
             if (!confirm(`¿Estás seguro de BANEAR permanentemente al usuario ${telegramId}? Esta acción no se puede deshacer.`)) return;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Baneando...';
             try {
                 const res = await fetch(`/api/admin/users/${telegramId}/ban`, {
                     method: 'POST',
@@ -3880,12 +3887,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario baneado permanentemente.' });
                     adminModal.classList.add('hidden');
-                    renderManageUsersView(); // refrescar la lista
+                    renderManageUsersView();
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error al banear' });
+                    btn.disabled = false;
+                    btn.innerHTML = '🚫 Banear usuario';
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+                btn.disabled = false;
+                btn.innerHTML = '🚫 Banear usuario';
+            }
         };
     })();
 </script>
