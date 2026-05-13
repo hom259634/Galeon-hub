@@ -2389,6 +2389,8 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
     if (referralRate !== undefined) {
         await supabase.from('app_config').upsert({ key: 'referral_commission_rate', value: referralRate.toString() }, { onConflict: 'key' });
     }
+    const wasOpen = await isWithdrawTime();
+
     if (withdrawTimeStart !== undefined) {
         await supabase.from('app_config').upsert({ key: 'withdraw_time_start', value: withdrawTimeStart.toString() }, { onConflict: 'key' });
     }
@@ -2396,37 +2398,45 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
         await supabase.from('app_config').upsert({ key: 'withdraw_time_end', value: withdrawTimeEnd.toString() }, { onConflict: 'key' });
     }
     if (withdrawTimeStart !== undefined || withdrawTimeEnd !== undefined) {
-        // Si cambió el horario fijo, el horario programado es la prioridad:
-        // limpiamos cualquier anulación manual activa para que el nuevo horario rija
-        await supabase
+        const { data: overrideData } = await supabase
             .from('app_config')
-            .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
-        await supabase
-            .from('app_config')
-            .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
+            .select('value')
+            .eq('key', 'withdraw_manual_override')
+            .single();
+        const currentOverride = overrideData?.value || 'none';
 
-        const now = moment.tz(TIMEZONE);
-        const currentHour = now.hour() + now.minute() / 60;
-        const newStart = withdrawTimeStart !== undefined ? withdrawTimeStart : await getWithdrawTimeStart();
-        const newEnd = withdrawTimeEnd !== undefined ? withdrawTimeEnd : await getWithdrawTimeEnd();
-
-        if (currentHour < newStart || currentHour >= newEnd) {
-            // La nueva ventana ya cerró → enviar aviso de cierre inmediato
-            const startStr = formatHour12(newStart);
-            const endStr = formatHour12(newEnd);
-            const todayStart = now.clone().startOf('day').add(newStart, 'hours');
-            const nextOpeningIsToday = now.isBefore(todayStart);
-            const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
-            await broadcastToAllUsers(
-                `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-                `La ventana de retiros ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`
-            );
-            // No marcamos schedule_changed porque ya se notificó
-        } else {
-            // Marcamos que se notifique un mensaje especial al cerrar cuando el cron llegue al end
+        if (currentOverride === 'open') {
             await supabase
                 .from('app_config')
                 .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
+        } else if (wasOpen) {
+            await supabase
+                .from('app_config')
+                .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
+            await supabase
+                .from('app_config')
+                .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
+
+            const now = moment.tz(TIMEZONE);
+            const currentHour = now.hour() + now.minute() / 60;
+            const newStart = withdrawTimeStart !== undefined ? withdrawTimeStart : await getWithdrawTimeStart();
+            const newEnd = withdrawTimeEnd !== undefined ? withdrawTimeEnd : await getWithdrawTimeEnd();
+
+            if (currentHour < newStart || currentHour >= newEnd) {
+                const startStr = formatHour12(newStart);
+                const endStr = formatHour12(newEnd);
+                const todayStart = now.clone().startOf('day').add(newStart, 'hours');
+                const nextOpeningIsToday = now.isBefore(todayStart);
+                const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
+                await broadcastToAllUsers(
+                    `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+                    `La ventana de retiros ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`
+                );
+            } else {
+                await supabase
+                    .from('app_config')
+                    .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
+            }
         }
     }
     res.json({ success: true });
