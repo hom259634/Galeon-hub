@@ -3640,47 +3640,60 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
             return res.status(500).json({ error: updateError.message });
         }
 
-        // Notificar al usuario si el bono se migró
-                // ========== NOTIFICACIONES AL USUARIO ==========
+        // ========== NOTIFICACIONES AL USUARIO ==========
         const oldCup = parseFloat(user.cup) || 0;
         const oldUsd = parseFloat(user.usd) || 0;
         const oldBonus = parseFloat(user.bonus_cup) || 0;
-        const diffCup = finalCup - oldCup;
-        const diffUsd = finalUsd - oldUsd;
-        const diffBonus = finalBonus - oldBonus;
+
+        // Diferencia de lo que el admin realmente solicitó (antes de migración)
+        const diffCupReq = cup - oldCup;
+        const diffUsdReq = usd - oldUsd;
+        const diffBonusReq = bonus_cup - oldBonus;
+        const bonusMigrated = (bonus_cup > 0 && finalBonus === 0);
 
         // 1. Si el bono migró (se envió un monto al bono y se movió a CUP)
-        if (bonus_cup > 0 && finalBonus === 0) {
-            const montoBono = bonus_cup.toFixed(2);
+        if (bonusMigrated) {
             try {
                 await bot.telegram.sendMessage(telegramId,
-                    `⚠️ Han sido sumados ${montoBono} CUP a tu bono de bienvenida actual, y este se ha movido a tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`,
+                    `⚠️ Han sido sumados ${bonus_cup.toFixed(2)} CUP a tu bono de bienvenida actual, y este se ha movido a tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
         }
-        // 2. Si el bono aumentó pero NO migró (se queda en la cuenta como bono)
-        else if (diffBonus > 0) {
+        // 2. Cambio en el bono (aumento o reducción) que NO migró
+        else if (Math.abs(diffBonusReq) > 0.001) {
+            const verbo = diffBonusReq > 0 ? 'sumados' : 'restados';
+            const prep = diffBonusReq > 0 ? 'a' : 'de';
             try {
                 await bot.telegram.sendMessage(telegramId,
-                    `⚠️ Han sido sumados ${diffBonus.toFixed(2)} CUP a tu bono de bienvenida actual. Si crees que esto es incorrecto, por favor, contáctanos.`,
+                    `⚠️ Han sido ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual. Si crees que esto es incorrecto, por favor, contáctanos.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
         }
 
-        // 3. Cambios en CUP o USD (si hubo diferencia)
-        if (Math.abs(diffCup) > 0.001 || Math.abs(diffUsd) > 0.001) {
+        // 3. Cambios en CUP o USD (usando lo solicitado, no lo final, para evitar duplicar por migración)
+        if (Math.abs(diffCupReq) > 0.001 || Math.abs(diffUsdReq) > 0.001) {
             const partes = [];
-            if (Math.abs(diffCup) > 0.001) {
-                const verbo = diffCup > 0 ? 'sumados' : 'restados';
-                partes.push(`${verbo} ${Math.abs(diffCup).toFixed(2)} CUP`);
+            if (Math.abs(diffCupReq) > 0.001) {
+                const verbo = diffCupReq > 0 ? 'sumados' : 'restados';
+                partes.push(`${verbo} ${Math.abs(diffCupReq).toFixed(2)} CUP`);
             }
-            if (Math.abs(diffUsd) > 0.001) {
-                const verbo = diffUsd > 0 ? 'sumados' : 'restados';
-                partes.push(`${verbo} ${Math.abs(diffUsd).toFixed(2)} USD`);
+            if (Math.abs(diffUsdReq) > 0.001) {
+                const verbo = diffUsdReq > 0 ? 'sumados' : 'restados';
+                partes.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD`);
             }
-            const mensaje = `⚠️ Han sido ${partes.join(' y ')} ${partes.length > 1 ? 'a tu saldo principal' : 'de tu saldo principal'}. Si crees que esto es incorrecto, por favor, contáctanos.`;
+
+            let preposicion;
+            if (diffCupReq >= 0 && diffUsdReq >= 0) {
+                preposicion = 'a';
+            } else if (diffCupReq <= 0 && diffUsdReq <= 0) {
+                preposicion = 'de';
+            } else {
+                preposicion = 'en';
+            }
+
+            const mensaje = `⚠️ Han sido ${partes.join(' y ')} ${preposicion} tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`;
             try {
                 await bot.telegram.sendMessage(telegramId, mensaje, { parse_mode: 'HTML' });
             } catch (e) {}
