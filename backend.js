@@ -18,7 +18,7 @@ const moment = require('moment-timezone');
 let bot; 
 let botInfo = { username: 'bot', first_name: 'Bot' };
 
-// ========== CONFIGURACIÓN DESDE .ENV ==========
+// ======== == CONFIGURACIÓN DESDE .ENV ==========
 const SECURITY = process.env.AUTH;
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -3536,7 +3536,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
         // 1. Obtener todos los usuarios (incluyendo ref_by)
         const { data: users, error } = await supabase
             .from('users')
-            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by')
+            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by, is_banned')
             .order('first_name', { ascending: true });
 
         if (error) {
@@ -3569,9 +3569,10 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
             cup: u.cup,
             usd: u.usd,
             bonus_cup: u.bonus_cup,
-            is_referred: !!u.ref_by,                // tiene padre referente
-            has_bets: usersWithBets.has(u.telegram_id), // tiene jugadas
-            referral_count: referralCounts.get(u.telegram_id) || 0 // cuántos referidos tiene
+            is_referred: !!u.ref_by,
+            has_bets: usersWithBets.has(u.telegram_id),
+            referral_count: referralCounts.get(u.telegram_id) || 0,
+            is_banned: !!u.is_banned
         }));
 
         res.json(enrichedUsers);
@@ -3617,13 +3618,10 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
         let finalCup = cup;
         let finalUsd = usd;
         let finalBonus = bonus_cup;
-        let bonusMovedMsg = '';
 
         if (bonus_cup > 0 && totalEquivalentCUP >= minDepositCUP) {
-            // Migrar todo el bono a CUP
             finalCup += bonus_cup;
             finalBonus = 0;
-            bonusMovedMsg = `🎁 Tu bono de bienvenida de ${bonus_cup.toFixed(2)} CUP se ha movido a tu saldo principal.`;
         }
 
         const { error: updateError } = await supabase
@@ -3645,17 +3643,20 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
         const oldUsd = parseFloat(user.usd) || 0;
         const oldBonus = parseFloat(user.bonus_cup) || 0;
 
+        const adminHeader = `<b>${botInfo.first_name || botInfo.username || '4pu3$t4$ Qva®'}</b> — ADMIN:\n\n`;
+
         // Diferencia de lo que el admin realmente solicitó (antes de migración)
         const diffCupReq = cup - oldCup;
         const diffUsdReq = usd - oldUsd;
         const diffBonusReq = bonus_cup - oldBonus;
-        const bonusMigrated = (bonus_cup > 0 && finalBonus === 0);
+        const adminAddedBonus = diffBonusReq > 0.001;
+        const bonusMigrated = (adminAddedBonus && finalBonus === 0);
 
-        // 1. Si el bono migró (se envió un monto al bono y se movió a CUP)
+        // 1. Si el admin añadió bono y migró a CUP
         if (bonusMigrated) {
             try {
                 await bot.telegram.sendMessage(telegramId,
-                    `⚠️ Han sido sumados ${bonus_cup.toFixed(2)} CUP a tu bono de bienvenida actual, y este se ha movido a tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`,
+                    adminHeader + `⚠️ Han sido sumados ${diffBonusReq.toFixed(2)} CUP a tu bono de bienvenida actual, y este se ha movido a tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
@@ -3666,7 +3667,7 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
             const prep = diffBonusReq > 0 ? 'a' : 'de';
             try {
                 await bot.telegram.sendMessage(telegramId,
-                    `⚠️ Han sido ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual. Si crees que esto es incorrecto, por favor, contáctanos.`,
+                    adminHeader + `⚠️ Han sido ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual. Si crees que esto es incorrecto, por favor, contáctanos.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
@@ -3693,7 +3694,7 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
                 preposicion = 'en';
             }
 
-            const mensaje = `⚠️ Han sido ${partes.join(' y ')} ${preposicion} tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`;
+            const mensaje = adminHeader + `⚠️ Han sido ${partes.join(' y ')} ${preposicion} tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`;
             try {
                 await bot.telegram.sendMessage(telegramId, mensaje, { parse_mode: 'HTML' });
             } catch (e) {}
