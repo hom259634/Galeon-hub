@@ -1753,7 +1753,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const actionsHtml = sessionOpen ? `
                 <div class="flex gap-2 mt-4">
                     <button onclick="editBet(${bet.id})" class="flex-1 bg-blue-600 py-2 rounded-lg edit-cancel-btn">✏️ Editar</button>
-                    <button onclick="cancelBet(${bet.id})" class="flex-1 bg-red-600 py-2 rounded-lg edit-cancel-btn">🗑 Eliminar</button>
+                    <button onclick="cancelBet(${bet.id}, this)" class="flex-1 bg-red-600 py-2 rounded-lg edit-cancel-btn">🗑 Eliminar</button>
                 </div>
             ` : '';
 
@@ -1807,11 +1807,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             betDetailModal.classList.add('hidden');
         };
 
-        window.cancelBet = async (betId) => {
+        window.cancelBet = async (betId, btn) => {
+            if (btn && btn.disabled) return;
             if (!confirm('¿Estás seguro de eliminar esta jugada? Se te reembolsará el monto.')) return;
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Eliminando...'; }
             
             const bet = userBets.find(b => b.id === betId);
-            if (!bet) return;
+            if (!bet) {
+                if (btn) { btn.disabled = false; btn.innerHTML = '🗑 Eliminar'; }
+                return;
+            }
 
             try {
                 const res = await fetch(`/api/bets/${betId}/cancel`, {
@@ -1830,9 +1835,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error al eliminar' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = '🗑 Eliminar'; }
                 }
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión' });
+                if (btn) { btn.disabled = false; btn.innerHTML = '🗑 Eliminar'; }
             }
         };
 
@@ -2284,6 +2291,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 // Evento para Guardar horario fijo
                 document.getElementById('saveWithdrawHoursBtn').addEventListener('click', async () => {
+                    const btn = document.getElementById('saveWithdrawHoursBtn');
+                    if (!btn || btn.disabled) return;
+                    btn.disabled = true;
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Guardando...';
                     function timePartsToDecimal(hour12, minute, ampm) {
                         let h = parseInt(hour12);
                         if (ampm === 'PM' && h !== 12) h += 12;
@@ -2304,16 +2316,31 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                     if (isNaN(startVal) || isNaN(endVal) || startVal >= endVal) {
                         iziToast.warning({ message: 'Horario inválido. El inicio debe ser menor que el cierre.' });
+                        btn.disabled = false;
+                        btn.textContent = originalText;
                         return;
                     }
 
-                    await fetch('/api/admin/config', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ withdrawTimeStart: startVal, withdrawTimeEnd: endVal, userId: currentUser.telegram_id })
-                    });
-                    iziToast.success({ message: 'Horario de retiros actualizado' });
-                    renderSetWithdrawHoursView(); // Refrescar la vista
+                    try {
+                        const res = await fetch('/api/admin/config', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ withdrawTimeStart: startVal, withdrawTimeEnd: endVal, userId: currentUser.telegram_id })
+                        });
+                        if (res.ok) {
+                            iziToast.success({ message: 'Horario de retiros actualizado' });
+                            renderSetWithdrawHoursView(); // Refrescar la vista
+                        } else {
+                            const err = await res.json();
+                            iziToast.error({ message: err.error || 'Error al guardar' });
+                            btn.disabled = false;
+                            btn.textContent = originalText;
+                        }
+                    } catch (e) {
+                        iziToast.error({ message: 'Error de conexión' });
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                    }
                 });
 
                 const toggleBtn = document.getElementById('manualToggleWithdrawBtn');
@@ -2399,7 +2426,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     html += `<div class="bg-gray-700/50 p-2 rounded-lg text-center">
                         <span class="block text-sm">${slot.name}</span>
                         <span class="${clase} text-xs">${estado}</span>
-                        <button onclick="toggleSession('${lottery}', '${slot.name}', ${session ? session.id : 'null'}, '${session ? session.status : 'closed'}')" 
+                        <button onclick="toggleSession('${lottery}', '${slot.name}', ${session ? session.id : 'null'}, '${session ? session.status : 'closed'}', this)" 
                             class="mt-2 bg-${session && session.status === 'open' ? 'red' : 'green'}-600 px-3 py-1 rounded-lg text-xs w-full">${accion}</button>
                     </div>`;
                 }
@@ -2409,7 +2436,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             adminViewContainer.innerHTML = html;
         }
 
-        window.toggleSession = async (lottery, timeSlot, sessionId, currentStatus) => {
+        window.toggleSession = async (lottery, timeSlot, sessionId, currentStatus, btn) => {
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; const originalText = btn.textContent; btn.textContent = '⏳ Procesando...'; }
             if (sessionId) {
                 const newStatus = currentStatus === 'open' ? 'closed' : 'open';
                 try {
@@ -2424,8 +2453,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     } else {
                         const err = await res.json();
                         iziToast.error({ message: err.error });
+                        if (btn) { btn.disabled = false; btn.textContent = currentStatus === 'open' ? 'Cerrar' : 'Abrir'; }
                     }
-                } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                } catch (e) { iziToast.error({ message: 'Error de conexión' }); if (btn) { btn.disabled = false; btn.textContent = currentStatus === 'open' ? 'Cerrar' : 'Abrir'; } }
             } else {
                 try {
                     const res = await fetch('/api/admin/lottery-sessions', {
@@ -2439,8 +2469,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     } else {
                         const err = await res.json();
                         iziToast.error({ message: err.error });
+                        if (btn) { btn.disabled = false; btn.textContent = 'Abrir'; }
                     }
-                } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                } catch (e) { iziToast.error({ message: 'Error de conexión' }); if (btn) { btn.disabled = false; btn.textContent = 'Abrir'; } }
             }
         };
 
@@ -2457,7 +2488,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     sessions.forEach(s => {
                         const isPublished = publishedSet.has(`${s.lottery}|${s.date}|${s.time_slot}`);
                         html += `<div class="bg-gray-800/70 p-4 rounded-xl flex justify-between items-center mb-2"><div><span class="font-bold">${s.lottery} ${s.time_slot}</span><span class="text-sm ml-2">${s.date}</span>${isPublished?'<span class="ml-2 text-green-400">✅ publicado</span>':''}</div>`;
-                        if (!isPublished) html += `<button onclick="publishWinning(${s.id})" class="bg-teal-600 px-4 py-2 rounded-lg">📢 Publicar</button>`;
+                        if (!isPublished) html += `<button onclick="publishWinning(${s.id}, this)" class="bg-teal-600 px-4 py-2 rounded-lg">📢 Publicar</button>`;
                         else html += `<button onclick="showWinners(${s.id})" class="bg-blue-600 px-4 py-2 rounded-lg">👁️ Ver ganadores</button>`;
                         html += `</div>`;
                     });
@@ -2466,11 +2497,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             } catch (e) { adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar sesiones.</p>'; }
         }
 
-        window.publishWinning = async (sessionId) => {
+        window.publishWinning = async (sessionId, btn) => {
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Publicando...'; }
             const number = prompt('Número ganador de 7 DÍGITOS (puedes separar con espacio, ej: 517 3262):');
-            if (!number) return;
+            if (!number) { if (btn) { btn.disabled = false; btn.innerHTML = '📢 Publicar'; } return; }
             const clean = number.replace(/\s+/g, '');
-            if (!/^\d{7}$/.test(clean)) { iziToast.error({ message: 'Debe tener 7 dígitos' }); return; }
+            if (!/^\d{7}$/.test(clean)) { iziToast.error({ message: 'Debe tener 7 dígitos' }); if (btn) { btn.disabled = false; btn.innerHTML = '📢 Publicar'; } return; }
             try {
                 const res = await fetch('/api/admin/winning-numbers', {
                     method: 'POST',
@@ -2520,8 +2553,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error al publicar' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = '📢 Publicar'; }
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) { iziToast.error({ message: 'Error de conexión' }); if (btn) { btn.disabled = false; btn.innerHTML = '📢 Publicar'; } }
         };
 
         window.showWinners = async (sessionId) => {
@@ -2581,13 +2615,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 <button id="saveDepositMethodBtn" class="w-full bg-green-600 py-3 rounded-xl font-semibold hover:bg-green-700">Guardar</button>
             `;
             document.getElementById('saveDepositMethodBtn')?.addEventListener('click', async () => {
+                const btn = document.getElementById('saveDepositMethodBtn');
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = 'Guardando...';
                 const name = document.getElementById('depName').value.trim();
                 const card = document.getElementById('depCard').value.trim();
                 const confirm = document.getElementById('depConfirm').value.trim();
                 const currency = document.getElementById('depCurrency').value;
                 const minAmount = parseFloat(document.getElementById('depMinAmount').value);
                 const maxAmount = parseFloat(document.getElementById('depMaxAmount').value);
-                if (!name || !card || !confirm) { iziToast.warning({ message: 'Todos los campos son obligatorios' }); return; }
+                if (!name || !card || !confirm) { iziToast.warning({ message: 'Todos los campos son obligatorios' }); btn.disabled = false; btn.textContent = originalText; return; }
                 try {
                     const res = await fetch('/api/admin/deposit-methods', {
                         method: 'POST',
@@ -2600,8 +2639,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         })
                     });
                     if (res.ok) { iziToast.success({ message: 'Método añadido' }); await loadDepositMethods(); renderViewDataView(); }
-                    else { const err = await res.json(); iziToast.error({ message: err.error }); }
-                } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                    else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
+                } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
         }
 
@@ -2623,13 +2662,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 <button id="saveWithdrawMethodBtn" class="w-full bg-green-600 py-3 rounded-xl font-semibold hover:bg-green-700">Guardar</button>
             `;
             document.getElementById('saveWithdrawMethodBtn')?.addEventListener('click', async () => {
+                const btn = document.getElementById('saveWithdrawMethodBtn');
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = 'Guardando...';
                 const name = document.getElementById('witName').value.trim();
                 const card = document.getElementById('witCard').value.trim();
                 const confirm = document.getElementById('witConfirm').value.trim() || 'ninguno';
                 const currency = document.getElementById('witCurrency').value;
                 const minAmount = parseFloat(document.getElementById('witMinAmount').value);
                 const maxAmount = parseFloat(document.getElementById('witMaxAmount').value);
-                if (!name || !card) { iziToast.warning({ message: 'Nombre e instrucción obligatorios' }); return; }
+                if (!name || !card) { iziToast.warning({ message: 'Nombre e instrucción obligatorios' }); btn.disabled = false; btn.textContent = originalText; return; }
                 try {
                     const res = await fetch('/api/admin/withdraw-methods', {
                         method: 'POST',
@@ -2642,8 +2686,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         })
                     });
                     if (res.ok) { iziToast.success({ message: 'Método añadido' }); await loadWithdrawMethods(); renderViewDataView(); }
-                    else { const err = await res.json(); iziToast.error({ message: err.error }); }
-                } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                    else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
+                } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
         }
 
@@ -2705,7 +2749,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     <input type="number" id="editDepMinAmount" value="${method.min_amount !== null ? method.min_amount : 0}" step="0.01" min="0" class="w-full p-2 rounded bg-gray-700 text-white mb-3">
                     <label>Límite máximo (0 = sin límite)</label>
                     <input type="number" id="editDepMaxAmount" value="${method.max_amount !== null ? method.max_amount : 0}" step="0.01" min="0" class="w-full p-2 rounded bg-gray-700 text-white mb-3">
-                    <button onclick="saveEditDeposit(${methodId})" class="w-full bg-green-600 py-2 rounded-lg">Guardar cambios</button>
+                    <button onclick="saveEditDeposit(${methodId}, this)" class="w-full bg-green-600 py-2 rounded-lg">Guardar cambios</button>
                     <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
                 `;
                 adminModal.classList.remove('hidden');
@@ -2715,14 +2759,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         };
 
-        window.saveEditDeposit = async (methodId) => {
+        window.saveEditDeposit = async (methodId, btn) => {
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; const originalText = btn.textContent; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Guardando...'; }
             const name = document.getElementById('editDepName').value.trim();
             const card = document.getElementById('editDepCard').value.trim();
             const confirm = document.getElementById('editDepConfirm').value.trim();
             const currency = document.getElementById('editDepCurrency').value;
             const minAmount = parseFloat(document.getElementById('editDepMinAmount').value);
             const maxAmount = parseFloat(document.getElementById('editDepMaxAmount').value);
-            if (!name || !card || !confirm) { iziToast.warning({ message: 'Todos los campos son obligatorios' }); return; }
+            if (!name || !card || !confirm) { iziToast.warning({ message: 'Todos los campos son obligatorios' }); if (btn) { btn.disabled = false; btn.innerHTML = 'Guardar cambios'; } return; }
             try {
                 const res = await fetch(`/api/admin/deposit-methods/${methodId}`, {
                     method: 'PUT',
@@ -2742,8 +2788,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error });
+                    if (btn) { btn.disabled = false; btn.innerHTML = 'Guardar cambios'; }
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) { iziToast.error({ message: 'Error de conexión' }); if (btn) { btn.disabled = false; btn.innerHTML = 'Guardar cambios'; } }
         };
 
         async function renderEditWithdrawView() {
@@ -2794,7 +2841,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     <input type="number" id="editWitMinAmount" value="${method.min_amount !== null ? method.min_amount : 0}" step="0.01" min="0" class="w-full p-2 rounded bg-gray-700 text-white mb-3">
                     <label>Límite máximo (0 = sin límite)</label>
                     <input type="number" id="editWitMaxAmount" value="${method.max_amount !== null ? method.max_amount : 0}" step="0.01" min="0" class="w-full p-2 rounded bg-gray-700 text-white mb-3">
-                    <button onclick="saveEditWithdraw(${methodId})" class="w-full bg-green-600 py-2 rounded-lg">Guardar cambios</button>
+                    <button onclick="saveEditWithdraw(${methodId}, this)" class="w-full bg-green-600 py-2 rounded-lg">Guardar cambios</button>
                     <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
                 `;
                 adminModal.classList.remove('hidden');
@@ -2804,14 +2851,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         };
 
-        window.saveEditWithdraw = async (methodId) => {
+        window.saveEditWithdraw = async (methodId, btn) => {
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Guardando...'; }
             const name = document.getElementById('editWitName').value.trim();
             const card = document.getElementById('editWitCard').value.trim();
             const confirm = document.getElementById('editWitConfirm').value.trim();
             const currency = document.getElementById('editWitCurrency').value;
             const minAmount = parseFloat(document.getElementById('editWitMinAmount').value);
             const maxAmount = parseFloat(document.getElementById('editWitMaxAmount').value);
-            if (!name || !card) { iziToast.warning({ message: 'Nombre e instrucción son obligatorios' }); return; }
+            if (!name || !card) { iziToast.warning({ message: 'Nombre e instrucción son obligatorios' }); if (btn) { btn.disabled = false; btn.innerHTML = 'Guardar cambios'; } return; }
             try {
                 const res = await fetch(`/api/admin/withdraw-methods/${methodId}`, {
                     method: 'PUT',
@@ -2831,8 +2880,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error });
+                    if (btn) { btn.disabled = false; btn.innerHTML = 'Guardar cambios'; }
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) { iziToast.error({ message: 'Error de conexión' }); if (btn) { btn.disabled = false; btn.innerHTML = 'Guardar cambios'; } }
         };
 
         async function renderDeleteDepositView() {
@@ -2847,7 +2897,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     methods.forEach(m => {
                         html += `<div class="bg-gray-800/70 p-3 rounded-xl mb-2 flex justify-between items-center">
                             <div><span class="font-bold">${escapeHTML(m.name)}</span><br><small>${escapeHTML(m.card)} / ${escapeHTML(m.confirm)}</small></div>
-                            <button onclick="deleteDepositMethod(${m.id})" class="method-delete-btn"><i class="fas fa-trash"></i> Eliminar</button>
+                            <button onclick="deleteDepositMethod(${m.id}, this)" class="method-delete-btn"><i class="fas fa-trash"></i> Eliminar</button>
                         </div>`;
                     });
                 }
@@ -2858,8 +2908,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        window.deleteDepositMethod = async (methodId) => {
+        window.deleteDepositMethod = async (methodId, btn) => {
+            if (btn && btn.disabled) return;
             if (!confirm('\n¿Estás seguro de eliminar este método?')) return;
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Eliminando...'; }
             try {
                 const res = await fetch(`/api/admin/deposit-methods/${methodId}?userId=${currentUser.telegram_id}`, {
                     method: 'DELETE'
@@ -2871,8 +2923,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error });
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash"></i> Eliminar'; }
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) { iziToast.error({ message: 'Error de conexión' }); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash"></i> Eliminar'; } }
         };
 
         async function renderDeleteWithdrawView() {
@@ -2887,7 +2940,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     methods.forEach(m => {
                         html += `<div class="bg-gray-800/70 p-3 rounded-xl mb-2 flex justify-between items-center">
                             <div><span class="font-bold">${escapeHTML(m.name)}</span><br><small>${escapeHTML(m.card)} / ${escapeHTML(m.confirm)}</small></div>
-                            <button onclick="deleteWithdrawMethod(${m.id})" class="method-delete-btn"><i class="fas fa-trash"></i> Eliminar</button>
+                            <button onclick="deleteWithdrawMethod(${m.id}, this)" class="method-delete-btn"><i class="fas fa-trash"></i> Eliminar</button>
                         </div>`;
                     });
                 }
@@ -2898,8 +2951,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        window.deleteWithdrawMethod = async (methodId) => {
+        window.deleteWithdrawMethod = async (methodId, btn) => {
+            if (btn && btn.disabled) return;
             if (!confirm('¿Estás seguro de eliminar este método?')) return;
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Eliminando...'; }
             try {
                 const res = await fetch(`/api/admin/withdraw-methods/${methodId}?userId=${currentUser.telegram_id}`, {
                     method: 'DELETE'
@@ -2911,8 +2966,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error });
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash"></i> Eliminar'; }
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) { iziToast.error({ message: 'Error de conexión' }); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash"></i> Eliminar'; } }
         };
 
         async function renderSetBonusView() {
@@ -2929,18 +2985,38 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     <button id="saveBonusBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar</button>
                 `;
                 document.getElementById('saveBonusBtn').addEventListener('click', async () => {
+                    const btn = document.getElementById('saveBonusBtn');
+                    if (!btn || btn.disabled) return;
+                    btn.disabled = true;
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Guardando...';
                     const value = parseFloat(document.getElementById('newBonusValue').value);
                     if (isNaN(value) || value < 0) {
                         iziToast.warning({ message: 'Valor inválido' });
+                        btn.disabled = false;
+                        btn.textContent = originalText;
                         return;
                     }
-                    await fetch('/api/admin/config', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ bonusCupDefault: value, userId: currentUser.telegram_id })
-                    });
-                    iziToast.success({ message: 'Bono de bienvenida actualizado' });
-                    renderSetBonusView();
+                    try {
+                        const res = await fetch('/api/admin/config', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ bonusCupDefault: value, userId: currentUser.telegram_id })
+                        });
+                        if (res.ok) {
+                            iziToast.success({ message: 'Bono de bienvenida actualizado' });
+                            renderSetBonusView();
+                        } else {
+                            const err = await res.json();
+                            iziToast.error({ message: err.error || 'Error al guardar' });
+                            btn.disabled = false;
+                            btn.textContent = originalText;
+                        }
+                    } catch (e) {
+                        iziToast.error({ message: 'Error de conexión' });
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                    }
                 });
             } catch (e) {
                 console.error(e);
@@ -2969,8 +3045,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             `;
 
             document.getElementById('updateRateMLCBtn')?.addEventListener('click', async () => {
+                const btn = document.getElementById('updateRateMLCBtn');
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = 'Actualizando...';
                 const rate = parseFloat(document.getElementById('newRateMLC').value);
-                if (isNaN(rate) || rate <= 0) { iziToast.warning({ message: 'Tasa inválida' }); return; }
+                if (isNaN(rate) || rate <= 0) { iziToast.warning({ message: 'Tasa inválida' }); btn.disabled = false; btn.textContent = originalText; return; }
                 try {
                     const res = await fetch('/api/admin/exchange-rate/mlc', {
                         method: 'PUT',
@@ -2978,13 +3059,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         body: JSON.stringify({ rate, userId: currentUser.telegram_id })
                     });
                     if (res.ok) { exchangeRates.rate_mlc = rate; iziToast.success({ message: 'Tasa MLC/CUP actualizada' }); renderViewDataView(); }
-                    else { const err = await res.json(); iziToast.error({ message: err.error }); }
-                } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                    else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
+                } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
             
             document.getElementById('updateRateUSDBtn')?.addEventListener('click', async () => {
+                const btn = document.getElementById('updateRateUSDBtn');
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = 'Actualizando...';
                 const rate = parseFloat(document.getElementById('newRateUSD').value);
-                if (isNaN(rate) || rate <= 0) { iziToast.warning({ message: 'Tasa inválida' }); return; }
+                if (isNaN(rate) || rate <= 0) { iziToast.warning({ message: 'Tasa inválida' }); btn.disabled = false; btn.textContent = originalText; return; }
                 try {
                     const res = await fetch('/api/admin/exchange-rate/usd', {
                         method: 'PUT',
@@ -2992,13 +3078,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         body: JSON.stringify({ rate, userId: currentUser.telegram_id })
                     });
                     if (res.ok) { exchangeRates.rate = rate; iziToast.success({ message: 'Tasa USD/CUP actualizada' }); renderViewDataView(); }
-                    else { const err = await res.json(); iziToast.error({ message: err.error }); }
-                } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                    else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
+                } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
             
             document.getElementById('updateRateUSDTBtn')?.addEventListener('click', async () => {
+                const btn = document.getElementById('updateRateUSDTBtn');
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = 'Actualizando...';
                 const rate = parseFloat(document.getElementById('newRateUSDT').value);
-                if (isNaN(rate) || rate <= 0) { iziToast.warning({ message: 'Tasa inválida' }); return; }
+                if (isNaN(rate) || rate <= 0) { iziToast.warning({ message: 'Tasa inválida' }); btn.disabled = false; btn.textContent = originalText; return; }
                 try {
                     const res = await fetch('/api/admin/exchange-rate/usdt', {
                         method: 'PUT',
@@ -3006,13 +3097,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         body: JSON.stringify({ rate, userId: currentUser.telegram_id })
                     });
                     if (res.ok) { exchangeRates.rate_usdt = rate; iziToast.success({ message: 'Tasa USDT/CUP actualizada' }); renderViewDataView(); }
-                    else { const err = await res.json(); iziToast.error({ message: err.error }); }
-                } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                    else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
+                } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
             
             document.getElementById('updateRateTRXBtn')?.addEventListener('click', async () => {
+                const btn = document.getElementById('updateRateTRXBtn');
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = 'Actualizando...';
                 const rate = parseFloat(document.getElementById('newRateTRX').value);
-                if (isNaN(rate) || rate <= 0) { iziToast.warning({ message: 'Tasa inválida' }); return; }
+                if (isNaN(rate) || rate <= 0) { iziToast.warning({ message: 'Tasa inválida' }); btn.disabled = false; btn.textContent = originalText; return; }
                 try {
                     const res = await fetch('/api/admin/exchange-rate/trx', {
                         method: 'PUT',
@@ -3020,8 +3116,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         body: JSON.stringify({ rate, userId: currentUser.telegram_id })
                     });
                     if (res.ok) { exchangeRates.rate_trx = rate; iziToast.success({ message: 'Tasa TRX/CUP actualizada' }); renderViewDataView(); }
-                    else { const err = await res.json(); iziToast.error({ message: err.error }); }
-                } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                    else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
+                } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
         }
 
@@ -3038,22 +3134,40 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     <button id="saveRateBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar</button>
                 `;
                 document.getElementById('saveRateBtn').addEventListener('click', async () => {
+                    const btn = document.getElementById('saveRateBtn');
+                    if (!btn || btn.disabled) return;
+                    btn.disabled = true;
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Guardando...';
                     const percent = parseFloat(document.getElementById('newRateValue').value);
                     if (isNaN(percent) || percent < 0) {
                         iziToast.warning({ message: 'Valor inválido' });
+                        btn.disabled = false;
+                        btn.textContent = originalText;
                         return;
                     }
                     const rate = percent / 100;
-                    const res = await fetch('/api/admin/referral-rate', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rate, userId: currentUser.telegram_id })
-                    });
-                    if (res.ok)
-                    {
-                        iziToast.success({ message: 'Comisión actualizada' });
-                        await updateReferralRateText();
-                        renderSetReferralRateView();
+                    try {
+                        const res = await fetch('/api/admin/referral-rate', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ rate, userId: currentUser.telegram_id })
+                        });
+                        if (res.ok)
+                        {
+                            iziToast.success({ message: 'Comisión actualizada' });
+                            await updateReferralRateText();
+                            renderSetReferralRateView();
+                        } else {
+                            const err = await res.json();
+                            iziToast.error({ message: err.error || 'Error al guardar' });
+                            btn.disabled = false;
+                            btn.textContent = originalText;
+                        }
+                    } catch (e) {
+                        iziToast.error({ message: 'Error de conexión' });
+                        btn.disabled = false;
+                        btn.textContent = originalText;
                     }
                 });
             } catch (e) {
@@ -3099,7 +3213,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                     <span class="text-xs">USD:</span>
                                     <input type="number" id="max_usd_${p.bet_type}" value="${p.max_usd !== null ? p.max_usd : 0}" step="0.01" min="0" class="w-20 p-2 rounded bg-gray-700 text-white text-sm">
                                 </div>
-                                <button onclick="updatePlayPrice('${p.bet_type}')" class="ml-auto bg-blue-600 px-4 py-2 rounded-lg text-sm hover:bg-blue-700">Actualizar</button>
+                                <button onclick="updatePlayPrice('${p.bet_type}', this)" class="ml-auto bg-blue-600 px-4 py-2 rounded-lg text-sm hover:bg-blue-700">Actualizar</button>
                             </div>
                         </div>
                     </div>`;
@@ -3111,14 +3225,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        window.updatePlayPrice = async (betType) => {
+        window.updatePlayPrice = async (betType, btn) => {
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; const originalText = btn.textContent; btn.textContent = 'Actualizando...'; }
             const multiplier = parseFloat(document.getElementById(`multiplier_${betType}`).value);
             const minCup = parseFloat(document.getElementById(`min_cup_${betType}`).value);
             const minUsd = parseFloat(document.getElementById(`min_usd_${betType}`).value);
             const maxCup = parseFloat(document.getElementById(`max_cup_${betType}`).value);
             const maxUsd = parseFloat(document.getElementById(`max_usd_${betType}`).value);
             if (isNaN(multiplier) || isNaN(minCup) || isNaN(minUsd) || isNaN(maxCup) || isNaN(maxUsd) || multiplier < 0 || minCup < 0 || minUsd < 0 || maxCup < 0 || maxUsd < 0) {
-                iziToast.warning({ message: 'Valores inválidos' }); return;
+                iziToast.warning({ message: 'Valores inválidos' }); if (btn) { btn.disabled = false; btn.textContent = 'Actualizar'; } return;
             }
             try {
                 const res = await fetch(`/api/admin/play-prices/${betType}`, {
@@ -3140,8 +3256,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error });
+                    if (btn) { btn.disabled = false; btn.textContent = 'Actualizar'; }
                 }
-            } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+            } catch (e) { iziToast.error({ message: 'Error de conexión' }); if (btn) { btn.disabled = false; btn.textContent = 'Actualizar'; } }
         };
 
         async function renderViewDataView() {
@@ -3231,8 +3348,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                                 <p><strong>Captura:</strong> <a href="${d.screenshot_url}" target="_blank" class="text-cyan-400">Ver</a></p>
                                             </div>
                                             <div class="flex gap-2">
-                                                <button onclick="handlePending('deposit', ${d.id}, 'approve')" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
-                                                <button onclick="handlePending('deposit', ${d.id}, 'reject')" class="bg-red-600 px-3 py-1 rounded-lg text-sm">❌ Rechazar</button>
+                                                <button onclick="handlePending('deposit', ${d.id}, 'approve', this)" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
+                                                <button onclick="handlePending('deposit', ${d.id}, 'reject', this)" class="bg-red-600 px-3 py-1 rounded-lg text-sm">❌ Rechazar</button>
                                             </div>
                                         </div>
                                     </div>
@@ -3279,8 +3396,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                                 <p><strong>Cuenta:</strong> ${escapeHTML(w.account_info)}</p>
                                             </div>
                                             <div class="flex gap-2">
-                                                <button onclick="handlePending('withdraw', ${w.id}, 'approve')" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
-                                                <button onclick="handlePending('withdraw', ${w.id}, 'reject')" class="bg-red-600 px-3 py-1 rounded-lg text-sm">❌ Rechazar</button>
+                                                <button onclick="handlePending('withdraw', ${w.id}, 'approve', this)" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
+                                                <button onclick="handlePending('withdraw', ${w.id}, 'reject', this)" class="bg-red-600 px-3 py-1 rounded-lg text-sm">❌ Rechazar</button>
                                             </div>
                                         </div>
                                     </div>
@@ -3312,7 +3429,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             loadTab('deposits');
         }
 
-        window.handlePending = async (type, id, action) => {
+        window.handlePending = async (type, id, action, btn) => {
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Procesando...'; }
             const endpoint = type === 'deposit' ? `/api/admin/pending-deposits/${id}/${action}` : `/api/admin/pending-withdraws/${id}/${action}`;
             try {
                 const res = await fetch(endpoint, {
@@ -3336,10 +3455,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error al procesar la solicitud' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = action === 'approve' ? '✅ Aprobar' : '❌ Rechazar'; }
                 }
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión' });
                 console.error(e);
+                if (btn) { btn.disabled = false; btn.innerHTML = action === 'approve' ? '✅ Aprobar' : '❌ Rechazar'; }
             }
         };
 
@@ -3439,6 +3560,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-yellow-600 px-3 py-1 rounded-full text-sm" data-filter="withReferrals">Con referidos</button>
                         <button class="filter-btn bg-blue-600 px-3 py-1 rounded-full text-sm" data-filter="referred">Refiriendo</button>
                         <button class="filter-btn bg-cyan-600 px-3 py-1 rounded-full text-sm" data-filter="withBets">Con jugadas</button>
+                        <button class="filter-btn bg-red-700 px-3 py-1 rounded-full text-sm" data-filter="banned">🚫 Baneados</button>
                     </div>
                     <div id="usersGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto pr-1">`;
 
@@ -3507,6 +3629,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 break;
                             case 'withBets':
                                 categoryMatch = (user.has_bets === true);
+                                break;
+                            case 'banned':
+                                categoryMatch = (user.is_banned === true);
                                 break;
                         }
                         card.style.display = categoryMatch ? '' : 'none';
@@ -3642,9 +3767,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             `;
 
             document.getElementById('searchUserBtn').addEventListener('click', async () => {
+                const btn = document.getElementById('searchUserBtn');
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Buscando...';
                 const userId = document.getElementById('userSearchId').value.trim();
                 if (!userId) {
                     iziToast.warning({ message: 'Introduce un ID de Telegram' });
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
                     return;
                 }
 
@@ -3657,6 +3789,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     if (!res.ok) {
                         const err = await res.json();
                         resultDiv.innerHTML = `<p class="text-red-400">${err.error || 'Usuario no encontrado'}</p>`;
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
                         return;
                     }
 
@@ -3804,8 +3938,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             ${withdrawsHtml}
                         </div>
                     `;
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
                 } catch (e) {
                     resultDiv.innerHTML = '<p class="text-red-400">Error de conexión</p>';
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
                 }
             });
         }
@@ -3834,10 +3972,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 `;
 
                 document.getElementById('saveTransferMinsBtn').addEventListener('click', async () => {
+                    const btn = document.getElementById('saveTransferMinsBtn');
+                    if (!btn || btn.disabled) return;
+                    btn.disabled = true;
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Guardando...';
                     const minCup = parseFloat(document.getElementById('adminTransferMinCup').value);
                     const minUsd = parseFloat(document.getElementById('adminTransferMinUsd').value);
                     if (isNaN(minCup) || minCup < 0 || isNaN(minUsd) || minUsd < 0) {
                         iziToast.warning({ message: 'Valores inválidos' });
+                        btn.disabled = false;
+                        btn.textContent = originalText;
                         return;
                     }
 
@@ -3853,8 +3998,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         } else {
                             const err = await res.json();
                             iziToast.error({ message: err.error });
+                            btn.disabled = false;
+                            btn.textContent = originalText;
                         }
-                    } catch (e) { iziToast.error({ message: 'Error de conexión' }); }
+                    } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
                 });
             } catch (e) {
                 console.error(e);
