@@ -4926,6 +4926,11 @@ async function withdrawNotifications() {
             .from('app_config')
             .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
         await clearManualOverrideExpiry();
+        // Limpiar bandera de horario cambiado: al abrirse en el nuevo horario,
+        // el próximo cierre no debe mostrar "nuevo horario"
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
 
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
