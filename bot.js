@@ -1144,13 +1144,20 @@ bot.command('start', async (ctx) => {
         }
     }
 
-    // Mensaje de bienvenida (ahora primero)
-    await safeEdit(ctx,
-        `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(formatBotDisplayName(botName))}, tu asistente de la suerte 🍀\n\n` +
-        `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
-        `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`,
-        getMainKeyboard(ctx)
-    );
+    if (ctx.session?.isNewUser) {
+        await safeEdit(ctx,
+            `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(formatBotDisplayName(botName))}, tu asistente de la suerte 🍀\n\n` +
+            `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
+            `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`,
+            getMainKeyboard(ctx)
+        );
+    } else {
+        await safeEdit(ctx,
+            `👋 ¡Hola de nuevo, ${escapeHTML(firstName)}! ¿En qué podemos ayudarte hoy?\n\n` +
+            `Selecciona una opción del menú para continuar.`,
+            getMainKeyboard(ctx)
+        );
+    }
 
     if (ctx.session?.isNewUser) {
         const bonusAmount = parseFloat(ctx.dbUser?.bonus_cup);
@@ -4949,7 +4956,7 @@ async function withdrawNotifications() {
         let message;
         if (isChanged) {
             message = `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-                `La ventana ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`;
+                `La ventana de retiros ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`;
             // Limpiar la marca para que mañana sea el mensaje normal
             await supabase
                 .from('app_config')

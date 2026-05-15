@@ -2437,6 +2437,10 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
                     .from('app_config')
                     .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
             }
+        } else {
+            await supabase
+                .from('app_config')
+                .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
         }
     }
     res.json({ success: true });
