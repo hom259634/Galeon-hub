@@ -3538,10 +3538,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         // Añadir las funciones renderManageUsersView, searchUserByNameOrId y openBalanceModal
         async function renderManageUsersView() {
+            if (!currentUser) {
+                adminViewContainer.innerHTML = '<p class="text-red-400">Error: Sesión no inicializada. <button onclick="renderManageUsersView()" class="underline text-cyan-400 ml-2">Reintentar</button></p>';
+                return;
+            }
             adminViewContainer.innerHTML = `<div class="loader"></div> Cargando usuarios...`;
             try {
                 const res = await fetch(`/api/admin/users?userId=${currentUser.telegram_id}`);
-                if (!res.ok) throw new Error('Error al cargar usuarios');
+                if (!res.ok) {
+                    let errMsg = 'Error al cargar usuarios';
+                    try { const errData = await res.json(); errMsg = errData.error || errMsg; } catch (_) {}
+                    throw new Error(errMsg);
+                }
                 const users = await res.json();
 
                 // Guardar los usuarios en una variable accesible para el filtrado
@@ -3659,7 +3667,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     });
                 });
             } catch (e) {
-                adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar usuarios.</p>';
+                console.error('Error en renderManageUsersView:', e);
+                adminViewContainer.innerHTML = `<p class="text-red-400">Error al cargar usuarios: ${e.message}. <button onclick="renderManageUsersView()" class="underline text-cyan-400 ml-2">Reintentar</button></p>`;
             }
         }
 
