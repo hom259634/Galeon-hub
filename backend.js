@@ -2432,6 +2432,10 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
                     `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
                     `La ventana de retiros ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`
                 );
+                // Ya se envió el mensaje "nuevo horario", limpiar bandera
+                await supabase
+                    .from('app_config')
+                    .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
             } else {
                 await supabase
                     .from('app_config')

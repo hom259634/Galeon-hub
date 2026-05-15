@@ -4926,11 +4926,6 @@ async function withdrawNotifications() {
             .from('app_config')
             .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
         await clearManualOverrideExpiry();
-        // Limpiar bandera de horario cambiado: al abrirse en el nuevo horario,
-        // el próximo cierre no debe mostrar "nuevo horario"
-        await supabase
-            .from('app_config')
-            .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
 
         await broadcastToAllUsers(
             `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
@@ -4962,14 +4957,14 @@ async function withdrawNotifications() {
         if (isChanged) {
             message = `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
                 `La ventana de retiros ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`;
-            // Limpiar la marca para que mañana sea el mensaje normal
-            await supabase
-                .from('app_config')
-                .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
         } else {
             message = `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
                 `La ventana de retiros ha finalizado. Vuelve mañana de ${startStr} a ${endStr} (hora Cuba).`;
         }
+        // Siempre limpiar la bandera después del cierre programado
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
 
         await broadcastToAllUsers(message);
     }
