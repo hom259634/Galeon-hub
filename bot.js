@@ -111,6 +111,48 @@ function isAdmin(userId) {
     return ADMIN_IDS.includes(userId);
 }
 
+// ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
+let botRolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], lastFetch: 0 };
+const BOT_ROLES_CACHE_TTL = 60000;
+
+async function refreshBotRolesCache() {
+    try {
+        const { data } = await supabase.from('admin_roles').select('telegram_id, role');
+        botRolesCache.withdrawApprovers = data?.filter(r => r.role === 'withdraw_approver').map(r => Number(r.telegram_id)) || [];
+        botRolesCache.depositApprovers = data?.filter(r => r.role === 'deposit_approver').map(r => Number(r.telegram_id)) || [];
+        botRolesCache.scheduleManagers = data?.filter(r => r.role === 'schedule_manager').map(r => Number(r.telegram_id)) || [];
+        botRolesCache.lastFetch = Date.now();
+    } catch (e) {
+        console.error('Error refreshing bot roles cache:', e);
+    }
+}
+
+async function ensureBotRolesCache() {
+    if (Date.now() - botRolesCache.lastFetch > BOT_ROLES_CACHE_TTL) await refreshBotRolesCache();
+}
+
+async function hasRole(userId, role) {
+    await ensureBotRolesCache();
+    const id = Number(userId);
+    if (isAdmin(id)) return true;
+    switch (role) {
+        case 'withdraw_approver': return botRolesCache.withdrawApprovers.includes(id);
+        case 'deposit_approver': return botRolesCache.depositApprovers.includes(id);
+        case 'schedule_manager': return botRolesCache.scheduleManagers.includes(id);
+        default: return false;
+    }
+}
+
+function hasAnyRole(userId) {
+    if (isAdmin(userId)) return true;
+    const id = Number(userId);
+    return botRolesCache.withdrawApprovers.includes(id) ||
+           botRolesCache.depositApprovers.includes(id) ||
+           botRolesCache.scheduleManagers.includes(id);
+}
+
+refreshBotRolesCache();
+
 async function userHasApprovedDeposit(telegramId) {
     try {
         const { count, error } = await supabase
@@ -1007,7 +1049,7 @@ function getMainKeyboard(ctx) {
         ['❓ Cómo jugar', '🌐 Abrir Web-App'],
         ['❌ Cancelar']
     ];
-    if (isAdmin(ctx.from.id)) {
+    if (isAdmin(ctx.from.id) || hasAnyRole(ctx.from.id)) {
         buttons.push(['🔧 Admin']);
     }
     return Markup.keyboard(buttons).resize();
@@ -1115,6 +1157,11 @@ bot.use(async (ctx, next) => {
             // Pasamos ctx para que pueda marcar nuevo usuario en sesión
             const user = await getUser(uid, firstName, username, ctx);
             ctx.dbUser = user || { cup: 0, usd: 0 };
+
+            if (ctx.dbUser?.is_banned) {
+                await ctx.reply('⛔ Tu cuenta ha sido baneada.');
+                return;
+            }
         } catch (e) {
             console.error('Error cargando usuario en middleware:', e);
             ctx.dbUser = { cup: 0, usd: 0 };
@@ -1495,7 +1542,7 @@ bot.action('recharge', async (ctx) => {
     const { data: methods } = await supabase
         .from('deposit_methods')
         .select('*')
-        .order('id', { ascending: true });
+        .order('name', { ascending: true });
 
     if (!methods || methods.length === 0) {
         await ctx.answerCbQuery('❌ Por el momento no hay métodos de depósito disponibles. Intenta más tarde.', { show_alert: true });
@@ -1570,7 +1617,7 @@ bot.action('withdraw', async (ctx) => {
     const { data: methods } = await supabase
         .from('withdraw_methods')
         .select('*')
-        .order('id', { ascending: true });
+        .order('name', { ascending: true });
 
     if (!methods || methods.length === 0) {
         await ctx.answerCbQuery('❌ Por el momento no hay métodos de retiro disponibles. Intenta más tarde.', { show_alert: true });
@@ -1776,12 +1823,30 @@ bot.action('how_to_play', async (ctx) => {
 // });
 
 bot.action('admin_panel', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) {
-        await ctx.answerCbQuery('⛔ No autorizado. Solo administradores.', { show_alert: true });
+    if (!isAdmin(ctx.from.id) && !hasAnyRole(ctx.from.id)) {
+        await ctx.answerCbQuery('⛔ No autorizado.', { show_alert: true });
         return;
     }
-    await safeEdit(ctx, '🔧 <b>Panel de administración</b>\nSelecciona una opción:', adminPanelKbd());
+    if (isAdmin(ctx.from.id)) {
+        await safeEdit(ctx, '🔧 <b>Panel de administración</b>\nSelecciona una opción:', adminPanelKbd());
+    } else {
+        await safeEdit(ctx, '🔧 <b>Panel de administración</b>\nSelecciona una opción:', subadminPanelKbd(ctx.from.id));
+    }
 });
+
+function subadminPanelKbd(userId) {
+    const id = Number(userId);
+    const buttons = [];
+    if (botRolesCache.scheduleManagers.includes(id)) {
+        buttons.push([Markup.button.callback('🎰 Gestionar sesiones', 'admin_sessions')]);
+        buttons.push([Markup.button.callback('🔢 Publicar ganadores', 'admin_winning')]);
+    }
+    if (botRolesCache.withdrawApprovers.includes(id) || botRolesCache.depositApprovers.includes(id)) {
+        buttons.push([Markup.button.callback('📋 Ver datos actuales', 'adm_view')]);
+    }
+    buttons.push([Markup.button.callback('◀ Menú principal', 'main')]);
+    return Markup.inlineKeyboard(buttons);
+}
 
 // ---------- ADMIN: ELIMINAR DIFUSIÓN ----------
 bot.action(/delete_broadcast_(\d+)/, async (ctx) => {
@@ -1814,7 +1879,7 @@ bot.action(/delete_broadcast_(\d+)/, async (ctx) => {
 });
 
 bot.action('admin_sessions', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'schedule_manager'))) return;
     await showRegionsMenu(ctx);
 });
 
@@ -1829,7 +1894,7 @@ async function showRegionsMenu(ctx) {
 }
 
 bot.action(/sess_region_(.+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'schedule_manager'))) return;
     const lottery = ctx.match[1];
     await showRegionSessions(ctx, lottery);
 });
@@ -1881,7 +1946,7 @@ async function showRegionSessions(ctx, lottery) {
 };
 
 bot.action(/create_session_(.+)_(.+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'schedule_manager'))) return;
     try {
         const lottery = ctx.match[1];
         const timeSlot = ctx.match[2];
@@ -1936,7 +2001,7 @@ bot.action(/create_session_(.+)_(.+)/, async (ctx) => {
 });
 
 bot.action(/toggle_session_(\d+)_(.+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'schedule_manager'))) return;
     try {
         const sessionId = parseInt(ctx.match[1]);
         const currentStatus = ctx.match[2];
@@ -2004,7 +2069,7 @@ bot.action('adm_add_wit', async (ctx) => {
 
 bot.action('adm_edit_dep', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
-    const { data: methods } = await supabase.from('deposit_methods').select('*').order('id');
+    const { data: methods } = await supabase.from('deposit_methods').select('*').order('name');
     if (!methods || methods.length === 0) {
         await ctx.answerCbQuery('No hay métodos de depósito para editar.', { show_alert: true });
         return;
@@ -2017,7 +2082,7 @@ bot.action('adm_edit_dep', async (ctx) => {
 
 bot.action('adm_edit_wit', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
-    const { data: methods } = await supabase.from('withdraw_methods').select('*').order('id');
+    const { data: methods } = await supabase.from('withdraw_methods').select('*').order('name');
     if (!methods || methods.length === 0) {
         await ctx.answerCbQuery('No hay métodos de retiro para editar.', { show_alert: true });
         return;
@@ -2030,7 +2095,7 @@ bot.action('adm_edit_wit', async (ctx) => {
 
 bot.action('adm_delete_dep', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
-    const { data: methods } = await supabase.from('deposit_methods').select('*').order('id');
+    const { data: methods } = await supabase.from('deposit_methods').select('*').order('name');
     if (!methods || methods.length === 0) {
         await ctx.answerCbQuery('No hay métodos de depósito para eliminar.', { show_alert: true });
         return;
@@ -2043,7 +2108,7 @@ bot.action('adm_delete_dep', async (ctx) => {
 
 bot.action('adm_delete_wit', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
-    const { data: methods } = await supabase.from('withdraw_methods').select('*').order('id');
+    const { data: methods } = await supabase.from('withdraw_methods').select('*').order('name');
     if (!methods || methods.length === 0) {
         await ctx.answerCbQuery('No hay métodos de retiro para eliminar.', { show_alert: true });
         return;
@@ -2335,7 +2400,7 @@ bot.action('adm_view', async (ctx) => {
 });
 
 bot.action('admin_winning', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'schedule_manager'))) return;
 
     const { data: closedSessions } = await supabase
         .from('lottery_sessions')
@@ -2372,7 +2437,7 @@ bot.action('admin_winning', async (ctx) => {
 });
 
 bot.action(/publish_win_(\d+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'schedule_manager'))) return;
     const sessionId = parseInt(ctx.match[1]);
     ctx.session.winningSessionId = sessionId;
     ctx.session.adminAction = 'winning_numbers';
@@ -2663,7 +2728,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
 // ========== SISTEMA DE SOPORTE ==========
 // Acción para que un admin responda a un usuario
 bot.action(/support_reply_(\d+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) {
+    if (!isAdmin(ctx.from.id) && !hasAnyRole(ctx.from.id)) {
         await ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
         return;
     }
@@ -2893,10 +2958,14 @@ bot.on(message('text'), async (ctx) => {
             ]);
             await ctx.reply('Haz clic en el botón para acceder a nuestra plataforma web interactiva:', webAppButton);
             return;
-        } else if (text === '🔧 Admin' && isAdmin(uid)) {
-            await safeEdit(ctx, '🔧 <b>Panel de administración</b>\nSelecciona una opción:', adminPanelKbd());
+        } else if (text === '🔧 Admin' && (isAdmin(uid) || hasAnyRole(uid))) {
+            if (isAdmin(uid)) {
+                await safeEdit(ctx, '🔧 <b>Panel de administración</b>\nSelecciona una opción:', adminPanelKbd());
+            } else {
+                await safeEdit(ctx, '🔧 <b>Panel de administración</b>\nSelecciona una opción:', subadminPanelKbd(uid));
+            }
             return;
-        } else if (text === '📢 Difusión' && isAdmin(uid)) {
+        } else if (text === '📢 Difusión' && (isAdmin(uid) || hasAnyRole(uid))) {
             const cleared = clearPendingFlow(session || {});
             if (cleared) {
                 await ctx.reply('✅ Flujo de administración cancelado. Ya puedes enviar mensajes de difusión.', getMainKeyboard(ctx));
@@ -3543,7 +3612,8 @@ bot.on(message('text'), async (ctx) => {
 
                     if (error) throw error;
 
-                    for (const adminId of ADMIN_IDS) {
+                    const withdrawNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers]);
+                    for (const adminId of withdrawNotifyIds) {
                         try {
                             await ctx.telegram.sendMessage(adminId,
                                 `🟨 <b>Nueva solicitud de retiro</b>\n` +
@@ -3620,7 +3690,8 @@ bot.on(message('text'), async (ctx) => {
 
                     if (error) throw error;
 
-                    for (const adminId of ADMIN_IDS) {
+                    const withdrawNotifyIds2 = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers]);
+                    for (const adminId of withdrawNotifyIds2) {
                         try {
                                 await ctx.telegram.sendMessage(adminId,
                                 `🟨 <b>Nueva solicitud de retiro</b>\n` +
@@ -3686,7 +3757,8 @@ bot.on(message('text'), async (ctx) => {
                         if (error) throw error;
 
                         // Notify admins
-                        for (const adminId of ADMIN_IDS) {
+                        const withdrawNotifyIds3 = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers]);
+                        for (const adminId of withdrawNotifyIds3) {
                             try {
                                 await ctx.telegram.sendMessage(adminId,
                                     `🟨 <b>Nueva solicitud de retiro</b>\n` +
@@ -3698,7 +3770,8 @@ bot.on(message('text'), async (ctx) => {
                                     {
                                         parse_mode: 'HTML',
                                         reply_markup: Markup.inlineKeyboard([
-                                            [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`), Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
+                                            [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`),
+                                             Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
                                         ]).reply_markup
                                     }
                                 );
@@ -3866,7 +3939,8 @@ bot.on(message('text'), async (ctx) => {
 
             if (error) throw error;
 
-            for (const adminId of ADMIN_IDS) {
+            const withdrawNotifyIds4 = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers]);
+            for (const adminId of withdrawNotifyIds4) {
                 try {
                     await bot.telegram.sendMessage(adminId,
                         `📤 <b>Nueva solicitud de RETIRO</b>\n` +
@@ -4437,9 +4511,10 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
     }
-    if (!isAdmin(uid)) {
-        // Reenviar a todos los admins
-        for (const adminId of ADMIN_IDS) {
+    if (!isAdmin(uid) && !hasAnyRole(uid)) {
+        // Reenviar a todos los admins y subadmins
+        const supportNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers]);
+        for (const adminId of supportNotifyIds) {
             try {
                 await bot.telegram.sendMessage(adminId,
                     `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name)} (${uid}):\n\n${escapeHTML(text)}`,
@@ -4456,7 +4531,7 @@ bot.on(message('text'), async (ctx) => {
         }
         await ctx.reply('✅ Tu mensaje ha sido enviado al equipo de soporte. Te responderemos a la brevedad.');
         } else {
-        // Si es admin y no está en ningún flujo, el mensaje se transmite a todos los usuarios
+        // Si es admin/subadmin y no está en ningún flujo, el mensaje se transmite a todos los usuarios (solo super admins pueden broadcast)
         if (isAdmin(uid) && !hasActiveAdminFlow(session) && text.trim() !== '📢 Difusión') {
             await adminBroadcast(ctx, escapeHTML(text));
             await ctx.reply('✅ Mensaje enviado a todos los usuarios.', Markup.inlineKeyboard([
@@ -4464,7 +4539,8 @@ bot.on(message('text'), async (ctx) => {
             ]));
         } else {
             // Usuario normal sin flujo → mensaje de soporte (comportamiento original)
-            for (const adminId of ADMIN_IDS) {
+            const supportNotifyIds2 = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers]);
+            for (const adminId of supportNotifyIds2) {
                 try {
                     await bot.telegram.sendMessage(adminId,
                         `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name)} (${uid}):\n\n${escapeHTML(text)}`,
@@ -4504,7 +4580,8 @@ bot.on(message('photo'), async (ctx) => {
         if (amountText && parsed && method) {
             try {
                 const request = await createDepositRequest(uid, method.id, buffer, amountText, parsed.currency);
-                for (const adminId of ADMIN_IDS) {
+                const depositNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.depositApprovers]);
+                for (const adminId of depositNotifyIds) {
                     try {
                         await bot.telegram.sendMessage(adminId,
                             `📥 <b>Nueva solicitud de DEPÓSITO</b>\n` +
@@ -4559,7 +4636,7 @@ bot.on(message('photo'), async (ctx) => {
 
 // ========== APROBAR/RECHAZAR DEPÓSITOS Y RETIROS ==========
 bot.action(/approve_deposit_(\d+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) {
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'deposit_approver'))) {
         await ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
         return;
     }
@@ -4670,7 +4747,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
 });
 
 bot.action(/reject_deposit_(\d+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'deposit_approver'))) return;
     try {
         const requestId = parseInt(ctx.match[1]);
         await supabase
@@ -4701,7 +4778,7 @@ bot.action(/reject_deposit_(\d+)/, async (ctx) => {
 });
 
 bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) {
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'withdraw_approver'))) {
         await ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
         return;
     }
@@ -4764,7 +4841,7 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
 });
 
 bot.action(/reject_withdraw_(\d+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'withdraw_approver'))) return;
     try {
         const requestId = parseInt(ctx.match[1]);
         await supabase.from('withdraw_requests').update({ status: 'rejected', updated_at: new Date() }).eq('id', requestId);

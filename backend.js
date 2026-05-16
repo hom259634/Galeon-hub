@@ -61,6 +61,67 @@ function isAdmin(userId) {
     return ADMIN_IDS.includes(parseInt(userId));
 }
 
+// ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
+let rolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], lastFetch: 0 };
+const ROLES_CACHE_TTL = 60000;
+
+async function refreshRolesCache() {
+    try {
+        const { data } = await supabase.from('admin_roles').select('telegram_id, role');
+        rolesCache.withdrawApprovers = data?.filter(r => r.role === 'withdraw_approver').map(r => Number(r.telegram_id)) || [];
+        rolesCache.depositApprovers = data?.filter(r => r.role === 'deposit_approver').map(r => Number(r.telegram_id)) || [];
+        rolesCache.scheduleManagers = data?.filter(r => r.role === 'schedule_manager').map(r => Number(r.telegram_id)) || [];
+        rolesCache.lastFetch = Date.now();
+    } catch (e) {
+        console.error('Error refreshing roles cache:', e);
+    }
+}
+
+async function ensureRolesCache() {
+    if (Date.now() - rolesCache.lastFetch > ROLES_CACHE_TTL) await refreshRolesCache();
+}
+
+async function getUserRoles(userId) {
+    await ensureRolesCache();
+    const id = Number(userId);
+    const roles = [];
+    if (rolesCache.withdrawApprovers.includes(id)) roles.push('withdraw_approver');
+    if (rolesCache.depositApprovers.includes(id)) roles.push('deposit_approver');
+    if (rolesCache.scheduleManagers.includes(id)) roles.push('schedule_manager');
+    return roles;
+}
+
+async function hasRole(userId, role) {
+    await ensureRolesCache();
+    const id = Number(userId);
+    if (isAdmin(userId)) return true; // super admins have all roles
+    switch (role) {
+        case 'withdraw_approver': return rolesCache.withdrawApprovers.includes(id);
+        case 'deposit_approver': return rolesCache.depositApprovers.includes(id);
+        case 'schedule_manager': return rolesCache.scheduleManagers.includes(id);
+        default: return false;
+    }
+}
+
+async function hasAnyRole(userId) {
+    if (isAdmin(userId)) return true;
+    const roles = await getUserRoles(userId);
+    return roles.length > 0;
+}
+
+async function requireAdminOrRole(req, res, next, allowedRoles = []) {
+    let userId = req.verifiedTelegramId || req.body.userId || req.query.userId || req.headers['x-telegram-id'];
+    if (!userId) return res.status(403).json({ error: 'No autorizado: falta userId' });
+    if (isAdmin(userId)) return next();
+    for (const role of allowedRoles) {
+        if (await hasRole(userId, role)) return next();
+    }
+    return res.status(403).json({ error: 'No tienes permisos para esta acción' });
+}
+
+// Precargar caché al inicio
+refreshRolesCache();
+
 function formatHour12(hourDecimal) {
     const totalMinutes = Math.round(hourDecimal * 60);
     const h = Math.floor(totalMinutes / 60) % 12 || 12;
@@ -888,7 +949,7 @@ app.post('/api/auth', async (req, res) => {
     const tgUser = JSON.parse(userStr);
     const user = await getOrCreateUser(tgUser.id, tgUser.first_name, tgUser.username);
     if (user && user.is_banned) {
-        return res.status(403).json({ error: 'Tu cuenta ha sido baneada permanentemente.' });
+        return res.status(403).json({ error: 'Tu cuenta ha sido baneada.' });
     }
     const isNewUser = !!user?.__isNewUser;
     if (user && typeof user === 'object' && '__isNewUser' in user) {
@@ -904,6 +965,7 @@ app.post('/api/auth', async (req, res) => {
         user,
         isNewUser,
         isAdmin: isAdmin(tgUser.id),
+        roles: await getUserRoles(tgUser.id),
         exchangeRate: rates.rate,
         exchangeRateMLC: rates.rate_mlc,
         exchangeRateUSDT: rates.rate_usdt,
@@ -935,7 +997,7 @@ app.get('/api/referral-rate', async (req, res) => {
 
 // --- Métodos de depósito ---
 app.get('/api/deposit-methods', async (req, res) => {
-    const { data } = await supabase.from('deposit_methods').select('*').order('id');
+    const { data } = await supabase.from('deposit_methods').select('*').order('name');
     // Forzar min_amount y max_amount a número si existen
     const fixed = (data || []).map(m => ({
         ...m,
@@ -951,7 +1013,7 @@ app.get('/api/deposit-methods/:id', async (req, res) => {
 
 // --- Métodos de retiro ---
 app.get('/api/withdraw-methods', async (req, res) => {
-    const { data } = await supabase.from('withdraw_methods').select('*').order('id');
+    const { data } = await supabase.from('withdraw_methods').select('*').order('name');
     res.json(data || []);
 });
 app.get('/api/withdraw-methods/:id', async (req, res) => {
@@ -1111,7 +1173,8 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
         return res.status(500).json({ error: 'Error al guardar solicitud' });
     }
 
-    for (const adminId of ADMIN_IDS) {
+    const notifyIds = new Set([...ADMIN_IDS.map(id => Number(id)), ...rolesCache.depositApprovers]);
+    for (const adminId of notifyIds) {
         try {
             await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
@@ -1211,7 +1274,8 @@ app.post('/api/withdraw-requests', async (req, res) => {
         return res.status(500).json({ error: 'Error al crear solicitud' });
     }
 
-    for (const adminId of ADMIN_IDS) {
+    const notifyIds = new Set([...ADMIN_IDS.map(id => Number(id)), ...rolesCache.withdrawApprovers]);
+    for (const adminId of notifyIds) {
         try {
             await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
@@ -3660,11 +3724,25 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
         const adminAddedBonus = diffBonusReq > 0.001;
         const bonusMigrated = (adminAddedBonus && finalBonus === 0);
 
-        // 1. Si el admin añadió bono y migró a CUP
+        // 1. Si el admin añadió bono y migró a CUP (se muestra la transferencia que lo activó)
         if (bonusMigrated) {
+            let msg = '⚠️ Han sido sumados ';
+            const partes = [];
+            if (Math.abs(diffCupReq) > 0.001) {
+                partes.push(`${diffCupReq.toFixed(2)} CUP a tu saldo principal`);
+            }
+            if (Math.abs(diffUsdReq) > 0.001) {
+                partes.push(`${diffUsdReq.toFixed(2)} USD a tu saldo USD`);
+            }
+            if (partes.length === 1) {
+                msg += partes[0] + ', tu bono de bienvenida actual se ha movido ';
+                msg += Math.abs(diffCupReq) > 0.001 ? 'al mismo.' : 'a tu saldo principal.';
+            } else {
+                msg += partes.join(' y ') + ', tu bono de bienvenida actual se ha movido a tu saldo principal.';
+            }
             try {
                 await bot.telegram.sendMessage(telegramId,
-                    adminHeader + `⚠️ Han sido sumados ${diffBonusReq.toFixed(2)} CUP a tu bono de bienvenida actual, y este se ha movido a tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`,
+                    adminHeader + msg + ` Si crees que esto es incorrecto, por favor, contáctanos.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
@@ -3681,8 +3759,8 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
             } catch (e) {}
         }
 
-        // 3. Cambios en CUP o USD (usando lo solicitado, no lo final, para evitar duplicar por migración)
-        if (Math.abs(diffCupReq) > 0.001 || Math.abs(diffUsdReq) > 0.001) {
+        // 3. Cambios en CUP o USD (solo si NO hubo migración de bono, para evitar redundancia)
+        if (!bonusMigrated && (Math.abs(diffCupReq) > 0.001 || Math.abs(diffUsdReq) > 0.001)) {
             const partes = [];
             if (Math.abs(diffCupReq) > 0.001) {
                 const verbo = diffCupReq > 0 ? 'sumados' : 'restados';
@@ -3723,15 +3801,18 @@ app.post('/api/admin/users/:telegramId/ban', requireAdmin, async (req, res) => {
     }
 
     try {
-        // Marcar como baneado (asumiendo que existe la columna is_banned en users)
-        const { error } = await supabase
+        const { data, error } = await supabase
             .from('users')
-            .update({ is_banned: true, updated_at: new Date() })
-            .eq('telegram_id', telegramId);
+            .update({ is_banned: true, updated_at: new Date().toISOString() })
+            .eq('telegram_id', telegramId)
+            .select();
 
         if (error) {
-            // Si la columna no existe, el error aquí será capturado
             return res.status(500).json({ error: 'No se pudo banear al usuario. Verifica que la columna is_banned exista en la tabla users.' });
+        }
+
+        if (!data || data.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
         res.json({ success: true });
@@ -3739,6 +3820,438 @@ app.post('/api/admin/users/:telegramId/ban', requireAdmin, async (req, res) => {
         console.error('Error baneando usuario:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
+});
+
+// Desbanear usuario
+app.post('/api/admin/users/:telegramId/unban', requireAdmin, async (req, res) => {
+    const telegramId = parseInt(req.params.telegramId);
+    if (isNaN(telegramId)) {
+        return res.status(400).json({ error: 'ID de usuario inválido' });
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('users')
+            .update({ is_banned: false, updated_at: new Date().toISOString() })
+            .eq('telegram_id', telegramId)
+            .select();
+
+        if (error) {
+            return res.status(500).json({ error: 'No se pudo desbanear al usuario.' });
+        }
+
+        if (!data || data.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error('Error desbaneando usuario:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// ========== ENDPOINTS DE GESTIÓN DE ROLES (solo super admin) ==========
+
+// Obtener todos los roles asignados
+app.get('/api/admin/admin-roles', requireAdmin, async (req, res) => {
+    try {
+        const { data } = await supabase.from('admin_roles').select('*').order('telegram_id');
+        const enriched = [];
+        for (const row of data || []) {
+            const { data: user } = await supabase
+                .from('users')
+                .select('first_name, username')
+                .eq('telegram_id', row.telegram_id)
+                .maybeSingle();
+            enriched.push({
+                telegram_id: row.telegram_id,
+                role: row.role,
+                created_at: row.created_at,
+                assigned_by: row.assigned_by,
+                user_name: user?.first_name || 'Desconocido',
+                username: user?.username
+            });
+        }
+        res.json(enriched);
+    } catch (e) {
+        console.error('Error obteniendo roles:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Obtener roles de un usuario específico
+app.get('/api/admin/admin-roles/:telegramId', requireAdmin, async (req, res) => {
+    try {
+        const telegramId = parseInt(req.params.telegramId);
+        const { data } = await supabase
+            .from('admin_roles')
+            .select('role')
+            .eq('telegram_id', telegramId);
+        const roles = (data || []).map(r => r.role);
+        res.json({ telegram_id: telegramId, roles });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Asignar roles a un usuario (reemplaza todos los roles existentes)
+app.put('/api/admin/admin-roles/:telegramId', requireAdmin, async (req, res) => {
+    try {
+        const telegramId = parseInt(req.params.telegramId);
+        const { roles } = req.body; // array de strings: ['withdraw_approver', 'deposit_approver', 'schedule_manager']
+        const uid = parseInt(req.verifiedTelegramId || req.body.userId);
+
+        if (!Array.isArray(roles)) {
+            return res.status(400).json({ error: 'roles debe ser un array' });
+        }
+
+        const validRoles = ['withdraw_approver', 'deposit_approver', 'schedule_manager'];
+        for (const role of roles) {
+            if (!validRoles.includes(role)) {
+                return res.status(400).json({ error: `Rol inválido: ${role}` });
+            }
+        }
+
+        // Eliminar todos los roles existentes del usuario
+        await supabase.from('admin_roles').delete().eq('telegram_id', telegramId);
+
+        // Insertar los nuevos roles
+        if (roles.length > 0) {
+            const inserts = roles.map(role => ({
+                telegram_id: telegramId,
+                role,
+                assigned_by: uid
+            }));
+            const { error } = await supabase.from('admin_roles').insert(inserts);
+            if (error) return res.status(500).json({ error: error.message });
+        }
+
+        // Refrescar caché
+        await refreshRolesCache();
+
+        res.json({ success: true, telegram_id: telegramId, roles });
+    } catch (e) {
+        console.error('Error asignando roles:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Obtener mis propios roles (público autenticado)
+app.get('/api/my-roles', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.json({ roles: [] });
+    const roles = await getUserRoles(userId);
+    res.json({ roles, isSuperAdmin: isAdmin(userId) });
+});
+
+// ========== ENDPOINTS ACCESIBLES POR ROLE-BASED USERS ==========
+
+// Obtener solicitudes de depósito pendientes (deposit_approver o admin)
+app.get('/api/admin/pending-deposits-role', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'deposit_approver'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const { data, error } = await supabase
+        .from('deposit_requests')
+        .select(`
+            id, user_id, amount, currency, screenshot_url, status, created_at,
+            users (first_name, username),
+            deposit_methods (name, card, confirm)
+        `)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    const formatted = (data || []).map(d => ({
+        id: d.id, user_id: d.user_id, user_name: d.users?.first_name || 'Desconocido',
+        username: d.users?.username, amount: d.amount, currency: d.currency,
+        screenshot_url: d.screenshot_url, method_name: d.deposit_methods?.name,
+        method_card: d.deposit_methods?.card, method_confirm: d.deposit_methods?.confirm,
+        created_at: d.created_at
+    }));
+    res.json(formatted);
+});
+
+// Aprobar depósito (deposit_approver o admin)
+app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'deposit_approver'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const { id } = req.params;
+    const { data: request, error: fetchError } = await supabase
+        .from('deposit_requests').select('*').eq('id', id).eq('status', 'pending').single();
+    if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
+
+    const user = await getOrCreateUser(request.user_id);
+    let newCup = parseFloat(user.cup) || 0;
+    let newUsd = parseFloat(user.usd) || 0;
+    let newBonus = parseFloat(user.bonus_cup) || 0;
+    let bonusMovedCup = 0;
+
+    if (request.currency === 'CUP') newCup += parseFloat(request.amount);
+    else if (request.currency === 'USD') newUsd += parseFloat(request.amount);
+    else { const cupAmount = await convertToCUP(parseFloat(request.amount), request.currency); newCup += cupAmount; }
+
+    await supabase.from('users').update({ cup: newCup, usd: newUsd, updated_at: new Date() }).eq('telegram_id', request.user_id);
+
+    if (newBonus > 0) {
+        const { data: prevApproved } = await supabase.from('deposit_requests').select('id').eq('user_id', request.user_id).eq('status', 'approved').neq('id', parseInt(id)).limit(1);
+        if (!(prevApproved && prevApproved.length > 0)) {
+            newCup += newBonus; bonusMovedCup = newBonus;
+            await supabase.from('users').update({ cup: newCup, bonus_cup: 0, updated_at: new Date() }).eq('telegram_id', request.user_id);
+        }
+    }
+
+    await supabase.from('deposit_requests').update({ status: 'approved', processed_at: new Date(), processed_by: parseInt(userId) }).eq('id', id);
+
+    try {
+        const creditedAmount = request.currency === 'USD' ? parseFloat(request.amount) : await convertToCUP(parseFloat(request.amount), request.currency);
+        const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
+            ? String(request.amount)
+            : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
+        const currencySymbol = request.currency === 'USD' ? '💵' : '🇨🇺';
+        let text = `✅ <b>Depósito aprobado</b>\n\n💰 Monto depositado: ${depositedAmountText}\n${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
+        if (request.currency === 'USD') {
+            text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+        }
+        if (bonusMovedCup > 0) {
+            text += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+        }
+        text += `\n\n¡Gracias por confiar en nosotros!`;
+        if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, text, { parse_mode: 'HTML' });
+    } catch (e) {}
+    res.json({ success: true });
+});
+
+// Rechazar depósito (deposit_approver o admin)
+app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'deposit_approver'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const { id } = req.params;
+    const { data: request, error: fetchError } = await supabase
+        .from('deposit_requests').select('*').eq('id', id).eq('status', 'pending').single();
+    if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
+
+    await supabase.from('deposit_requests').update({ status: 'rejected', processed_at: new Date(), processed_by: parseInt(userId) }).eq('id', id);
+    try {
+        if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n📌 La solicitud no pudo ser procesada.\n💰 Monto depositado: ${request.amount} ${String(request.currency || '').toLowerCase()}`, { parse_mode: 'HTML' });
+    } catch (e) {}
+    res.json({ success: true });
+});
+
+// Obtener solicitudes de retiro pendientes (withdraw_approver o admin)
+app.get('/api/admin/pending-withdraws-role', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'withdraw_approver'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const { data, error } = await supabase
+        .from('withdraw_requests')
+        .select(`
+            id, user_id, amount, currency, account_info, status, created_at,
+            users (first_name, username),
+            withdraw_methods (name, card, confirm)
+        `)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    const formatted = (data || []).map(w => ({
+        id: w.id, user_id: w.user_id, user_name: w.users?.first_name || 'Desconocido',
+        username: w.users?.username, amount: w.amount, currency: w.currency,
+        account_info: w.account_info, method_name: w.withdraw_methods?.name,
+        method_card: w.withdraw_methods?.card, method_confirm: w.withdraw_methods?.confirm,
+        created_at: w.created_at
+    }));
+    res.json(formatted);
+});
+
+// Aprobar retiro (withdraw_approver o admin)
+app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'withdraw_approver'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const { id } = req.params;
+    const { data: request, error: fetchError } = await supabase
+        .from('withdraw_requests').select('*').eq('id', id).eq('status', 'pending').single();
+    if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
+
+    const user = await getOrCreateUser(request.user_id);
+    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency);
+    if (!debitPlan.ok) return res.status(400).json({ error: debitPlan.errorMessage || 'Saldo insuficiente' });
+
+    let newCup = (parseFloat(user.cup) || 0) - debitPlan.cupDebit;
+    let newUsd = (parseFloat(user.usd) || 0) - debitPlan.usdDebit;
+    await supabase.from('users').update({ cup: newCup, usd: newUsd, updated_at: new Date() }).eq('telegram_id', request.user_id);
+    await supabase.from('withdraw_requests').update({ status: 'approved', processed_at: new Date(), processed_by: parseInt(userId) }).eq('id', id);
+
+    try {
+        if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id,
+            `✅ <b>¡Retiro aprobado!</b>\n\n💰 Monto: ${request.amount} ${request.currency}\n📌 En breve los fondos serán enviados a tu cuenta.`,
+            { parse_mode: 'HTML' });
+    } catch (e) {}
+    res.json({ success: true });
+});
+
+// Rechazar retiro (withdraw_approver o admin)
+app.post('/api/admin/pending-withdraws-role/:id/reject', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'withdraw_approver'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const { id } = req.params;
+    const { data: request, error: fetchError } = await supabase
+        .from('withdraw_requests').select('*').eq('id', id).eq('status', 'pending').single();
+    if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
+
+    await supabase.from('withdraw_requests').update({ status: 'rejected', processed_at: new Date(), processed_by: parseInt(userId) }).eq('id', id);
+    try {
+        if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${request.currency}\n📌 Contacta con el administrador para más información.`,
+            { parse_mode: 'HTML' });
+    } catch (e) {}
+    res.json({ success: true });
+});
+
+// Obtener configuración de horarios (schedule_manager o admin)
+app.get('/api/admin/schedule-config', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'schedule_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
+    const { data: overrideData } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_manual_override')
+        .single();
+    const manualOverride = overrideData?.value || 'none';
+    const available = await isWithdrawTime();
+    res.json({ start, end, manualOverride, available });
+});
+
+// Actualizar horario de retiros (schedule_manager o admin)
+app.put('/api/admin/schedule-config', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'schedule_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const { start, end } = req.body;
+
+    // Delegar en el endpoint existente
+    const originalUrl = req.url;
+    const originalBody = req.body;
+
+    // Simular llamada al endpoint de config existente
+    try {
+        const wasOpen = await isWithdrawTime();
+
+        if (start !== undefined) {
+            await supabase.from('app_config').upsert({ key: 'withdraw_time_start', value: start.toString() }, { onConflict: 'key' });
+        }
+        if (end !== undefined) {
+            await supabase.from('app_config').upsert({ key: 'withdraw_time_end', value: end.toString() }, { onConflict: 'key' });
+        }
+
+        res.json({ success: true, message: 'Horario actualizado' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error al actualizar horario' });
+    }
+});
+
+// Toggle manual de retiros (schedule_manager o admin)
+app.post('/api/admin/schedule-toggle', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'schedule_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+
+    const { action } = req.body;
+    if (!action || !['open', 'close'].includes(action)) {
+        return res.status(400).json({ error: 'Acción inválida. Use "open" o "close".' });
+    }
+
+    // Reutilizar la lógica del endpoint existente
+    const wasOpen = await isWithdrawTime();
+    const start = await getWithdrawTimeStart();
+    const end = await getWithdrawTimeEnd();
+
+    await supabase
+        .from('app_config')
+        .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
+
+    const nowOpen = await isWithdrawTime();
+
+    if (wasOpen === nowOpen) {
+        return res.status(400).json({
+            error: wasOpen
+                ? 'La sesión ya está abierta por el horario programado. No se puede cerrar manualmente.'
+                : 'La sesión ya está cerrada fuera del horario programado.'
+        });
+    }
+
+    // Apply expiry logic matching admin endpoint
+    const now = moment.tz(TIMEZONE);
+    let expiryDate = null;
+
+    if (action === 'open') {
+        const currentHour = now.hour() + now.minute() / 60;
+        const insideWindow = currentHour >= start && currentHour < end;
+        if (insideWindow) {
+            expiryDate = now.clone().startOf('day').add(end, 'hours').toDate();
+        } else {
+            await clearManualOverrideExpiry();
+        }
+    } else {
+        const todayStart = now.clone().startOf('day').add(start, 'hours');
+        if (now.isBefore(todayStart)) {
+            expiryDate = todayStart.toDate();
+        } else {
+            expiryDate = todayStart.add(1, 'day').toDate();
+        }
+    }
+
+    if (expiryDate) {
+        await setManualOverrideExpiry(expiryDate);
+    } else {
+        await clearManualOverrideExpiry();
+    }
+
+    // Notificar a todos los usuarios (mismo mensaje que admin endpoint)
+    const startStr = formatHour12(start);
+    const endStrFormatted = formatHour12(end);
+    let message = '';
+    if (action === 'open') {
+        message =
+            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+            `Ya puedes solicitar tus retiros desde este momento.\n` +
+            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`;
+    } else {
+        const todayStart = now.clone().startOf('day').add(start, 'hours');
+        const nextOpeningIsToday = now.isBefore(todayStart);
+        const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
+        message =
+            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+            `La ventana de retiros ha finalizado. Se reabrirá ${openingDayStr} de ${startStr} a ${endStrFormatted} (hora Cuba).`;
+    }
+
+    await broadcastToAllUsers(message, 'HTML');
+
+    res.json({ success: true, available: nowOpen });
 });
 
 // ========== SERVIDOR ESTÁTICO ==========
