@@ -356,7 +356,7 @@
             <button data-section="wallet" class="nav-btn flex flex-col items-center p-2 rounded-xl text-white transition-all"><i class="fas fa-wallet text-2xl"></i><span class="text-xs mt-1">Mi dinero</span></button>
             <button data-section="bets" class="nav-btn flex flex-col items-center p-2 rounded-xl text-white transition-all"><i class="fas fa-ticket-alt text-2xl"></i><span class="text-xs mt-1">Jugadas</span></button>
             <button data-section="referrals" class="nav-btn flex flex-col items-center p-2 rounded-xl text-white transition-all"><i class="fas fa-users text-2xl"></i><span class="text-xs mt-1">Referidos</span></button>
-            <button id="adminNavBtn" data-section="admin" class="nav-btn hidden flex flex-col items-center p-2 rounded-xl text-white transition-all"><i class="fas fa-crown text-2xl"></i><span class="text-xs mt-1">Admin</span></button>
+            <button id="adminNavBtn" data-section="admin" class="nav-btn hidden flex flex-col items-center p-2 rounded-xl text-white transition-all"><i class="fas fa-crown text-2xl"></i><span class="text-xs mt-1" id="adminNavLabel">Admin</span></button>
         </div>
 
         <!-- Contenedor de secciones -->
@@ -544,7 +544,7 @@
                 </div>
             </div>
 
-            <!-- SECCIÓN ADMIN -->
+            <!-- SECCIÓN ADMIN (super admin) -->
             <div id="section-admin" class="section hidden-section">
                 <div class="glass-card p-5">
                     <h3 class="text-2xl font-bold mb-4 flex items-center"><i class="fas fa-crown text-yellow-400 mr-2"></i>Panel Admin</h3>
@@ -562,14 +562,23 @@
                         <button data-admin-view="setBonus" class="admin-nav-btn bg-indigo-400/80 p-3 rounded-xl hover:bg-indigo-500"><i class="fas fa-gift mr-1"></i> Bono Inicial</button>
                         <button data-admin-view="setReferralRate" class="admin-nav-btn bg-orange-400/80 p-3 rounded-xl hover:bg-orange-500"><i class="fas fa-percent mr-1"></i>% Referidos</button>
                         <button data-admin-view="setWithdrawHours" class="admin-nav-btn bg-purple-400/80 p-3 rounded-xl hover:bg-purple-500"><i class="fas fa-clock mr-1"></i> Horario Retiros</button>
-                        <button data-admin-view="transferMins" class="admin-nav-btn bg-teal-400/80 p-3 rounded-xl hover:bg-teal-500"><i class="fas fa-sliders-h mr-1"></i> Min. Transferencia</button>
+                        <button data-admin-view="transferMins" class="admin-nav-btn bg-teal-400/80 p-3 rounded-xl hover:bg-teal-500"><i class="fas fa-sliders-h mr-1"></i> Mín. Transferencia</button>
                         <button data-admin-view="userManager" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-user-cog mr-1"></i>Estadísticas de Usuarios</button>
                         <button data-admin-view="manageUsers" class="admin-nav-btn bg-emerald-600/80 p-3 rounded-xl hover:bg-emerald-700"><i class="fas fa-user-edit mr-1"></i> Gestión de Usuarios</button>
+                        <button data-admin-view="roleManager" class="admin-nav-btn bg-fuchsia-600/80 p-3 rounded-xl hover:bg-fuchsia-700"><i class="fas fa-user-shield mr-1"></i> Designación de Admins</button>
                         <button data-admin-view="pendingRequests" class="admin-nav-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700"><i class="fas fa-clock mr-1"></i> Solicitudes Pendientes</button>
                         <button data-admin-view="viewData" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-eye mr-1"></i> Ver Datos</button>
                         
                     </div>
                     <div id="adminViewContainer" class="mt-4"></div>
+                </div>
+            </div>
+
+            <!-- SECCIÓN FUNCIONES DE ADMIN (para role-based users) -->
+            <div id="section-funciones-admin" class="section hidden-section">
+                <div class="glass-card p-5">
+                    <h3 class="text-2xl font-bold mb-4 flex items-center"><i class="fas fa-user-shield text-cyan-400 mr-2"></i>Funciones de Admin</h3>
+                    <div id="funcionesAdminContent"></div>
                 </div>
             </div>
         </div>
@@ -640,6 +649,7 @@
         // Estado global
         let currentUser = null;
         let isAdmin = false;
+        let userRoles = [];
         let exchangeRates = { rate: 110, rate_mlc: 110, rate_usdt: 110, rate_trx: 1 };
         let bonusCupDefault = 70;
         let botUsername = '';
@@ -815,9 +825,13 @@
         }
 
         function showSection(sectionId) {
-            if (sectionId !== 'admin' && withdrawPollInterval) {
+            if (sectionId !== 'admin' && sectionId !== 'funciones-admin' && withdrawPollInterval) {
                 clearInterval(withdrawPollInterval);
                 withdrawPollInterval = null;
+            }
+            if (funcionesAdminInterval && sectionId !== 'funciones-admin') {
+                clearInterval(funcionesAdminInterval);
+                funcionesAdminInterval = null;
             }
             if (sectionId !== 'play') {
                 resetBetEditMode(false);
@@ -832,6 +846,7 @@
                 active.classList.add('active-section');
             }
             if (sectionId === 'wallet') onShowWallet();
+            if (sectionId === 'funciones-admin') renderFuncionesAdmin();
         }
 
         function resetBetEditMode(clearForm = true, force = false) {
@@ -1350,6 +1365,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 currentUser = data.user;
                 isAdmin = data.isAdmin || false;
+                userRoles = data.roles || [];
                 exchangeRates = {
                     rate: data.exchangeRate || 110,
                     rate_mlc: data.exchangeRateMLC || 110,
@@ -1395,8 +1411,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } catch (e) { /* silent */ }
                 updateBalanceUI();
 
-                if (isAdmin) {
-                    document.getElementById('adminNavBtn').classList.remove('hidden');
+                if (isAdmin || userRoles.length > 0) {
+                    const adminBtn = document.getElementById('adminNavBtn');
+                    const adminLabel = document.getElementById('adminNavLabel');
+                    if (isAdmin) {
+                        adminBtn.dataset.section = 'admin';
+                        adminLabel.innerText = 'Admin';
+                    } else {
+                        adminBtn.dataset.section = 'funciones-admin';
+                        adminLabel.innerText = 'Admin';
+                    }
+                    adminBtn.classList.remove('hidden');
                 }
 
                 await Promise.allSettled([
@@ -3464,6 +3489,378 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         };
 
+        // ========== RENDERIZAR FUNCIONES DE ADMIN (para role-based users) ==========
+        let funcionesAdminInterval = null;
+
+        async function renderFuncionesAdmin() {
+            const container = document.getElementById('funcionesAdminContent');
+            if (!container) return;
+
+            // Limpiar intervalo anterior si existe
+            if (funcionesAdminInterval) {
+                clearInterval(funcionesAdminInterval);
+                funcionesAdminInterval = null;
+            }
+            // Auto-refresh cada 15 segundos mientras esté visible
+            funcionesAdminInterval = setInterval(() => {
+                const section = document.getElementById('section-funciones-admin');
+                if (section && !section.classList.contains('hidden-section')) {
+                    loadFuncionesDepositos();
+                    loadFuncionesRetiros();
+                    loadFuncionesHorario();
+                } else {
+                    clearInterval(funcionesAdminInterval);
+                    funcionesAdminInterval = null;
+                }
+            }, 15000);
+
+            let html = '<div class="space-y-4">';
+
+            // Mostrar roles actuales del usuario
+            if (userRoles.length > 0) {
+                html += `<div class="text-sm text-gray-400 mb-2">Tus permisos: ${userRoles.map(r => {
+                    const labels = { withdraw_approver: '✅ Aprobar Retiros', deposit_approver: '✅ Aprobar Depósitos', schedule_manager: '🕐 Gestionar Horarios' };
+                    return labels[r] || r;
+                }).join(' · ')}</div>`;
+            }
+
+            // Deposit approver: ver solicitudes de depósito pendientes
+            if (userRoles.includes('deposit_approver') || isAdmin) {
+                html += `<div id="funcionesDepositos"><div class="loader"></div> Cargando solicitudes de depósito...</div>`;
+            }
+
+            // Withdraw approver: ver solicitudes de retiro pendientes
+            if (userRoles.includes('withdraw_approver') || isAdmin) {
+                html += `<div id="funcionesRetiros"><div class="loader"></div> Cargando solicitudes de retiro...</div>`;
+            }
+
+            // Schedule manager: gestión de horarios
+            if (userRoles.includes('schedule_manager') || isAdmin) {
+                html += `<div id="funcionesHorario"><div class="loader"></div> Cargando configuración de horario...</div>`;
+            }
+
+            html += '</div>';
+            container.innerHTML = html;
+
+            // Cargar datos según roles
+            if (userRoles.includes('deposit_approver') || isAdmin) {
+                loadFuncionesDepositos();
+            }
+            if (userRoles.includes('withdraw_approver') || isAdmin) {
+                loadFuncionesRetiros();
+            }
+            if (userRoles.includes('schedule_manager') || isAdmin) {
+                loadFuncionesHorario();
+            }
+        }
+
+        async function loadFuncionesDepositos() {
+            const container = document.getElementById('funcionesDepositos');
+            if (!container) return;
+            try {
+                const res = await fetch('/api/admin/pending-deposits-role');
+                if (!res.ok) { container.innerHTML = '<p class="text-red-400">Error al cargar solicitudes</p>'; return; }
+                const deposits = await res.json();
+                if (!deposits || deposits.length === 0) {
+                    container.innerHTML = '<div class="bg-gray-800/40 p-4 rounded-xl"><p class="text-gray-400">📥 No hay solicitudes de depósito pendientes.</p></div>';
+                    return;
+                }
+                let html = '<div class="bg-gray-800/40 p-4 rounded-xl"><h4 class="font-semibold mb-3 text-cyan-300">📥 Depósitos Pendientes</h4>';
+                for (const d of deposits) {
+                    html += `<div class="bg-gray-700/40 p-3 rounded-lg mb-2">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="font-medium">${escapeHTML(d.user_name)} ${d.username ? '@' + escapeHTML(d.username) : ''}</p>
+                                <p class="text-sm text-gray-300">💰 ${d.amount} ${d.currency}</p>
+                                <p class="text-xs text-gray-400">🏦 ${escapeHTML(d.method_name || 'N/A')}</p>
+                                <p class="text-xs text-gray-400">🆔 Solicitud #${d.id}</p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="procesarDepositoRol(${d.id},'approve',this)" class="bg-green-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700">✅</button>
+                                <button onclick="procesarDepositoRol(${d.id},'reject',this)" class="bg-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-700">❌</button>
+                            </div>
+                        </div>
+                        ${d.screenshot_url ? `<a href="${d.screenshot_url}" target="_blank" class="text-xs text-cyan-400 underline">📎 Ver captura</a>` : ''}
+                    </div>`;
+                }
+                html += '</div>';
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = '<p class="text-red-400">Error de conexión</p>';
+            }
+        }
+
+        async function loadFuncionesRetiros() {
+            const container = document.getElementById('funcionesRetiros');
+            if (!container) return;
+            try {
+                const res = await fetch('/api/admin/pending-withdraws-role');
+                if (!res.ok) { container.innerHTML = '<p class="text-red-400">Error al cargar solicitudes</p>'; return; }
+                const withdraws = await res.json();
+                if (!withdraws || withdraws.length === 0) {
+                    container.innerHTML = '<div class="bg-gray-800/40 p-4 rounded-xl"><p class="text-gray-400">📤 No hay solicitudes de retiro pendientes.</p></div>';
+                    return;
+                }
+                let html = '<div class="bg-gray-800/40 p-4 rounded-xl"><h4 class="font-semibold mb-3 text-pink-300">📤 Retiros Pendientes</h4>';
+                for (const w of withdraws) {
+                    html += `<div class="bg-gray-700/40 p-3 rounded-lg mb-2">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="font-medium">${escapeHTML(w.user_name)} ${w.username ? '@' + escapeHTML(w.username) : ''}</p>
+                                <p class="text-sm text-gray-300">💰 ${w.amount} ${w.currency}</p>
+                                <p class="text-xs text-gray-400">🏦 ${escapeHTML(w.method_name || 'N/A')}</p>
+                                <p class="text-xs text-gray-400">📞 ${escapeHTML(w.account_info || '')}</p>
+                                <p class="text-xs text-gray-400">🆔 Solicitud #${w.id}</p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="procesarRetiroRol(${w.id},'approve',this)" class="bg-green-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700">✅</button>
+                                <button onclick="procesarRetiroRol(${w.id},'reject',this)" class="bg-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-700">❌</button>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+                html += '</div>';
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = '<p class="text-red-400">Error de conexión</p>';
+            }
+        }
+
+        async function loadFuncionesHorario() {
+            const container = document.getElementById('funcionesHorario');
+            if (!container) return;
+            try {
+                const res = await fetch('/api/admin/schedule-config');
+                if (!res.ok) { container.innerHTML = '<p class="text-red-400">Error al cargar configuración</p>'; return; }
+                const config = await res.json();
+
+                const isOpen = config.available;
+                const startH = Math.floor(config.start);
+                const startM = Math.round((config.start - startH) * 60);
+                const endH = Math.floor(config.end);
+                const endM = Math.round((config.end - endH) * 60);
+
+                let html = `<div class="bg-gray-800/40 p-4 rounded-xl">
+                    <h4 class="font-semibold mb-3 text-purple-300">🕐 Gestión de Horario de Retiros</h4>
+                    <div class="mb-3">
+                        <p class="text-sm">Estado actual: <span class="${isOpen ? 'text-green-400' : 'text-red-400'} font-bold">${isOpen ? '🟢 Abierto' : '🔴 Cerrado'}</span></p>
+                        <p class="text-xs text-gray-400">${config.manualOverride !== 'none' ? '(Anulación manual activa)' : '(Horario programado)'}</p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                            <label class="block text-xs mb-1">Hora inicio (formato 24h)</label>
+                            <input type="number" id="schedStartHour" value="${startH}" min="0" max="23" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">
+                            <input type="number" id="schedStartMin" value="${startM}" min="0" max="59" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm mt-1">
+                        </div>
+                        <div>
+                            <label class="block text-xs mb-1">Hora fin (formato 24h)</label>
+                            <input type="number" id="schedEndHour" value="${endH}" min="0" max="23" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">
+                            <input type="number" id="schedEndMin" value="${endM}" min="0" max="59" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm mt-1">
+                        </div>
+                    </div>
+                    <button onclick="guardarHorarioRetiro()" class="w-full bg-blue-600 py-2 rounded-lg font-bold hover:bg-blue-700 mb-3">💾 Guardar Horario</button>
+                    <div class="flex gap-3">
+                        <button onclick="toggleRetiroManual('open')" class="flex-1 bg-green-600 py-2 rounded-lg font-bold hover:bg-green-700">🔓 Abrir ahora</button>
+                        <button onclick="toggleRetiroManual('close')" class="flex-1 bg-red-600 py-2 rounded-lg font-bold hover:bg-red-700">🔒 Cerrar ahora</button>
+                    </div>
+                </div>`;
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = '<p class="text-red-400">Error de conexión</p>';
+            }
+        }
+
+        // Funciones globales para los botones de Funciones de Admin
+        window.procesarDepositoRol = async (id, action, btn) => {
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+            try {
+                const res = await fetch(`/api/admin/pending-deposits-role/${id}/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: currentUser.telegram_id })
+                });
+                if (res.ok) {
+                    iziToast.success({ message: action === 'approve' ? 'Depósito aprobado' : 'Depósito rechazado' });
+                    if (isAdmin) renderPendingRequestsView();
+                    else loadFuncionesDepositos();
+                } else {
+                    const err = await res.json();
+                    iziToast.error({ message: err.error || 'Error' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = action === 'approve' ? '✅' : '❌'; }
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+                if (btn) { btn.disabled = false; btn.innerHTML = action === 'approve' ? '✅' : '❌'; }
+            }
+        };
+
+        window.procesarRetiroRol = async (id, action, btn) => {
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+            try {
+                const res = await fetch(`/api/admin/pending-withdraws-role/${id}/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: currentUser.telegram_id })
+                });
+                if (res.ok) {
+                    iziToast.success({ message: action === 'approve' ? 'Retiro aprobado' : 'Retiro rechazado' });
+                    if (isAdmin) renderPendingRequestsView();
+                    else loadFuncionesRetiros();
+                } else {
+                    const err = await res.json();
+                    iziToast.error({ message: err.error || 'Error' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = action === 'approve' ? '✅' : '❌'; }
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+                if (btn) { btn.disabled = false; btn.innerHTML = action === 'approve' ? '✅' : '❌'; }
+            }
+        };
+
+        window.guardarHorarioRetiro = async () => {
+            const startH = parseInt(document.getElementById('schedStartHour').value) || 0;
+            const startM = parseInt(document.getElementById('schedStartMin').value) || 0;
+            const endH = parseInt(document.getElementById('schedEndHour').value) || 0;
+            const endM = parseInt(document.getElementById('schedEndMin').value) || 0;
+            const start = startH + startM / 60;
+            const end = endH + endM / 60;
+            if (start >= end) { iziToast.error({ message: 'La hora de inicio debe ser menor que la de fin' }); return; }
+            try {
+                const res = await fetch('/api/admin/schedule-config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ start, end })
+                });
+                if (res.ok) {
+                    iziToast.success({ message: 'Horario actualizado' });
+                    loadFuncionesHorario();
+                } else {
+                    const err = await res.json();
+                    iziToast.error({ message: err.error || 'Error' });
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+            }
+        };
+
+        window.toggleRetiroManual = async (action) => {
+            try {
+                const res = await fetch('/api/admin/schedule-toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action })
+                });
+                if (res.ok) {
+                    iziToast.success({ message: action === 'open' ? 'Retiros abiertos' : 'Retiros cerrados' });
+                    loadFuncionesHorario();
+                } else {
+                    const err = await res.json();
+                    iziToast.error({ message: err.error || 'Error' });
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+            }
+        };
+
+        // ========== RENDERIZAR DESIGNACIÓN DE ADMINS ==========
+        async function renderRoleManagerView() {
+            if (!isAdmin) return;
+            adminViewContainer.innerHTML = '<div class="loader"></div> Cargando usuarios...';
+            try {
+                const [usersRes, rolesRes] = await Promise.all([
+                    fetch('/api/admin/users'),
+                    fetch('/api/admin/admin-roles')
+                ]);
+                if (!usersRes.ok || !rolesRes.ok) throw new Error('Error de servidor');
+                const users = await usersRes.json();
+                const allRoles = await rolesRes.json();
+
+                // Mapa de roles por usuario
+                const rolesMap = {};
+                for (const r of allRoles) {
+                    if (!rolesMap[r.telegram_id]) rolesMap[r.telegram_id] = [];
+                    rolesMap[r.telegram_id].push(r.role);
+                }
+
+                let html = `<h4 class="text-xl font-bold mb-4">👥 Designación de Admins y Privilegios</h4>
+                    <p class="text-sm text-gray-400 mb-4">Selecciona los privilegios para cada usuario. Los cambios se guardan automáticamente.</p>
+                    <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-gray-400 border-b border-gray-600">
+                                <th class="pb-2 pr-2">Usuario</th>
+                                <th class="pb-2 pr-2 text-center" title="Aprobar depósitos">📥 Depósitos</th>
+                                <th class="pb-2 pr-2 text-center" title="Aprobar retiros">📤 Retiros</th>
+                                <th class="pb-2 text-center" title="Gestionar horario de retiros">🕐 Horario</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                for (const u of users) {
+                    const userRolesList = rolesMap[u.telegram_id] || [];
+                    const hasDeposit = userRolesList.includes('deposit_approver');
+                    const hasWithdraw = userRolesList.includes('withdraw_approver');
+                    const hasSchedule = userRolesList.includes('schedule_manager');
+                    const displayName = u.first_name || u.username || `ID ${u.telegram_id}`;
+                    const usernameStr = u.username ? `@${u.username}` : '';
+                    html += `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
+                        <td class="py-2 pr-2">
+                            <span class="font-medium">${escapeHTML(displayName)}</span>
+                            <span class="text-xs text-gray-500 block">${escapeHTML(usernameStr)} <span class="text-gray-600">#${u.telegram_id}</span></span>
+                        </td>
+                        <td class="py-2 pr-2 text-center">
+                            <input type="checkbox" ${hasDeposit ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'deposit_approver', this.checked)" class="w-5 h-5 accent-cyan-500 cursor-pointer">
+                        </td>
+                        <td class="py-2 pr-2 text-center">
+                            <input type="checkbox" ${hasWithdraw ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'withdraw_approver', this.checked)" class="w-5 h-5 accent-pink-500 cursor-pointer">
+                        </td>
+                        <td class="py-2 text-center">
+                            <input type="checkbox" ${hasSchedule ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'schedule_manager', this.checked)" class="w-5 h-5 accent-purple-500 cursor-pointer">
+                        </td>
+                    </tr>`;
+                }
+                html += `</tbody></table></div>`;
+                adminViewContainer.innerHTML = html;
+            } catch (e) {
+                console.error('Error en renderRoleManagerView:', e);
+                adminViewContainer.innerHTML = `<p class="text-red-400">Error al cargar usuarios: ${e.message}</p>`;
+            }
+        }
+
+        // Función global para toggle de roles
+        window.toggleUserRole = async (telegramId, role, enabled) => {
+            try {
+                // Obtener roles actuales del usuario
+                const res = await fetch(`/api/admin/admin-roles/${telegramId}`);
+                if (!res.ok) throw new Error('Error al obtener roles');
+                const data = await res.json();
+                let roles = data.roles || [];
+
+                if (enabled) {
+                    if (!roles.includes(role)) roles.push(role);
+                } else {
+                    roles = roles.filter(r => r !== role);
+                }
+
+                const saveRes = await fetch(`/api/admin/admin-roles/${telegramId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roles })
+                });
+
+                if (saveRes.ok) {
+                    iziToast.success({ message: enabled ? 'Privilegio asignado' : 'Privilegio removido', timeout: 1500 });
+                } else {
+                    const err = await saveRes.json();
+                    iziToast.error({ message: err.error || 'Error al guardar' });
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+                console.error(e);
+            }
+        };
+
         adminNavBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 if (!isAdmin) return;
@@ -3490,6 +3887,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 else if (view === 'transferMins') renderTransferMinsView();
                 else if (view === 'userManager') renderUserManagerView();
                 else if (view === 'manageUsers') renderManageUsersView();
+                else if (view === 'roleManager') renderRoleManagerView();
             });
         });
 
@@ -3578,10 +3976,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const cup = parseFloat(u.cup) || 0;
                         const usd = parseFloat(u.usd) || 0;
                         const bonus = parseFloat(u.bonus_cup) || 0;
-                        cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-pointer hover:bg-gray-700/60 transition user-card" data-userid="${u.telegram_id}" onclick="openBalanceModal(${u.telegram_id}, '${escapeHTML(u.first_name || 'Sin nombre')}', ${cup}, ${usd}, ${bonus})">
+                        const isBanned = !!u.is_banned;
+                        const bannedClass = isBanned ? 'opacity-60 border border-red-500' : '';
+                        const bannedBadge = isBanned ? '<span class="text-red-400 text-xs ml-2">🚫 BANEADO</span>' : '';
+                        cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-pointer hover:bg-gray-700/60 transition user-card ${bannedClass}" data-userid="${u.telegram_id}" onclick="openBalanceModal(${u.telegram_id}, '${escapeHTML(u.first_name || 'Sin nombre')}', ${cup}, ${usd}, ${bonus}, ${isBanned})">
                             <div class="flex justify-between items-start">
                                 <div>
-                                    <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''}</p>
+                                    <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''}${bannedBadge}</p>
                                     <p class="text-xs text-gray-400">ID: ${u.telegram_id}</p>
                                 </div>
                                 <div class="text-right text-sm">
@@ -3672,9 +4073,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        window.openBalanceModal = (telegramId, name, cup, usd, bonus) => {
+        window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false) => {
+            const banButtonHtml = isBanned
+                ? `<button id="banUserBtn" onclick="desbanearUsuario(${telegramId})" class="w-full bg-green-700 py-3 rounded-xl mt-2 font-bold">✅ Desbanear usuario</button>`
+                : `<button id="banUserBtn" onclick="banearUsuario(${telegramId})" class="w-full bg-red-700 py-3 rounded-xl mt-2 font-bold">🚫 Banear usuario</button>`;
             modalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-4">Editar saldo de ${escapeHTML(name)} (ID: ${telegramId})</h4>
+                ${isBanned ? '<p class="text-red-400 font-bold mb-3">🚫 Este usuario está BANEADO</p>' : ''}
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm mb-1">CUP</label>
@@ -3703,13 +4108,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', -1)" class="bg-red-700 px-3 rounded-lg">-1</button>
                             <input type="number" id="editBonus" value="${bonus}" step="0.01" class="w-24 p-1.5 rounded bg-gray-700 text-white text-sm">
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 1)" class="bg-green-700 px-3 rounded-lg">+1</button>
-                            <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 5)" class="bg-green-600 px-3 rounded-lg">+5</button>
+                            <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 10)" class="bg-green-600 px-3 rounded-lg">+10</button>
                         </div>
                         <p class="text-xs text-gray-400 mt-1">Si el bono supera el mínimo de depósito, se migrará automáticamente a CUP.</p>
                     </div>
                 </div>
                 <button id="saveBalanceBtn" onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
-                <button id="banUserBtn" onclick="banearUsuario(${telegramId})" class="w-full bg-red-700 py-3 rounded-xl mt-2 font-bold">🚫 Banear usuario</button>
+                ${banButtonHtml}
                 <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
             `;
             adminModal.classList.remove('hidden');
@@ -4045,8 +4450,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     adminModal.classList.add('hidden');
                     renderManageUsersView();
                 } else {
-                    const err = await res.json();
-                    iziToast.error({ message: err.error || 'Error al banear' });
+                    let errMsg = 'Error al banear';
+                    try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
+                    iziToast.error({ message: errMsg });
                     btn.disabled = false;
                     btn.innerHTML = '🚫 Banear usuario';
                 }
@@ -4054,6 +4460,36 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 iziToast.error({ message: 'Error de conexión' });
                 btn.disabled = false;
                 btn.innerHTML = '🚫 Banear usuario';
+            }
+        };
+
+        window.desbanearUsuario = async (telegramId) => {
+            const btn = document.getElementById('banUserBtn');
+            if (!btn || btn.disabled) return;
+            if (!confirm(`¿Estás seguro de DESBANEAR al usuario ${telegramId}?`)) return;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Desbaneando...';
+            try {
+                const res = await fetch(`/api/admin/users/${telegramId}/unban`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: currentUser.telegram_id })
+                });
+                if (res.ok) {
+                    iziToast.success({ message: 'Usuario desbaneado correctamente.' });
+                    adminModal.classList.add('hidden');
+                    renderManageUsersView();
+                } else {
+                    let errMsg = 'Error al desbanear';
+                    try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
+                    iziToast.error({ message: errMsg });
+                    btn.disabled = false;
+                    btn.innerHTML = '✅ Desbanear usuario';
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+                btn.disabled = false;
+                btn.innerHTML = '✅ Desbanear usuario';
             }
         };
     })();
