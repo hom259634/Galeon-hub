@@ -4646,10 +4646,11 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             .from('deposit_requests')
             .select('*')
             .eq('id', requestId)
+            .eq('status', 'pending')
             .single();
 
         if (!request) {
-            await ctx.answerCbQuery('Solicitud no encontrada', { show_alert: true });
+            await ctx.answerCbQuery('Solicitud no encontrada o ya procesada', { show_alert: true });
             return;
         }
 
@@ -4721,7 +4722,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
 
         await supabase
             .from('deposit_requests')
-            .update({ status: 'approved', updated_at: new Date() })
+            .update({ status: 'approved', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
             .eq('id', requestId);
 
         await ctx.telegram.sendMessage(
@@ -4747,27 +4748,34 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
 });
 
 bot.action(/reject_deposit_(\d+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'deposit_approver'))) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'deposit_approver'))) {
+        await ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
+        return;
+    }
     try {
         const requestId = parseInt(ctx.match[1]);
-        await supabase
-            .from('deposit_requests')
-            .update({ status: 'rejected', updated_at: new Date() })
-            .eq('id', requestId);
-
         const { data: request } = await supabase
             .from('deposit_requests')
-            .select('user_id')
+            .select('user_id, amount, currency')
             .eq('id', requestId)
+            .eq('status', 'pending')
             .single();
 
-        if (request) {
-            await ctx.telegram.sendMessage(
-                request.user_id,
-                '❌ Depósito rechazado\n\n📌La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.',
-                { parse_mode: 'HTML' }
-            );
+        if (!request) {
+            await ctx.answerCbQuery('Solicitud no encontrada o ya procesada', { show_alert: true });
+            return;
         }
+
+        await supabase
+            .from('deposit_requests')
+            .update({ status: 'rejected', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
+            .eq('id', requestId);
+
+        await ctx.telegram.sendMessage(
+            request.user_id,
+            '❌ Depósito rechazado\n\n📌 La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.',
+            { parse_mode: 'HTML' }
+        );
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('❌ Depósito rechazado.');
         await ctx.answerCbQuery();
@@ -4788,10 +4796,11 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             .from('withdraw_requests')
             .select('*')
             .eq('id', requestId)
+            .eq('status', 'pending')
             .single();
 
         if (!request) {
-            await ctx.answerCbQuery('Solicitud no encontrada', { show_alert: true });
+            await ctx.answerCbQuery('Solicitud no encontrada o ya procesada', { show_alert: true });
             return;
         }
 
@@ -4820,14 +4829,13 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
 
         await supabase
             .from('withdraw_requests')
-            .update({ status: 'approved', updated_at: new Date() })
+            .update({ status: 'approved', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
             .eq('id', requestId);
 
         await ctx.telegram.sendMessage(request.user_id,
-            `✅ <b>Retiro aprobado</b>\n\n` +
-            `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
-            `💵 Se debitaron ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
-            `En breve los fondos serán enviados a tu cuenta.`,
+            `✅ <b>¡Retiro aprobado!</b>\n\n` +
+            `💰 Monto: ${request.amount} ${request.currency}\n` +
+            `📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
 
@@ -4841,17 +4849,25 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
 });
 
 bot.action(/reject_withdraw_(\d+)/, async (ctx) => {
-    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'withdraw_approver'))) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'withdraw_approver'))) {
+        await ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
+        return;
+    }
     try {
         const requestId = parseInt(ctx.match[1]);
-        await supabase.from('withdraw_requests').update({ status: 'rejected', updated_at: new Date() }).eq('id', requestId);
-        const { data: request } = await supabase.from('withdraw_requests').select('user_id').eq('id', requestId).single();
-        if (request) {
-            await ctx.telegram.sendMessage(request.user_id,
-                '❌ <b>Retiro rechazado</b>\nTu solicitud no pudo ser procesada. Por favor, contacta al administrador para más detalles.',
-                { parse_mode: 'HTML' }
-            );
+        const { data: request } = await supabase.from('withdraw_requests').select('user_id, amount, currency').eq('id', requestId).eq('status', 'pending').single();
+
+        if (!request) {
+            await ctx.answerCbQuery('Solicitud no encontrada o ya procesada', { show_alert: true });
+            return;
         }
+
+        await supabase.from('withdraw_requests').update({ status: 'rejected', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id }).eq('id', requestId);
+
+        await ctx.telegram.sendMessage(request.user_id,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${request.currency}\n📌 Contacta con el administrador para más información.`,
+            { parse_mode: 'HTML' }
+        );
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('❌ Retiro rechazado.');
         await ctx.answerCbQuery();

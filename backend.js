@@ -3715,7 +3715,7 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
         const oldUsd = parseFloat(user.usd) || 0;
         const oldBonus = parseFloat(user.bonus_cup) || 0;
 
-        const adminHeader = `<b>${botInfo.first_name || botInfo.username || '4pu3$t4$ Qva®'}</b> — ADMIN:\n\n`;
+        const adminHeader = `<b>${escapeHTML(botInfo.first_name || botInfo.username || '4pu3$t4$ Qva®')}</b> — ADMIN:\n\n`;
 
         // Diferencia de lo que el admin realmente solicitó (antes de migración)
         const diffCupReq = cup - oldCup;
@@ -3764,23 +3764,16 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
             const partes = [];
             if (Math.abs(diffCupReq) > 0.001) {
                 const verbo = diffCupReq > 0 ? 'sumados' : 'restados';
-                partes.push(`${verbo} ${Math.abs(diffCupReq).toFixed(2)} CUP`);
+                const prep = diffCupReq > 0 ? 'a' : 'de';
+                partes.push(`${verbo} ${Math.abs(diffCupReq).toFixed(2)} CUP ${prep} tu saldo principal`);
             }
             if (Math.abs(diffUsdReq) > 0.001) {
                 const verbo = diffUsdReq > 0 ? 'sumados' : 'restados';
-                partes.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD`);
+                const prep = diffUsdReq > 0 ? 'a' : 'de';
+                partes.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD ${prep} tu saldo USD`);
             }
 
-            let preposicion;
-            if (diffCupReq >= 0 && diffUsdReq >= 0) {
-                preposicion = 'a';
-            } else if (diffCupReq <= 0 && diffUsdReq <= 0) {
-                preposicion = 'de';
-            } else {
-                preposicion = 'en';
-            }
-
-            const mensaje = adminHeader + `⚠️ Han sido ${partes.join(' y ')} ${preposicion} tu saldo principal. Si crees que esto es incorrecto, por favor, contáctanos.`;
+            const mensaje = adminHeader + `⚠️ Han sido ${partes.join(' y ')}. Si crees que esto es incorrecto, por favor, contáctanos.`;
             try {
                 await bot.telegram.sendMessage(telegramId, mensaje, { parse_mode: 'HTML' });
             } catch (e) {}
@@ -4041,7 +4034,7 @@ app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
 
     await supabase.from('deposit_requests').update({ status: 'rejected', processed_at: new Date(), processed_by: parseInt(userId) }).eq('id', id);
     try {
-        if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n📌 La solicitud no pudo ser procesada.\n💰 Monto depositado: ${request.amount} ${String(request.currency || '').toLowerCase()}`, { parse_mode: 'HTML' });
+        if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ Depósito rechazado\n\n📌 La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.`, { parse_mode: 'HTML' });
     } catch (e) {}
     res.json({ success: true });
 });
@@ -4151,11 +4144,6 @@ app.put('/api/admin/schedule-config', async (req, res) => {
     }
     const { start, end } = req.body;
 
-    // Delegar en el endpoint existente
-    const originalUrl = req.url;
-    const originalBody = req.body;
-
-    // Simular llamada al endpoint de config existente
     try {
         const wasOpen = await isWithdrawTime();
 
@@ -4164,6 +4152,56 @@ app.put('/api/admin/schedule-config', async (req, res) => {
         }
         if (end !== undefined) {
             await supabase.from('app_config').upsert({ key: 'withdraw_time_end', value: end.toString() }, { onConflict: 'key' });
+        }
+
+        if (start !== undefined || end !== undefined) {
+            const { data: overrideData } = await supabase
+                .from('app_config')
+                .select('value')
+                .eq('key', 'withdraw_manual_override')
+                .single();
+            const currentOverride = overrideData?.value || 'none';
+
+            if (currentOverride === 'open') {
+                await supabase
+                    .from('app_config')
+                    .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
+            } else if (wasOpen) {
+                await supabase
+                    .from('app_config')
+                    .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
+                await supabase
+                    .from('app_config')
+                    .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
+
+                const now = moment.tz(TIMEZONE);
+                const currentHour = now.hour() + now.minute() / 60;
+                const newStart = start !== undefined ? start : await getWithdrawTimeStart();
+                const newEnd = end !== undefined ? end : await getWithdrawTimeEnd();
+
+                if (currentHour < newStart || currentHour >= newEnd) {
+                    const startStr = formatHour12(newStart);
+                    const endStr = formatHour12(newEnd);
+                    const todayStart = now.clone().startOf('day').add(newStart, 'hours');
+                    const nextOpeningIsToday = now.isBefore(todayStart);
+                    const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
+                    await broadcastToAllUsers(
+                        `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
+                        `La ventana de retiros ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`
+                    );
+                    await supabase
+                        .from('app_config')
+                        .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
+                } else {
+                    await supabase
+                        .from('app_config')
+                        .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
+                }
+            } else {
+                await supabase
+                    .from('app_config')
+                    .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
+            }
         }
 
         res.json({ success: true, message: 'Horario actualizado' });
