@@ -3519,7 +3519,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             // Mostrar roles actuales del usuario
             if (userRoles.length > 0) {
                 html += `<div class="text-sm text-gray-400 mb-2">Tus permisos: ${userRoles.map(r => {
-                    const labels = { withdraw_approver: '✅ Aprobar Retiros', deposit_approver: '✅ Aprobar Depósitos', schedule_manager: '🕐 Gestionar Horarios' };
+                    const labels = { withdraw_approver: '✅ Aprobar o Denegar Retiros', deposit_approver: '✅ Aprobar o Denegar Depósitos', schedule_manager: '🕐 Gestionar Horarios de Retiros' };
                     return labels[r] || r;
                 }).join(' · ')}</div>`;
             }
@@ -3653,7 +3653,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <input type="number" id="schedStartMin" value="${startM}" min="0" max="59" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm mt-1">
                         </div>
                         <div>
-                            <label class="block text-xs mb-1">Hora fin (formato 24h)</label>
+                            <label class="block text-xs mb-1">Hora cierre (formato 24h)</label>
                             <input type="number" id="schedEndHour" value="${endH}" min="0" max="23" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">
                             <input type="number" id="schedEndMin" value="${endM}" min="0" max="59" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm mt-1">
                         </div>
@@ -4436,7 +4436,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         window.banearUsuario = async (telegramId) => {
             const btn = document.getElementById('banUserBtn');
             if (!btn || btn.disabled) return;
-            if (!confirm(`¿Estás seguro de BANEAR permanentemente al usuario ${telegramId}? Esta acción no se puede deshacer.`)) return;
+            if (!confirm(`¿Estás seguro de BANEAR al usuario ${telegramId}?`)) return;
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Baneando...';
             try {
