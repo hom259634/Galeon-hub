@@ -69,6 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // ========== INICIALIZAR BOT ==========
 const bot = new Telegraf(BOT_TOKEN);
+bot.pendingNotifications = new Map();
 let botInfo = { username: 'bot', first_name: 'Bot' };
 
 // ========== CONFIGURAR COMANDOS DEL MENÚ LATERAL ==========
@@ -108,7 +109,7 @@ bot.use(localSession.middleware());
 
 // ========== FUNCIÓN PARA VERIFICAR SI UN USUARIO ES ADMIN ==========
 function isAdmin(userId) {
-    return ADMIN_IDS.includes(userId);
+    return ADMIN_IDS.includes(Number(userId));
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
@@ -674,20 +675,22 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
 
 // ========== FUNCIÓN PARA OBTENER MÍNIMO DE TRANSFERENCIA (admin o fallback) ==========
 async function getTransferMin(currency) {
-    // Buscar en app_config (ajustado por admin)
-    const key = currency === 'CUP' ? 'transfer_min_cup' : 'transfer_min_usd';
-    const { data: cfg } = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', key)
-        .single();
-    if (cfg && cfg.value !== null && !isNaN(parseFloat(cfg.value))) {
-        return parseFloat(cfg.value);
-    }
+    try {
+        const key = currency === 'CUP' ? 'transfer_min_cup' : 'transfer_min_usd';
+        const { data: cfg } = await supabase
+            .from('app_config')
+            .select('value')
+            .eq('key', key)
+            .single();
+        if (cfg && cfg.value !== null && !isNaN(parseFloat(cfg.value))) {
+            return parseFloat(cfg.value);
+        }
+    } catch (e) {}
 
-    // Fallback: usar el mínimo global de depósito (ya derivado de los métodos)
-    if (currency === 'CUP') return await getMinDepositCUP();
-    if (currency === 'USD') return await getMinDepositUSD();
+    try {
+        if (currency === 'CUP') return await getMinDepositCUP();
+        if (currency === 'USD') return await getMinDepositUSD();
+    } catch (e) {}
 
     return null;
 }
@@ -702,45 +705,46 @@ async function getReferralCommissionRate() {
 }
 
 async function getMinDepositCUP() {
-    const { data } = await supabase
-        .from('deposit_methods')
-        .select('min_amount')
-        .eq('currency', 'CUP')
-        .not('min_amount', 'is', null)
-        .order('min_amount', { ascending: true })
-        .limit(1);
-    if (data && data.length > 0 && data[0].min_amount !== null) {
-        return parseFloat(data[0].min_amount);
-    }
+    try {
+        const { data } = await supabase
+            .from('deposit_methods')
+            .select('min_amount')
+            .eq('currency', 'CUP')
+            .not('min_amount', 'is', null)
+            .order('min_amount', { ascending: true })
+            .limit(1);
+        if (data && data.length > 0 && data[0].min_amount !== null) {
+            return parseFloat(data[0].min_amount);
+        }
+    } catch (e) {}
     return 0;
 }
 
 async function getMinDepositUSD() {
-    // Buscar primero el método específico "Tarjeta Clásica" (moneda USD)
-    const { data: preferred } = await supabase
-        .from('deposit_methods')
-        .select('min_amount')
-        .eq('currency', 'USD')
-        .eq('name', 'Tarjeta Clásica')
-        .maybeSingle();
+    try {
+        const { data: preferred } = await supabase
+            .from('deposit_methods')
+            .select('min_amount')
+            .eq('currency', 'USD')
+            .eq('name', 'Tarjeta Clásica')
+            .maybeSingle();
 
-    if (preferred && preferred.min_amount !== null) {
-        return parseFloat(preferred.min_amount);
-    }
+        if (preferred && preferred.min_amount !== null) {
+            return parseFloat(preferred.min_amount);
+        }
 
-    // Si no existe, usar el menor mínimo entre todos los métodos USD
-    const { data } = await supabase
-        .from('deposit_methods')
-        .select('min_amount')
-        .eq('currency', 'USD')
-        .not('min_amount', 'is', null)
-        .order('min_amount', { ascending: true })
-        .limit(1);
+        const { data } = await supabase
+            .from('deposit_methods')
+            .select('min_amount')
+            .eq('currency', 'USD')
+            .not('min_amount', 'is', null)
+            .order('min_amount', { ascending: true })
+            .limit(1);
 
-    if (data && data.length > 0 && data[0].min_amount !== null) {
-        return parseFloat(data[0].min_amount);
-    }
-
+        if (data && data.length > 0 && data[0].min_amount !== null) {
+            return parseFloat(data[0].min_amount);
+        }
+    } catch (e) {}
     return 0;
 }
 
@@ -2367,7 +2371,10 @@ bot.action(/set_min_(.+)/, async (ctx) => {
 });
 
 bot.action('adm_view', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
+    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'withdraw_approver')) && !(await hasRole(ctx.from.id, 'deposit_approver'))) {
+        await ctx.answerCbQuery('⛔ No autorizado.', { show_alert: true });
+        return;
+    }
     const rates = await getExchangeRates();
     const bonusDefault = await getBonusCupDefault();
     const refRate = await getReferralCommissionRate();
@@ -2596,8 +2603,10 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
             }
 
             if (ganado) {
-                premioTotalUSD += item.usd * multiplicador;
-                premioTotalCUP += item.cup * multiplicador;
+                const itemUsd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount || 0) : 0);
+                const itemCup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount || 0) : 0);
+                premioTotalUSD += itemUsd * multiplicador;
+                premioTotalCUP += itemCup * multiplicador;
             }
         }
 
@@ -3612,10 +3621,13 @@ bot.on(message('text'), async (ctx) => {
 
                     if (error) throw error;
 
+                    await ensureBotRolesCache();
                     const withdrawNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers]);
+                    const wdKey1 = `withdraw_${request.id}`;
+                    const wdEntries1 = [];
                     for (const adminId of withdrawNotifyIds) {
                         try {
-                            await ctx.telegram.sendMessage(adminId,
+                            const sent = await ctx.telegram.sendMessage(adminId,
                                 `🟨 <b>Nueva solicitud de retiro</b>\n` +
                                 `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                                 `Monto: ${amount} ${currency}\n` +
@@ -3630,8 +3642,10 @@ bot.on(message('text'), async (ctx) => {
                                     ]).reply_markup
                                 }
                             );
+                            if (sent?.message_id) wdEntries1.push({ chatId: adminId, messageId: sent.message_id });
                         } catch (e) {}
                     }
+                    if (wdEntries1.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(wdKey1, wdEntries1);
 
                     await ctx.reply(
                         `✅ <b>Solicitud de retiro enviada</b>\n` +
@@ -3690,10 +3704,13 @@ bot.on(message('text'), async (ctx) => {
 
                     if (error) throw error;
 
+                    await ensureBotRolesCache();
                     const withdrawNotifyIds2 = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers]);
+                    const wdKey2 = `withdraw_${request.id}`;
+                    const wdEntries2 = [];
                     for (const adminId of withdrawNotifyIds2) {
                         try {
-                                await ctx.telegram.sendMessage(adminId,
+                            const sent = await ctx.telegram.sendMessage(adminId,
                                 `🟨 <b>Nueva solicitud de retiro</b>\n` +
                                 `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                                 `Monto: ${amount} ${currency}\n` +
@@ -3707,8 +3724,10 @@ bot.on(message('text'), async (ctx) => {
                                     ]).reply_markup
                                 }
                             );
+                            if (sent?.message_id) wdEntries2.push({ chatId: adminId, messageId: sent.message_id });
                         } catch (e) {}
                     }
+                    if (wdEntries2.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(wdKey2, wdEntries2);
 
                     await ctx.reply(
                         `✅ <b>Solicitud de retiro enviada</b>\n` +
@@ -3757,10 +3776,13 @@ bot.on(message('text'), async (ctx) => {
                         if (error) throw error;
 
                         // Notify admins
+                        await ensureBotRolesCache();
                         const withdrawNotifyIds3 = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers]);
+                        const wdKey3 = `withdraw_${request.id}`;
+                        const wdEntries3 = [];
                         for (const adminId of withdrawNotifyIds3) {
                             try {
-                                await ctx.telegram.sendMessage(adminId,
+                                const sent = await ctx.telegram.sendMessage(adminId,
                                     `🟨 <b>Nueva solicitud de retiro</b>\n` +
                                     `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                                     `Monto: ${amount} ${currency}\n` +
@@ -3775,8 +3797,10 @@ bot.on(message('text'), async (ctx) => {
                                         ]).reply_markup
                                     }
                                 );
+                                if (sent?.message_id) wdEntries3.push({ chatId: adminId, messageId: sent.message_id });
                             } catch (e) {}
                         }
+                        if (wdEntries3.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(wdKey3, wdEntries3);
 
                         await ctx.reply(
                             `✅ <b>Solicitud de retiro enviada</b>\n` +
@@ -3939,10 +3963,13 @@ bot.on(message('text'), async (ctx) => {
 
             if (error) throw error;
 
+            await ensureBotRolesCache();
             const withdrawNotifyIds4 = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers]);
+            const wdKey4 = `withdraw_${request.id}`;
+            const wdEntries4 = [];
             for (const adminId of withdrawNotifyIds4) {
                 try {
-                    await bot.telegram.sendMessage(adminId,
+                    const sent = await bot.telegram.sendMessage(adminId,
                         `📤 <b>Nueva solicitud de RETIRO</b>\n` +
                         `👤 Usuario: ${ctx.from.first_name} (${uid})\n` +
                         `💰 Monto: ${amount} ${currency}\n` +
@@ -3957,8 +3984,10 @@ bot.on(message('text'), async (ctx) => {
                             ]).reply_markup
                         }
                     );
+                    if (sent?.message_id) wdEntries4.push({ chatId: adminId, messageId: sent.message_id });
                 } catch (e) {}
             }
+            if (wdEntries4.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(wdKey4, wdEntries4);
 
             await ctx.reply(
                 `✅ <b>Solicitud de retiro enviada</b>\n` +
@@ -4056,6 +4085,9 @@ bot.on(message('text'), async (ctx) => {
 
     // --- Flujo: transferencia - monto ---
     if (session.awaitingTransferAmount) {
+        let transferDebitDone = false;
+        let transferOrigCup = 0, transferOrigUsd = 0;
+        try {
         const parsed = parseAmountWithCurrency(text);
 
         if (!parsed) {
@@ -4121,6 +4153,8 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
         // 4. Debitar origen usando el plan calculado
+        transferOrigCup = parseFloat(user.cup) || 0;
+        transferOrigUsd = parseFloat(user.usd) || 0;
         const updates = {};
         if (cupDebit && cupDebit > 0) {
             const curCup = parseFloat(user.cup) || 0;
@@ -4132,6 +4166,7 @@ bot.on(message('text'), async (ctx) => {
         }
         updates.updated_at = new Date();
         await supabase.from('users').update(updates).eq('telegram_id', uid);
+        transferDebitDone = true;
 
         // 5. Acreditar al receptor (LÓGICA CORREGIDA)
         const { data: freshTarget } = await supabase
@@ -4264,6 +4299,25 @@ bot.on(message('text'), async (ctx) => {
         delete session.transferDepositMethod;
         delete session.transferCurrency;
         return;
+    } catch (transferErr) {
+        console.error('Error en flujo de transferencia (bot):', transferErr?.message || transferErr);
+        if (transferDebitDone) {
+            try {
+                await supabase.from('users').update({
+                    cup: transferOrigCup,
+                    usd: transferOrigUsd,
+                    updated_at: new Date()
+                }).eq('telegram_id', uid);
+            } catch (rollbackErr) {
+                console.error('Error en rollback de transferencia (bot):', rollbackErr?.message || rollbackErr);
+            }
+        }
+        delete session.awaitingTransferAmount;
+        delete session.transferTarget;
+        delete session.transferDepositMethod;
+        delete session.transferCurrency;
+        await ctx.reply('❌ Error al procesar la transferencia. Si el saldo fue debitado, contacta al administrador.', getMainKeyboard(ctx)).catch(() => {});
+    }
     }
 
     // 4. Si no hay ningún flujo activo, se trata como mensaje de soporte
@@ -4580,10 +4634,13 @@ bot.on(message('photo'), async (ctx) => {
         if (amountText && parsed && method) {
             try {
                 const request = await createDepositRequest(uid, method.id, buffer, amountText, parsed.currency);
+                await ensureBotRolesCache();
                 const depositNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.depositApprovers]);
+                const depKey = `deposit_${request.id}`;
+                const depEntries = [];
                 for (const adminId of depositNotifyIds) {
                     try {
-                        await bot.telegram.sendMessage(adminId,
+                        const sent = await bot.telegram.sendMessage(adminId,
                             `📥 <b>Nueva solicitud de DEPÓSITO</b>\n` +
                             `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                             `🏦 Método: ${escapeHTML(method.name)} (${escapeHTML(method.currency)})\n` +
@@ -4598,8 +4655,10 @@ bot.on(message('photo'), async (ctx) => {
                                 ]).reply_markup
                             }
                         );
+                        if (sent?.message_id) depEntries.push({ chatId: adminId, messageId: sent.message_id });
                     } catch (e) {}
                 }
+                if (depEntries.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(depKey, depEntries);
                 await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n\n\n ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
             } catch (e) {
                 console.error(e);
@@ -4644,9 +4703,10 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
         const requestId = parseInt(ctx.match[1]);
         const { data: request } = await supabase
             .from('deposit_requests')
-            .select('*')
+            .update({ status: 'approved', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
             .eq('id', requestId)
             .eq('status', 'pending')
+            .select()
             .single();
 
         if (!request) {
@@ -4668,8 +4728,6 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             .eq('telegram_id', request.user_id)
             .single();
 
-        // Si el depósito es USD, acreditarlo en la parte USD; cualquier otra moneda -> convertir a CUP
-        // Check if user had any previously approved deposits (excluding this one)
         const { data: prevApproved } = await supabase
             .from('deposit_requests')
             .select('id')
@@ -4678,7 +4736,6 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             .neq('id', requestId)
             .limit(1);
 
-        // Consider transfers as "already received balance" too: if user already had any CUP or USD, treat as not-first
         const userCup = parseFloat(user.cup) || 0;
         const userUsd = parseFloat(user.usd) || 0;
         const hadAnyMainBalance = (userCup > 0) || (userUsd > 0);
@@ -4720,11 +4777,6 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             }
         }
 
-        await supabase
-            .from('deposit_requests')
-            .update({ status: 'approved', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
-            .eq('id', requestId);
-
         await ctx.telegram.sendMessage(
             request.user_id,
             buildDepositApprovedMessage({
@@ -4738,6 +4790,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             { parse_mode: 'HTML' }
         );
 
+        updatePendingNotifications(`deposit_${requestId}`, `✅ <b>Depósito #${requestId} aprobado</b> por un administrador.`);
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('✅ Depósito aprobado y saldo actualizado correctamente.');
         await ctx.answerCbQuery();
@@ -4756,9 +4809,10 @@ bot.action(/reject_deposit_(\d+)/, async (ctx) => {
         const requestId = parseInt(ctx.match[1]);
         const { data: request } = await supabase
             .from('deposit_requests')
-            .select('user_id, amount, currency')
+            .update({ status: 'rejected', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
             .eq('id', requestId)
             .eq('status', 'pending')
+            .select()
             .single();
 
         if (!request) {
@@ -4766,16 +4820,12 @@ bot.action(/reject_deposit_(\d+)/, async (ctx) => {
             return;
         }
 
-        await supabase
-            .from('deposit_requests')
-            .update({ status: 'rejected', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
-            .eq('id', requestId);
-
         await ctx.telegram.sendMessage(
             request.user_id,
             '❌ Depósito rechazado\n\n📌 La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.',
             { parse_mode: 'HTML' }
         );
+        updatePendingNotifications(`deposit_${requestId}`, `❌ <b>Depósito #${requestId} rechazado</b> por un administrador.`);
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('❌ Depósito rechazado.');
         await ctx.answerCbQuery();
@@ -4794,9 +4844,10 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
         const requestId = parseInt(ctx.match[1]);
         const { data: request } = await supabase
             .from('withdraw_requests')
-            .select('*')
+            .update({ status: 'approved', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
             .eq('id', requestId)
             .eq('status', 'pending')
+            .select()
             .single();
 
         if (!request) {
@@ -4827,11 +4878,6 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             })
             .eq('telegram_id', request.user_id);
 
-        await supabase
-            .from('withdraw_requests')
-            .update({ status: 'approved', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
-            .eq('id', requestId);
-
         await ctx.telegram.sendMessage(request.user_id,
             `✅ <b>¡Retiro aprobado!</b>\n\n` +
             `💰 Monto: ${request.amount} ${request.currency}\n` +
@@ -4839,6 +4885,7 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             { parse_mode: 'HTML' }
         );
 
+        updatePendingNotifications(`withdraw_${requestId}`, `✅ <b>Retiro #${requestId} aprobado</b> por un administrador.`);
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('✅ Retiro aprobado y saldo debitado correctamente.');
         await ctx.answerCbQuery();
@@ -4855,19 +4902,18 @@ bot.action(/reject_withdraw_(\d+)/, async (ctx) => {
     }
     try {
         const requestId = parseInt(ctx.match[1]);
-        const { data: request } = await supabase.from('withdraw_requests').select('user_id, amount, currency').eq('id', requestId).eq('status', 'pending').single();
+        const { data: request } = await supabase.from('withdraw_requests').update({ status: 'rejected', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id }).eq('id', requestId).eq('status', 'pending').select().single();
 
         if (!request) {
             await ctx.answerCbQuery('Solicitud no encontrada o ya procesada', { show_alert: true });
             return;
         }
 
-        await supabase.from('withdraw_requests').update({ status: 'rejected', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id }).eq('id', requestId);
-
         await ctx.telegram.sendMessage(request.user_id,
             `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${request.currency}\n📌 Contacta con el administrador para más información.`,
             { parse_mode: 'HTML' }
         );
+        updatePendingNotifications(`withdraw_${requestId}`, `❌ <b>Retiro #${requestId} rechazado</b> por un administrador.`);
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('❌ Retiro rechazado.');
         await ctx.answerCbQuery();
@@ -5066,10 +5112,14 @@ async function withdrawNotifications() {
 // Después de todo el código, antes del module.exports
 let cronRunning = false;
 
-cron.schedule('* * * * *', () => {
-    closeExpiredSessions();
-    openScheduledSessions();
-    withdrawNotifications();
+cron.schedule('* * * * *', async () => {
+    try {
+        await closeExpiredSessions();
+        await openScheduledSessions();
+        await withdrawNotifications();
+    } catch (e) {
+        console.error('Error en cron job:', e);
+    }
 }, { timezone: TIMEZONE });
 
 //----------Cambios hechos por Luis David -----------//
@@ -5124,5 +5174,23 @@ bot.on('edited_message', async (ctx) => {
     }
     console.log(`[Broadcast Edit] Editado en ${recipients.length} usuarios.`);
 });
+
+// ========== ACTUALIZAR NOTIFICACIONES PENDIENTES (reflejar decisión web ↔ bot) ==========
+async function updatePendingNotifications(key, statusText) {
+    const entries = bot.pendingNotifications?.get(key);
+    if (!entries) return;
+    for (const { chatId, messageId } of entries) {
+        try {
+            await bot.telegram.editMessageText(chatId, messageId, undefined, statusText, {
+                parse_mode: 'HTML',
+                reply_markup: { inline_keyboard: [] }
+            });
+        } catch (e) {}
+    }
+    bot.pendingNotifications?.delete(key);
+}
+
+// Exponer funciones para que backend.js pueda refrescar el caché al asignar roles
+bot.refreshBotRolesCache = refreshBotRolesCache;
 
 module.exports = bot;
