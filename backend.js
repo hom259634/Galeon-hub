@@ -58,7 +58,7 @@ const regionMap = {
 // ========== FUNCIONES AUXILIARES ==========
 
 function isAdmin(userId) {
-    return ADMIN_IDS.includes(parseInt(userId));
+    return ADMIN_IDS.includes(Number(userId));
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========

@@ -69,6 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // ========== INICIALIZAR BOT ==========
 const bot = new Telegraf(BOT_TOKEN);
+bot.pendingNotifications = new Map();
 let botInfo = { username: 'bot', first_name: 'Bot' };
 
 // ========== CONFIGURAR COMANDOS DEL MENÚ LATERAL ==========
@@ -108,7 +109,7 @@ bot.use(localSession.middleware());
 
 // ========== FUNCIÓN PARA VERIFICAR SI UN USUARIO ES ADMIN ==========
 function isAdmin(userId) {
-    return ADMIN_IDS.includes(userId);
+    return ADMIN_IDS.includes(Number(userId));
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
@@ -2602,8 +2603,10 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
             }
 
             if (ganado) {
-                premioTotalUSD += item.usd * multiplicador;
-                premioTotalCUP += item.cup * multiplicador;
+                const itemUsd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount || 0) : 0);
+                const itemCup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount || 0) : 0);
+                premioTotalUSD += itemUsd * multiplicador;
+                premioTotalCUP += itemCup * multiplicador;
             }
         }
 
@@ -5109,10 +5112,14 @@ async function withdrawNotifications() {
 // Después de todo el código, antes del module.exports
 let cronRunning = false;
 
-cron.schedule('* * * * *', () => {
-    closeExpiredSessions();
-    openScheduledSessions();
-    withdrawNotifications();
+cron.schedule('* * * * *', async () => {
+    try {
+        await closeExpiredSessions();
+        await openScheduledSessions();
+        await withdrawNotifications();
+    } catch (e) {
+        console.error('Error en cron job:', e);
+    }
 }, { timezone: TIMEZONE });
 
 //----------Cambios hechos por Luis David -----------//
