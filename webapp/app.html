@@ -3626,6 +3626,29 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
+        function to12h(h) {
+            const hour24 = Math.floor(h);
+            const min = Math.round((h - hour24) * 60);
+            const period = hour24 >= 12 ? 'PM' : 'AM';
+            const hour12 = hour24 % 12 || 12;
+            return { hour12, min, period };
+        }
+
+        function hourOptions(selected) {
+            let opts = '';
+            for (let i = 1; i <= 12; i++) opts += `<option value="${i}"${i === selected ? ' selected' : ''}>${i}</option>`;
+            return opts;
+        }
+
+        function minOptions(selected) {
+            let opts = '';
+            for (let i = 0; i < 60; i += 5) {
+                const v = i.toString().padStart(2, '0');
+                opts += `<option value="${i}"${i === selected ? ' selected' : ''}>${v}</option>`;
+            }
+            return opts;
+        }
+
         async function loadFuncionesHorario() {
             const container = document.getElementById('funcionesHorario');
             if (!container) return;
@@ -3635,33 +3658,45 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const config = await res.json();
 
                 const isOpen = config.available;
-                const startH = Math.floor(config.start);
-                const startM = Math.round((config.start - startH) * 60);
-                const endH = Math.floor(config.end);
-                const endM = Math.round((config.end - endH) * 60);
+                const start = to12h(config.start);
+                const end = to12h(config.end);
 
                 let html = `<div class="bg-gray-800/40 p-4 rounded-xl">
                     <h4 class="font-semibold mb-3 text-purple-300">🕐 Gestión de Horario de Retiros</h4>
                     <div class="mb-3">
                         <p class="text-sm">Estado actual: <span class="${isOpen ? 'text-green-400' : 'text-red-400'} font-bold">${isOpen ? '🟢 Abierto' : '🔴 Cerrado'}</span></p>
-                        <p class="text-xs text-gray-400">${config.manualOverride !== 'none' ? '(Anulación manual activa)' : '(Horario programado)'}</p>
+                        <p class="text-xs text-gray-400">${config.manualOverride !== 'none' ? '(Cierre manual activo)' : '(Horario programado)'}</p>
                     </div>
                     <div class="grid grid-cols-2 gap-3 mb-3">
                         <div>
-                            <label class="block text-xs mb-1">Hora inicio (formato 24h)</label>
-                            <input type="number" id="schedStartHour" value="${startH}" min="0" max="23" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">
-                            <input type="number" id="schedStartMin" value="${startM}" min="0" max="59" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm mt-1">
+                            <label class="block text-xs mb-1">Hora inicio</label>
+                            <div class="flex gap-1">
+                                <select id="schedStartHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">${hourOptions(start.hour12)}</select>
+                                <span class="text-white self-center">:</span>
+                                <select id="schedStartMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">${minOptions(start.min)}</select>
+                                <select id="schedStartAmPm" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">
+                                    <option value="AM"${start.period === 'AM' ? ' selected' : ''}>AM</option>
+                                    <option value="PM"${start.period === 'PM' ? ' selected' : ''}>PM</option>
+                                </select>
+                            </div>
                         </div>
                         <div>
-                            <label class="block text-xs mb-1">Hora cierre (formato 24h)</label>
-                            <input type="number" id="schedEndHour" value="${endH}" min="0" max="23" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">
-                            <input type="number" id="schedEndMin" value="${endM}" min="0" max="59" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm mt-1">
+                            <label class="block text-xs mb-1">Hora cierre</label>
+                            <div class="flex gap-1">
+                                <select id="schedEndHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">${hourOptions(end.hour12)}</select>
+                                <span class="text-white self-center">:</span>
+                                <select id="schedEndMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">${minOptions(end.min)}</select>
+                                <select id="schedEndAmPm" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">
+                                    <option value="AM"${end.period === 'AM' ? ' selected' : ''}>AM</option>
+                                    <option value="PM"${end.period === 'PM' ? ' selected' : ''}>PM</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
-                    <button onclick="guardarHorarioRetiro()" class="w-full bg-blue-600 py-2 rounded-lg font-bold hover:bg-blue-700 mb-3">💾 Guardar Horario</button>
+                    <button id="guardarHorarioBtn" onclick="guardarHorarioRetiro()" class="w-full bg-blue-600 py-2 rounded-lg font-bold hover:bg-blue-700 mb-3">💾 Guardar Horario</button>
                     <div class="flex gap-3">
-                        <button onclick="toggleRetiroManual('open')" class="flex-1 bg-green-600 py-2 rounded-lg font-bold hover:bg-green-700">🔓 Abrir ahora</button>
-                        <button onclick="toggleRetiroManual('close')" class="flex-1 bg-red-600 py-2 rounded-lg font-bold hover:bg-red-700">🔒 Cerrar ahora</button>
+                        <button id="toggleOpenBtn" onclick="toggleRetiroManual('open',this)" class="flex-1 bg-green-600 py-2 rounded-lg font-bold hover:bg-green-700">🔓 Abrir ahora</button>
+                        <button id="toggleCloseBtn" onclick="toggleRetiroManual('close',this)" class="flex-1 bg-red-600 py-2 rounded-lg font-bold hover:bg-red-700">🔒 Cerrar ahora</button>
                     </div>
                 </div>`;
                 container.innerHTML = html;
@@ -3720,13 +3755,29 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         };
 
         window.guardarHorarioRetiro = async () => {
-            const startH = parseInt(document.getElementById('schedStartHour').value) || 0;
-            const startM = parseInt(document.getElementById('schedStartMin').value) || 0;
-            const endH = parseInt(document.getElementById('schedEndHour').value) || 0;
-            const endM = parseInt(document.getElementById('schedEndMin').value) || 0;
-            const start = startH + startM / 60;
-            const end = endH + endM / 60;
-            if (start >= end) { iziToast.error({ message: 'La hora de inicio debe ser menor que la de fin' }); return; }
+            const btn = document.getElementById('guardarHorarioBtn');
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Guardando...'; }
+
+            let sH = parseInt(document.getElementById('schedStartHour').value) || 0;
+            const sM = parseInt(document.getElementById('schedStartMin').value) || 0;
+            let eH = parseInt(document.getElementById('schedEndHour').value) || 0;
+            const eM = parseInt(document.getElementById('schedEndMin').value) || 0;
+            const sAmPm = document.getElementById('schedStartAmPm').value;
+            const eAmPm = document.getElementById('schedEndAmPm').value;
+
+            if (sAmPm === 'PM' && sH !== 12) sH += 12;
+            if (sAmPm === 'AM' && sH === 12) sH = 0;
+            if (eAmPm === 'PM' && eH !== 12) eH += 12;
+            if (eAmPm === 'AM' && eH === 12) eH = 0;
+
+            const start = sH + sM / 60;
+            const end = eH + eM / 60;
+            if (start >= end) {
+                iziToast.error({ message: 'La hora de inicio debe ser menor que la de fin' });
+                if (btn) { btn.disabled = false; btn.innerHTML = '💾 Guardar Horario'; }
+                return;
+            }
             try {
                 const res = await fetch('/api/admin/schedule-config', {
                     method: 'PUT',
@@ -3739,13 +3790,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = '💾 Guardar Horario'; }
                 }
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión' });
+                if (btn) { btn.disabled = false; btn.innerHTML = '💾 Guardar Horario'; }
             }
         };
 
-        window.toggleRetiroManual = async (action) => {
+        window.toggleRetiroManual = async (action, btn) => {
+            if (btn && btn.disabled) return;
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Procesando...'; }
             try {
                 const res = await fetch('/api/admin/schedule-toggle', {
                     method: 'POST',
@@ -3758,9 +3813,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
+                    if (btn) { btn.disabled = false; btn.textContent = action === 'open' ? '🔓 Abrir ahora' : '🔒 Cerrar ahora'; }
                 }
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión' });
+                if (btn) { btn.disabled = false; btn.textContent = action === 'open' ? '🔓 Abrir ahora' : '🔒 Cerrar ahora'; }
             }
         };
 
@@ -3961,6 +4018,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     <div class="flex flex-wrap gap-2 mb-4">
                         <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-filter="all">Todos</button>
                         <button class="filter-btn bg-gray-600 px-3 py-1 rounded-full text-sm" data-filter="withMainBalance">Con saldo principal</button>
+                        <button class="filter-btn bg-sky-600 px-3 py-1 rounded-full text-sm" data-filter="withUsdBalance">Con saldo USD</button>
                         <button class="filter-btn bg-purple-600 px-3 py-1 rounded-full text-sm" data-filter="withBonus">Con bono</button>
                         <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="empty">Sin saldo ni bono</button>
                         <button class="filter-btn bg-yellow-600 px-3 py-1 rounded-full text-sm" data-filter="withReferrals">Con referidos</button>
@@ -4019,6 +4077,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             case 'all': break;
                             case 'withMainBalance':
                                 categoryMatch = (parseFloat(user.cup) > 0 || parseFloat(user.usd) > 0);
+                                break;
+                            case 'withUsdBalance':
+                                categoryMatch = (parseFloat(user.usd) > 0);
                                 break;
                             case 'withBonus':
                                 categoryMatch = (parseFloat(user.bonus_cup) > 0);
