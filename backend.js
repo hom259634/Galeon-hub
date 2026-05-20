@@ -3560,8 +3560,9 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
 
     try {
         await bot.telegram.sendMessage(request.user_id,
-            `✅ <b>¡Retiro aprobado!</b>\n\n` +
-            `💰 Monto: ${request.amount} ${request.currency}\n` +
+            `✅ <b>Retiro aprobado</b>\n\n` +
+            `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
+            `💵 Se debitaron ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
             `📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
@@ -3902,6 +3903,44 @@ app.post('/api/admin/users/:telegramId/unban', requireAdmin, async (req, res) =>
     }
 });
 
+// Reiniciar usuario (lo deja como nuevo, con el bono de bienvenida actual)
+app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
+    const userId = req.verifiedTelegramId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !hasAnyRole(userId)) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const telegramId = parseInt(req.params.telegramId);
+    if (isNaN(telegramId)) {
+        return res.status(400).json({ error: 'ID de usuario inválido' });
+    }
+    try {
+        const currentBonus = await getBonusCupDefault();
+        const { data, error } = await supabase
+            .from('users')
+            .update({
+                cup: 0,
+                usd: 0,
+                bonus_cup: currentBonus,
+                is_banned: false,
+                updated_at: new Date().toISOString()
+            })
+            .eq('telegram_id', telegramId)
+            .select();
+
+        if (error) {
+            return res.status(500).json({ error: 'No se pudo reiniciar al usuario.' });
+        }
+        if (!data || data.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+        res.json({ success: true, bonus_cup: currentBonus });
+    } catch (e) {
+        console.error('Error reiniciando usuario:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
 // ========== ENDPOINTS DE GESTIÓN DE ROLES (solo super admin) ==========
 
 // Obtener todos los roles asignados
@@ -4039,25 +4078,31 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
         .eq('id', id).eq('status', 'pending').select().single();
     if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
 
-    const user = await getOrCreateUser(request.user_id);
-    let newCup = parseFloat(user.cup) || 0;
-    let newUsd = parseFloat(user.usd) || 0;
-    let newBonus = parseFloat(user.bonus_cup) || 0;
+    const { data: user } = await supabase
+        .from('users')
+        .select('cup, usd, bonus_cup')
+        .eq('telegram_id', request.user_id)
+        .single();
+
+    let newCup = parseFloat(user?.cup) || 0;
+    let newUsd = parseFloat(user?.usd) || 0;
+    let bonusCup = parseFloat(user?.bonus_cup) || 0;
     let bonusMovedCup = 0;
 
     if (request.currency === 'CUP') newCup += parseFloat(request.amount);
     else if (request.currency === 'USD') newUsd += parseFloat(request.amount);
     else { const cupAmount = await convertToCUP(parseFloat(request.amount), request.currency); newCup += cupAmount; }
 
-    await supabase.from('users').update({ cup: newCup, usd: newUsd, updated_at: new Date() }).eq('telegram_id', request.user_id);
-
-    if (newBonus > 0) {
+    if (bonusCup > 0) {
         const { data: prevApproved } = await supabase.from('deposit_requests').select('id').eq('user_id', request.user_id).eq('status', 'approved').neq('id', parseInt(id)).limit(1);
         if (!(prevApproved && prevApproved.length > 0)) {
-            newCup += newBonus; bonusMovedCup = newBonus;
-            await supabase.from('users').update({ cup: newCup, bonus_cup: 0, updated_at: new Date() }).eq('telegram_id', request.user_id);
+            newCup += bonusCup;
+            bonusMovedCup = bonusCup;
+            bonusCup = 0;
         }
     }
+
+    await supabase.from('users').update({ cup: newCup, usd: newUsd, bonus_cup: bonusCup, updated_at: new Date() }).eq('telegram_id', request.user_id);
 
     res.json({ success: true });
     (async () => {
@@ -4152,7 +4197,7 @@ app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
 
     try {
         if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id,
-            `✅ <b>¡Retiro aprobado!</b>\n\n💰 Monto: ${request.amount} ${request.currency}\n📌 En breve los fondos serán enviados a tu cuenta.`,
+            `✅ <b>Retiro aprobado</b>\n\n💰 Monto retirado: ${request.amount} ${request.currency}\n💵 Se debitaron ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\nEn breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
     updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`);
@@ -4395,8 +4440,8 @@ try {
     if (bot && bot.telegram && typeof bot.telegram.getMe === 'function') {
         bot.telegram.getMe().then(info => {
             botInfo = info;
-            console.log('Bot info actualizada (temprano):', botInfo);
-        }).catch(e => console.error('Error actualizando botInfo temprano:', e));
+            console.log('Bot info actualizada:', botInfo);
+        }).catch(e => console.error('Error actualizando botInfo:', e));
     }
 
     if (bot && typeof bot.launch === 'function') {

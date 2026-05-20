@@ -1839,15 +1839,8 @@ bot.action('admin_panel', async (ctx) => {
 });
 
 function subadminPanelKbd(userId) {
-    const id = Number(userId);
     const buttons = [];
-    if (botRolesCache.scheduleManagers.includes(id)) {
-        buttons.push([Markup.button.callback('🎰 Gestionar sesiones', 'admin_sessions')]);
-        buttons.push([Markup.button.callback('🔢 Publicar ganadores', 'admin_winning')]);
-    }
-    if (botRolesCache.withdrawApprovers.includes(id) || botRolesCache.depositApprovers.includes(id)) {
-        buttons.push([Markup.button.callback('📋 Ver datos actuales', 'adm_view')]);
-    }
+    buttons.push([Markup.button.callback('📋 Ver datos actuales', 'adm_view')]);
     buttons.push([Markup.button.callback('◀ Menú principal', 'main')]);
     return Markup.inlineKeyboard(buttons);
 }
@@ -2371,7 +2364,7 @@ bot.action(/set_min_(.+)/, async (ctx) => {
 });
 
 bot.action('adm_view', async (ctx) => {
-    if (!isAdmin(ctx.from.id) && !(await hasRole(ctx.from.id, 'withdraw_approver')) && !(await hasRole(ctx.from.id, 'deposit_approver'))) {
+    if (!isAdmin(ctx.from.id) && !hasAnyRole(ctx.from.id)) {
         await ctx.answerCbQuery('⛔ No autorizado.', { show_alert: true });
         return;
     }
