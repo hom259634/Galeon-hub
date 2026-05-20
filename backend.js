@@ -3305,41 +3305,43 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
             .eq('telegram_id', request.user_id);
     }
 
-    try {
-        const creditedAmount = request.currency === 'USD'
-            ? parseFloat(request.amount)
-            : await convertToCUP(parseFloat(request.amount), request.currency);
-
-        const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
-            ? String(request.amount)
-            : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
-        const currencySymbol = request.currency === 'USD' ? '💵' : '🇨🇺';
-
-        let text =
-            `✅ <b>Depósito aprobado</b>\n\n` +
-            `💰 Monto depositado: ${depositedAmountText}\n` +
-            `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
-
-        if (request.currency === 'USD') {
-            text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
-        }
-
-        if (bonusMovedCup > 0) {
-            text += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
-        } else if (isFirstDeposit && newBonus > 0) {
-            text += `🎁 Tu bono de bienvenida se ha movido a tu saldo principal.\n`;
-        }
-
-        text += `\n¡Gracias por confiar en nosotros!`;
-
-        await bot.telegram.sendMessage(request.user_id,
-            text,
-            { parse_mode: 'HTML' }
-        );
-    } catch (e) {}
-
-    updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
     res.json({ success: true });
+    (async () => {
+        try {
+            const creditedAmount = request.currency === 'USD'
+                ? parseFloat(request.amount)
+                : await convertToCUP(parseFloat(request.amount), request.currency);
+
+            const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
+                ? String(request.amount)
+                : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
+            const currencySymbol = request.currency === 'USD' ? '💵' : '🇨🇺';
+
+            let text =
+                `✅ <b>Depósito aprobado</b>\n\n` +
+                `💰 Monto depositado: ${depositedAmountText}\n` +
+                `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
+
+            if (request.currency === 'USD') {
+                text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+            }
+
+            if (bonusMovedCup > 0) {
+                text += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+            } else if (isFirstDeposit && newBonus > 0) {
+                text += `🎁 Tu bono de bienvenida se ha movido a tu saldo principal.\n`;
+            }
+
+            text += `\n¡Gracias por confiar en nosotros!`;
+
+            await bot.telegram.sendMessage(request.user_id,
+                text,
+                { parse_mode: 'HTML' }
+            );
+
+            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
+        } catch (e) {}
+    })();
 });
 
 // --- Rechazar solicitud de depósito ---
@@ -3359,18 +3361,19 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
         return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
 
-    try {
-        await bot.telegram.sendMessage(
-            request.user_id,
-            `❌ Depósito rechazado\n\n📌 La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.`,
-            { parse_mode: 'HTML' }
-        );
-    } catch (e) {
-        console.error('Error notificando rechazo de depósito:', e);
-    }
-
-    updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
     res.json({ success: true });
+    (async () => {
+        try {
+            await bot.telegram.sendMessage(
+                request.user_id,
+                `❌ <b>Depósito rechazado</b>\n\n📌 La solicitud no pudo ser procesada.\n💰 Monto depositado: ${request.amount} ${String(request.currency || '').toLowerCase()}`,
+                { parse_mode: 'HTML' }
+            );
+        } catch (e) {
+            console.error('Error notificando rechazo de depósito:', e);
+        }
+        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
+    })();
 });
 
 // --- Gestor de usuarios (admin) ---
@@ -3706,8 +3709,9 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
             }
         }
 
-        // Lógica de migración de bono: si el bono editado supera el mínimo de depósito, migrar a CUP
+        // Lógica de migración de bono
         const minDepositCUP = await getMinDepositCUP();
+        const minDepositUSD = await getMinDepositUSD();
         const rateUSD = await getExchangeRateUSD();
         const totalEquivalentCUP = cup + (usd * rateUSD) + bonus_cup;
 
@@ -3715,7 +3719,23 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
         let finalUsd = usd;
         let finalBonus = bonus_cup;
 
-        if (bonus_cup > 0 && totalEquivalentCUP >= minDepositCUP) {
+        let existingBonusMigrated = false;
+
+        // Si el usuario tiene bono existente y admin agrega saldo principal >= mínimo, migrar bono
+        if (oldBonusVal > 0) {
+            const addedCup = cup - oldCupVal;
+            const addedUsd = usd - oldUsdVal;
+            const addingEnoughCup = addedCup >= minDepositCUP && addedCup > 0.001;
+            const addingEnoughUsd = addedUsd >= minDepositUSD && addedUsd > 0.001;
+            if (addingEnoughCup || addingEnoughUsd) {
+                finalCup += oldBonusVal;
+                finalBonus = 0;
+                existingBonusMigrated = true;
+            }
+        }
+
+        // Si el admin asignó un bono nuevo y cumple el umbral, migrar a CUP
+        if (!existingBonusMigrated && bonus_cup > 0 && totalEquivalentCUP >= minDepositCUP) {
             finalCup += bonus_cup;
             finalBonus = 0;
         }
@@ -3746,27 +3766,31 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
         const diffUsdReq = usd - oldUsd;
         const diffBonusReq = bonus_cup - oldBonus;
         const adminAddedBonus = diffBonusReq > 0.001;
-        const bonusMigrated = (adminAddedBonus && finalBonus === 0);
+        const bonusMigrated = (adminAddedBonus && finalBonus === 0) || existingBonusMigrated;
 
         // 1. Si el admin añadió bono y migró a CUP
         if (bonusMigrated) {
             const cupUsdParts = [];
             if (Math.abs(diffCupReq) > 0.001) {
-                const verbo = diffCupReq > 0 ? 'sumados' : 'restados los';
+                const esRestaTotal = diffCupReq < 0 && Math.abs(Math.abs(diffCupReq) - oldCup) < 0.001;
+                const verbo = diffCupReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
                 const prep = diffCupReq > 0 ? 'a' : 'de';
                 cupUsdParts.push(`${verbo} ${Math.abs(diffCupReq).toFixed(2)} CUP ${prep} tu saldo principal`);
             }
             if (Math.abs(diffUsdReq) > 0.001) {
-                const verbo = diffUsdReq > 0 ? 'sumados' : 'restados los';
+                const esRestaTotal = diffUsdReq < 0 && Math.abs(Math.abs(diffUsdReq) - oldUsd) < 0.001;
+                const verbo = diffUsdReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
                 const prep = diffUsdReq > 0 ? 'a' : 'de';
                 cupUsdParts.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD ${prep} tu saldo USD`);
             }
 
             let msg;
             if (cupUsdParts.length > 0) {
-                msg = `⚠️ Han sido ${cupUsdParts.join(' y ')}. Tu bono de bienvenida actual se ha movido a tu saldo principal.`;
+                const movido = Math.abs(diffUsdReq) <= 0.001 ? 'al mismo' : 'a tu saldo principal';
+                msg = `⚠️ Han sido ${cupUsdParts.join(' y ')}. Tu bono de bienvenida actual se ha movido ${movido}.`;
             } else {
-                const verbo = diffBonusReq > 0 ? 'sumados' : 'restados los';
+                const esRestaTotal = diffBonusReq < 0 && Math.abs(Math.abs(diffBonusReq) - oldBonus) < 0.001;
+                const verbo = diffBonusReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
                 const prep = diffBonusReq > 0 ? 'a' : 'de';
                 msg = `⚠️ Han sido ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual, este se ha movido a tu saldo principal.`;
             }
@@ -3780,7 +3804,8 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
         }
         // 2. Cambio en el bono (aumento o reducción) que NO migró
         else if (Math.abs(diffBonusReq) > 0.001) {
-            const verbo = diffBonusReq > 0 ? 'sumados' : 'restados los';
+            const esRestaTotal = diffBonusReq < 0 && Math.abs(Math.abs(diffBonusReq) - oldBonus) < 0.001;
+            const verbo = diffBonusReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
             const prep = diffBonusReq > 0 ? 'a' : 'de';
             try {
                 await bot.telegram.sendMessage(telegramId,
@@ -3794,12 +3819,14 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
         if (!bonusMigrated && (Math.abs(diffCupReq) > 0.001 || Math.abs(diffUsdReq) > 0.001)) {
             const partes = [];
             if (Math.abs(diffCupReq) > 0.001) {
-                const verbo = diffCupReq > 0 ? 'sumados' : 'restados los';
+                const esRestaTotal = diffCupReq < 0 && Math.abs(Math.abs(diffCupReq) - oldCup) < 0.001;
+                const verbo = diffCupReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
                 const prep = diffCupReq > 0 ? 'a' : 'de';
                 partes.push(`${verbo} ${Math.abs(diffCupReq).toFixed(2)} CUP ${prep} tu saldo principal`);
             }
             if (Math.abs(diffUsdReq) > 0.001) {
-                const verbo = diffUsdReq > 0 ? 'sumados' : 'restados los';
+                const esRestaTotal = diffUsdReq < 0 && Math.abs(Math.abs(diffUsdReq) - oldUsd) < 0.001;
+                const verbo = diffUsdReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
                 const prep = diffUsdReq > 0 ? 'a' : 'de';
                 partes.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD ${prep} tu saldo USD`);
             }
@@ -4032,24 +4059,26 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
         }
     }
 
-    try {
-        const creditedAmount = request.currency === 'USD' ? parseFloat(request.amount) : await convertToCUP(parseFloat(request.amount), request.currency);
-        const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
-            ? String(request.amount)
-            : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
-        const currencySymbol = request.currency === 'USD' ? '💵' : '🇨🇺';
-        let text = `✅ <b>Depósito aprobado</b>\n\n💰 Monto depositado: ${depositedAmountText}\n${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
-        if (request.currency === 'USD') {
-            text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
-        }
-        if (bonusMovedCup > 0) {
-            text += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
-        }
-        text += `\n\n¡Gracias por confiar en nosotros!`;
-        if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, text, { parse_mode: 'HTML' });
-    } catch (e) {}
-    updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
     res.json({ success: true });
+    (async () => {
+        try {
+            const creditedAmount = request.currency === 'USD' ? parseFloat(request.amount) : await convertToCUP(parseFloat(request.amount), request.currency);
+            const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
+                ? String(request.amount)
+                : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
+            const currencySymbol = request.currency === 'USD' ? '💵' : '🇨🇺';
+            let text = `✅ <b>Depósito aprobado</b>\n\n💰 Monto depositado: ${depositedAmountText}\n${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
+            if (request.currency === 'USD') {
+                text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
+            }
+            if (bonusMovedCup > 0) {
+                text += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+            }
+            text += `\n\n¡Gracias por confiar en nosotros!`;
+            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, text, { parse_mode: 'HTML' });
+            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
+        } catch (e) {}
+    })();
 });
 
 // Rechazar depósito (deposit_approver o admin)
@@ -4064,11 +4093,13 @@ app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
         .from('deposit_requests').update({ status: 'rejected', processed_at: new Date(), processed_by: parseInt(userId) })
         .eq('id', id).eq('status', 'pending').select().single();
     if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
-    try {
-        if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ Depósito rechazado\n\n📌 La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.`, { parse_mode: 'HTML' });
-    } catch (e) {}
-    updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
     res.json({ success: true });
+    (async () => {
+        try {
+            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n📌 La solicitud no pudo ser procesada.\n💰 Monto depositado: ${request.amount} ${String(request.currency || '').toLowerCase()}`, { parse_mode: 'HTML' });
+        } catch (e) {}
+        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
+    })();
 });
 
 // Obtener solicitudes de retiro pendientes (withdraw_approver o admin)

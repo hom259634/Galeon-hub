@@ -364,7 +364,7 @@ const withdrawalTemplates = {
         messages: [
             "Retiro CUP\nMínimo: {min} CUP\n\n\nPor favor, ingresa tu tarjeta CUP",
             "Retiro CUP\n\n\nIndica tu móvil a confirmar",
-            "Retiro CUP\nMínimo: {min} CUP\n🇨🇺 CUP real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en CUP (ej: 600 para 600 CUP)."
+            "Retiro CUP\nMínimo: {min} CUP\n🇨🇺 CUP real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en CUP (ej: 1000 para 1000 CUP)."
         ]
     },
     USDT: {
@@ -4777,26 +4777,30 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             }
         }
 
-        await ctx.telegram.sendMessage(
-            request.user_id,
-            buildDepositApprovedMessage({
-                depositedAmountText: request.amount,
-                creditedAmount: parsed.currency === 'USD' ? parsed.amount : amountCUP,
-                creditedCurrency: parsed.currency === 'USD' ? 'USD' : 'CUP',
-                includeUsdFollowup: parsed.currency === 'USD',
-                bonusMovedCup,
-                showBonusMovedNotice: isFirstDeposit
-            }),
-            { parse_mode: 'HTML' }
-        );
-
-        updatePendingNotifications(`deposit_${requestId}`, `✅ <b>Depósito #${requestId} aprobado</b> por un administrador.`);
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('✅ Depósito aprobado y saldo actualizado correctamente.');
         await ctx.answerCbQuery();
+
+        (async () => {
+            try {
+                await ctx.telegram.sendMessage(
+                    request.user_id,
+                    buildDepositApprovedMessage({
+                        depositedAmountText: request.amount,
+                        creditedAmount: parsed.currency === 'USD' ? parsed.amount : amountCUP,
+                        creditedCurrency: parsed.currency === 'USD' ? 'USD' : 'CUP',
+                        includeUsdFollowup: parsed.currency === 'USD',
+                        bonusMovedCup,
+                        showBonusMovedNotice: isFirstDeposit
+                    }),
+                    { parse_mode: 'HTML' }
+                );
+            } catch (e) {}
+            updatePendingNotifications(`deposit_${requestId}`, `✅ <b>Depósito #${requestId} aprobado</b> por un administrador.`);
+        })();
     } catch (e) {
         console.error(e);
-        await ctx.answerCbQuery('❌ Error al aprobar. Revisa los logs.', { show_alert: true });
+        try { await ctx.answerCbQuery('❌ Error al aprobar. Revisa los logs.', { show_alert: true }); } catch (e2) {}
     }
 });
 
@@ -4820,18 +4824,23 @@ bot.action(/reject_deposit_(\d+)/, async (ctx) => {
             return;
         }
 
-        await ctx.telegram.sendMessage(
-            request.user_id,
-            '❌ Depósito rechazado\n\n📌 La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.',
-            { parse_mode: 'HTML' }
-        );
-        updatePendingNotifications(`deposit_${requestId}`, `❌ <b>Depósito #${requestId} rechazado</b> por un administrador.`);
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         await ctx.reply('❌ Depósito rechazado.');
         await ctx.answerCbQuery();
+
+        (async () => {
+            try {
+                await ctx.telegram.sendMessage(
+                    request.user_id,
+                    '❌ Depósito rechazado\n\n📌 La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.',
+                    { parse_mode: 'HTML' }
+                );
+            } catch (e) {}
+            updatePendingNotifications(`deposit_${requestId}`, `❌ <b>Depósito #${requestId} rechazado</b> por un administrador.`);
+        })();
     } catch (e) {
         console.error(e);
-        await ctx.answerCbQuery('❌ Error al rechazar', { show_alert: true });
+        try { await ctx.answerCbQuery('❌ Error al rechazar', { show_alert: true }); } catch (e2) {}
     }
 });
 
@@ -4879,9 +4888,10 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             .eq('telegram_id', request.user_id);
 
         await ctx.telegram.sendMessage(request.user_id,
-            `✅ <b>¡Retiro aprobado!</b>\n\n` +
-            `💰 Monto: ${request.amount} ${request.currency}\n` +
-            `📌 En breve los fondos serán enviados a tu cuenta.`,
+            `✅ <b>Retiro aprobado</b>\n\n` +
+            `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
+            `💵 Se debitaron ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
+            `En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
 
@@ -4910,7 +4920,7 @@ bot.action(/reject_withdraw_(\d+)/, async (ctx) => {
         }
 
         await ctx.telegram.sendMessage(request.user_id,
-            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${request.currency}\n📌 Contacta con el administrador para más información.`,
+            '❌ <b>Retiro rechazado</b>\nTu solicitud no pudo ser procesada. Por favor, contacta al administrador para más detalles.',
             { parse_mode: 'HTML' }
         );
         updatePendingNotifications(`withdraw_${requestId}`, `❌ <b>Retiro #${requestId} rechazado</b> por un administrador.`);
