@@ -2282,14 +2282,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                     <label class="block text-sm mb-1">Hora de inicio</label>
                     <div class="flex gap-2 mb-3">
-                        <select id="selStartH" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                        <select id="selStartH" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
                             ${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===startParts.hour12?'selected':''}>${i+1}</option>`).join('')}
                         </select>
                         <span class="text-white mt-2">:</span>
-                        <select id="selStartM" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                        <select id="selStartM" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
                             ${Array.from({length:60},(_,i)=>`<option value="${i}" ${i===startParts.minute?'selected':''}>${i.toString().padStart(2,'0')}</option>`).join('')}
                         </select>
-                        <select id="selStartA" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                        <select id="selStartA" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
                             <option value="AM" ${startParts.ampm==='AM'?'selected':''}>AM</option>
                             <option value="PM" ${startParts.ampm==='PM'?'selected':''}>PM</option>
                         </select>
@@ -2297,14 +2297,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                     <label class="block text-sm mb-1">Hora de cierre</label>
                     <div class="flex gap-2 mb-3">
-                        <select id="selEndH" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                        <select id="selEndH" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
                             ${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===endParts.hour12?'selected':''}>${i+1}</option>`).join('')}
                         </select>
                         <span class="text-white mt-2">:</span>
-                        <select id="selEndM" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                        <select id="selEndM" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
                             ${Array.from({length:60},(_,i)=>`<option value="${i}" ${i===endParts.minute?'selected':''}>${i.toString().padStart(2,'0')}</option>`).join('')}
                         </select>
-                        <select id="selEndA" class="p-2 rounded bg-gray-800 text-white border border-purple-500">
+                        <select id="selEndA" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
                             <option value="AM" ${endParts.ampm==='AM'?'selected':''}>AM</option>
                             <option value="PM" ${endParts.ampm==='PM'?'selected':''}>PM</option>
                         </select>
@@ -3519,7 +3519,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             // Mostrar roles actuales del usuario
             if (userRoles.length > 0) {
                 html += `<div class="text-sm text-gray-400 mb-2">Tus permisos: ${userRoles.map(r => {
-                    const labels = { withdraw_approver: '✅ Aprobar o Denegar Retiros', deposit_approver: '✅ Aprobar o Denegar Depósitos', schedule_manager: '🕐 Gestionar Horarios de Retiros' };
+                    const labels = { withdraw_approver: '✅ Aprobar o Denegar Depósitos', deposit_approver: '✅ Aprobar o Denegar Retiros', schedule_manager: '🕐 Gestionar Horarios de Retiros' };
                     return labels[r] || r;
                 }).join(' · ')}</div>`;
             }
@@ -3662,7 +3662,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const end = to12h(config.end);
 
                 let html = `<div class="bg-gray-800/40 p-4 rounded-xl">
-                    <h4 class="font-semibold mb-3 text-purple-300">🕐 Gestión de Horario de Retiros</h4>
+                    <h4 class="font-semibold mb-3 text-purple-300">🕐 Gestionar Horario de Retiro</h4>
                     <div class="mb-3">
                         <p class="text-sm">Estado actual: <span class="${isOpen ? 'text-green-400' : 'text-red-400'} font-bold">${isOpen ? '🟢 Abierto' : '🔴 Cerrado'}</span></p>
                         <p class="text-xs text-gray-400">${config.manualOverride !== 'none' ? '(Cierre manual activo)' : '(Horario programado)'}</p>
@@ -3671,10 +3671,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <div>
                             <label class="block text-xs mb-1">Hora inicio</label>
                             <div class="flex gap-1">
-                                <select id="schedStartHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">${hourOptions(start.hour12)}</select>
+                                <select id="schedStartHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${hourOptions(start.hour12)}</select>
                                 <span class="text-white self-center">:</span>
-                                <select id="schedStartMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">${minOptions(start.min)}</select>
-                                <select id="schedStartAmPm" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">
+                                <select id="schedStartMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${minOptions(start.min)}</select>
+                                <select id="schedStartAmPm" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">
                                     <option value="AM"${start.period === 'AM' ? ' selected' : ''}>AM</option>
                                     <option value="PM"${start.period === 'PM' ? ' selected' : ''}>PM</option>
                                 </select>
@@ -3683,10 +3683,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <div>
                             <label class="block text-xs mb-1">Hora cierre</label>
                             <div class="flex gap-1">
-                                <select id="schedEndHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">${hourOptions(end.hour12)}</select>
+                                <select id="schedEndHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${hourOptions(end.hour12)}</select>
                                 <span class="text-white self-center">:</span>
-                                <select id="schedEndMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">${minOptions(end.min)}</select>
-                                <select id="schedEndAmPm" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm">
+                                <select id="schedEndMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${minOptions(end.min)}</select>
+                                <select id="schedEndAmPm" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">
                                     <option value="AM"${end.period === 'AM' ? ' selected' : ''}>AM</option>
                                     <option value="PM"${end.period === 'PM' ? ' selected' : ''}>PM</option>
                                 </select>
