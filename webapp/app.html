@@ -3519,7 +3519,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             // Mostrar roles actuales del usuario
             if (userRoles.length > 0) {
                 html += `<div class="text-sm text-gray-400 mb-2">Tus permisos: ${userRoles.map(r => {
-                    const labels = { withdraw_approver: '✅ Aprobar o Denegar Depósitos', deposit_approver: '✅ Aprobar o Denegar Retiros', schedule_manager: '🕐 Gestionar Horarios de Retiros' };
+                    const labels = { withdraw_approver: '✅ Aprobar o Denegar Depósitos', deposit_approver: '✅ Aprobar o Denegar Retiros', schedule_manager: '🕐 Gestionar Horario de Retiros' };
                     return labels[r] || r;
                 }).join(' · ')}</div>`;
             }
@@ -4175,6 +4175,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     </div>
                 </div>
                 <button id="saveBalanceBtn" onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
+                <button id="resetUserBtn" onclick="reiniciarUsuario(${telegramId})" class="w-full bg-yellow-700 py-3 rounded-xl mt-2 font-bold">🔄 Reiniciar Usuario</button>
                 ${banButtonHtml}
                 <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
             `;
@@ -4551,6 +4552,37 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 iziToast.error({ message: 'Error de conexión' });
                 btn.disabled = false;
                 btn.innerHTML = '✅ Desbanear usuario';
+            }
+        };
+
+        window.reiniciarUsuario = async (telegramId) => {
+            const btn = document.getElementById('resetUserBtn');
+            if (!btn || btn.disabled) return;
+            if (!confirm(`¿Estás seguro de REINICIAR al usuario ${telegramId}? Se borrará todo su saldo y se le asignará el bono de bienvenida actual.`)) return;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Reiniciando...';
+            try {
+                const res = await fetch(`/api/admin/users/${telegramId}/reset`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: currentUser.telegram_id })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    iziToast.success({ message: `Usuario reiniciado. Bono de bienvenida asignado: ${data.bonus_cup} CUP.` });
+                    adminModal.classList.add('hidden');
+                    renderManageUsersView();
+                } else {
+                    let errMsg = 'Error al reiniciar';
+                    try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
+                    iziToast.error({ message: errMsg });
+                    btn.disabled = false;
+                    btn.innerHTML = '🔄 Reiniciar Usuario';
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+                btn.disabled = false;
+                btn.innerHTML = '🔄 Reiniciar Usuario';
             }
         };
     })();
