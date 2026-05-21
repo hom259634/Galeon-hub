@@ -3369,7 +3369,7 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
         try {
             await bot.telegram.sendMessage(
                 request.user_id,
-                `❌ <b>Depósito rechazado</b>\n\n📌 La solicitud no pudo ser procesada.\n💰 Monto depositado: ${request.amount} ${String(request.currency || '').toLowerCase()}`,
+                `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Contacta con el administrador para más información.`,
                 { parse_mode: 'HTML' }
             );
         } catch (e) {
@@ -4305,7 +4305,7 @@ app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
     res.json({ success: true });
     (async () => {
         try {
-            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n📌 La solicitud no pudo ser procesada.\n💰 Monto depositado: ${request.amount} ${String(request.currency || '').toLowerCase()}`, { parse_mode: 'HTML' });
+            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Contacta con el administrador para más información.`, { parse_mode: 'HTML' });
         } catch (e) {}
         updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
     })();
@@ -4361,7 +4361,7 @@ app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
 
     try {
         if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id,
-            `✅ <b>Retiro aprobado</b>\n\n💰 Monto retirado: ${request.amount} ${request.currency}\n💵 Se debitaron ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\nEn breve los fondos serán enviados a tu cuenta.`,
+            `✅ <b>Retiro aprobado</b>\n\n💰 Monto retirado: ${request.amount} ${request.currency}\n💵 Se debitaron ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
     updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`);

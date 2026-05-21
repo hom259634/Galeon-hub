@@ -4828,7 +4828,7 @@ bot.action(/reject_deposit_(\d+)/, async (ctx) => {
             try {
                 await ctx.telegram.sendMessage(
                     request.user_id,
-                    '❌ Depósito rechazado\n\n📌 La solicitud no pudo ser procesada. Por favor, contáctanos si crees que esto es un error.',
+                    `❌ Depósito rechazado\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Contacta con el administrador para más información.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
@@ -4916,7 +4916,7 @@ bot.action(/reject_withdraw_(\d+)/, async (ctx) => {
         }
 
         await ctx.telegram.sendMessage(request.user_id,
-            '❌ <b>Retiro rechazado</b>\nTu solicitud no pudo ser procesada. Por favor, contacta al administrador para más detalles.',
+            '❌ <b>Retiro rechazado</b>\n\n📌 Tu solicitud no pudo ser procesada. Por favor, contacta al administrador para más detalles.',
             { parse_mode: 'HTML' }
         );
         updatePendingNotifications(`withdraw_${requestId}`, `❌ <b>Retiro #${requestId} rechazado</b> por un administrador.`);
