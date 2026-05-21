@@ -3496,18 +3496,60 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const container = document.getElementById('funcionesAdminContent');
             if (!container) return;
 
-            // Limpiar intervalo anterior si existe
             if (funcionesAdminInterval) {
                 clearInterval(funcionesAdminInterval);
                 funcionesAdminInterval = null;
             }
-            // Auto-refresh cada 15 segundos mientras esté visible
-            funcionesAdminInterval = setInterval(() => {
+
+            // Refrescar roles desde el servidor para reflejar cambios en tiempo real
+            try {
+                const res = await fetch('/api/my-roles');
+                if (res.ok) {
+                    const data = await res.json();
+                    userRoles = data.roles || [];
+                    isAdmin = data.isSuperAdmin || false;
+                }
+            } catch (e) {
+                console.error('Error refreshing roles:', e);
+            }
+
+            // Si ya no tiene permisos, ocultar botón admin y redirigir
+            if (!isAdmin && userRoles.length === 0) {
+                const adminBtn = document.getElementById('adminNavBtn');
+                if (adminBtn) adminBtn.classList.add('hidden');
+                iziToast.info({ message: 'Ya no tienes permisos de administración', position: 'topCenter', timeout: 3000 });
+                showSection('home');
+                return;
+            }
+
+            // Auto-refresh cada 15 segundos mientras esté visible, incluyendo re-verificación de roles
+            funcionesAdminInterval = setInterval(async () => {
                 const section = document.getElementById('section-funciones-admin');
                 if (section && !section.classList.contains('hidden-section')) {
-                    loadFuncionesDepositos();
-                    loadFuncionesRetiros();
-                    loadFuncionesHorario();
+                    try {
+                        const res = await fetch('/api/my-roles');
+                        if (res.ok) {
+                            const data = await res.json();
+                            const freshRoles = data.roles || [];
+                            const freshIsAdmin = data.isSuperAdmin || false;
+                            if (freshRoles.length === 0 && !freshIsAdmin) {
+                                clearInterval(funcionesAdminInterval);
+                                funcionesAdminInterval = null;
+                                userRoles = [];
+                                isAdmin = false;
+                                const adminBtn = document.getElementById('adminNavBtn');
+                                if (adminBtn) adminBtn.classList.add('hidden');
+                                iziToast.info({ message: 'Ya no tienes permisos de administración', position: 'topCenter', timeout: 3000 });
+                                showSection('home');
+                                return;
+                            }
+                            userRoles = freshRoles;
+                            isAdmin = freshIsAdmin;
+                        }
+                        loadFuncionesDepositos();
+                        loadFuncionesRetiros();
+                        loadFuncionesHorario();
+                    } catch (e) { console.error(e); }
                 } else {
                     clearInterval(funcionesAdminInterval);
                     funcionesAdminInterval = null;
@@ -3516,42 +3558,41 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             let html = '<div class="space-y-4">';
 
-            // Mostrar roles actuales del usuario
             if (userRoles.length > 0) {
                 html += `<div class="text-sm text-gray-400 mb-2">Tus permisos: ${userRoles.map(r => {
-                    const labels = { withdraw_approver: '✅ Aprobar o Denegar Depósitos', deposit_approver: '✅ Aprobar o Denegar Retiros', schedule_manager: '🕐 Gestionar Horario de Retiros' };
+                    const labels = { withdraw_approver: '✅ Aprobar o Denegar Depósitos', deposit_approver: '✅ Aprobar o Denegar Retiros', schedule_manager: '🕐 Gestionar Horario de Retiros', user_manager: '👥 Gestión de Usuarios' };
                     return labels[r] || r;
                 }).join(' · ')}</div>`;
             }
 
-            // Deposit approver: ver solicitudes de depósito pendientes
             if (userRoles.includes('deposit_approver') || isAdmin) {
                 html += `<div id="funcionesDepositos"><div class="loader"></div> Cargando solicitudes de depósito...</div>`;
             }
 
-            // Withdraw approver: ver solicitudes de retiro pendientes
             if (userRoles.includes('withdraw_approver') || isAdmin) {
                 html += `<div id="funcionesRetiros"><div class="loader"></div> Cargando solicitudes de retiro...</div>`;
             }
 
-            // Schedule manager: gestión de horarios
             if (userRoles.includes('schedule_manager') || isAdmin) {
                 html += `<div id="funcionesHorario"><div class="loader"></div> Cargando configuración de horario...</div>`;
+            }
+
+            if (userRoles.includes('user_manager') || isAdmin) {
+                html += `<div class="mb-4">
+                    <button id="loadUsersBtn" onclick="loadFuncionesUsers()" class="w-full bg-emerald-600/80 p-3 rounded-xl hover:bg-emerald-700 font-bold text-left flex items-center gap-2">
+                        <i class="fas fa-user-edit"></i> Gestión de Usuarios
+                    </button>
+                    <div id="funcionesUsersContainer" class="mt-2 hidden"></div>
+                </div>`;
             }
 
             html += '</div>';
             container.innerHTML = html;
 
-            // Cargar datos según roles
-            if (userRoles.includes('deposit_approver') || isAdmin) {
-                loadFuncionesDepositos();
-            }
-            if (userRoles.includes('withdraw_approver') || isAdmin) {
-                loadFuncionesRetiros();
-            }
-            if (userRoles.includes('schedule_manager') || isAdmin) {
-                loadFuncionesHorario();
-            }
+            if (userRoles.includes('deposit_approver') || isAdmin) loadFuncionesDepositos();
+            if (userRoles.includes('withdraw_approver') || isAdmin) loadFuncionesRetiros();
+            if (userRoles.includes('schedule_manager') || isAdmin) loadFuncionesHorario();
+            if (userRoles.includes('user_manager') || isAdmin) loadFuncionesUsers();
         }
 
         async function loadFuncionesDepositos() {
@@ -3662,10 +3703,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const end = to12h(config.end);
 
                 let html = `<div class="bg-gray-800/40 p-4 rounded-xl">
-                    <h4 class="font-semibold mb-3 text-purple-300">🕐 Gestionar Horario de Retiro</h4>
+                    <h4 class="font-semibold mb-3 text-purple-300">🕐 Gestionar Horario de Retiros</h4>
                     <div class="mb-3">
                         <p class="text-sm">Estado actual: <span class="${isOpen ? 'text-green-400' : 'text-red-400'} font-bold">${isOpen ? '🟢 Abierto' : '🔴 Cerrado'}</span></p>
-                        <p class="text-xs text-gray-400">${config.manualOverride !== 'none' ? '(Cierre manual activo)' : '(Horario programado)'}</p>
+                        <p class="text-xs text-gray-400">${config.manualOverride === 'open' ? '(Inicio manual activo)' : config.manualOverride === 'close' ? '(Cierre manual activo)' : '(Horario programado)'}</p>
                     </div>
                     <div class="grid grid-cols-2 gap-3 mb-3">
                         <div>
@@ -3704,6 +3745,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 container.innerHTML = '<p class="text-red-400">Error de conexión</p>';
             }
         }
+
+        window.loadFuncionesUsers = async () => {
+            const btn = document.getElementById('loadUsersBtn');
+            if (!btn || btn.disabled) return;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Cargando...';
+            const container = document.getElementById('funcionesUsersContainer');
+            container.classList.remove('hidden');
+            await renderManageUsersView(container);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-user-edit"></i> Gestión de Usuarios';
+        };
 
         // Funciones globales para los botones de Funciones de Admin
         window.procesarDepositoRol = async (id, action, btn) => {
@@ -3850,7 +3903,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <th class="pb-2 pr-2">Usuario</th>
                                 <th class="pb-2 pr-2 text-center" title="Aprobar depósitos">📥 Depósitos</th>
                                 <th class="pb-2 pr-2 text-center" title="Aprobar retiros">📤 Retiros</th>
-                                <th class="pb-2 text-center" title="Gestionar horario de retiros">🕐 Horario</th>
+                                <th class="pb-2 pr-2 text-center" title="Gestionar horario de retiros">🕐 Horario</th>
+                                <th class="pb-2 text-center" title="Gestión de Usuarios">👥 Usuarios</th>
                             </tr>
                         </thead>
                         <tbody>`;
@@ -3859,6 +3913,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const hasDeposit = userRolesList.includes('deposit_approver');
                     const hasWithdraw = userRolesList.includes('withdraw_approver');
                     const hasSchedule = userRolesList.includes('schedule_manager');
+                    const hasUsers = userRolesList.includes('user_manager');
                     const displayName = u.first_name || u.username || `ID ${u.telegram_id}`;
                     const usernameStr = u.username ? `@${u.username}` : '';
                     html += `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
@@ -3874,6 +3929,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         </td>
                         <td class="py-2 text-center">
                             <input type="checkbox" ${hasSchedule ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'schedule_manager', this.checked)" class="w-5 h-5 accent-purple-500 cursor-pointer">
+                        </td>
+                        <td class="py-2 text-center">
+                            <input type="checkbox" ${hasUsers ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'user_manager', this.checked)" class="w-5 h-5 accent-emerald-500 cursor-pointer">
                         </td>
                     </tr>`;
                 }
@@ -3915,6 +3973,117 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión' });
                 console.error(e);
+            }
+        };
+
+        // ========== VISTA: ACTIVIDAD DE ADMINS ==========
+        async function renderSubadminStatsView() {
+            if (!isAdmin) return;
+            adminViewContainer.innerHTML = '<div class="loader"></div> Cargando actividad de admins...';
+            try {
+                const res = await fetch('/api/admin/subadmin-stats');
+                if (!res.ok) throw new Error('Error al cargar');
+                const stats = await res.json();
+
+                if (stats.length === 0) {
+                    adminViewContainer.innerHTML = '<p class="text-gray-400">No hay subadmins registrados.</p>';
+                    return;
+                }
+
+                let html = `<h4 class="text-xl font-bold mb-4 flex items-center"><i class="fas fa-chart-bar text-orange-400 mr-2"></i>Actividad de Admins</h4>
+                    <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-gray-400 border-b border-gray-600">
+                                <th class="pb-2 pr-2">Admin</th>
+                                <th class="pb-2 pr-2 text-center">📥 Depósitos</th>
+                                <th class="pb-2 pr-2 text-center">💰 Total CUP</th>
+                                <th class="pb-2 pr-2 text-center">💵 Total USD</th>
+                                <th class="pb-2 pr-2 text-center">📤 Retiros</th>
+                                <th class="pb-2 pr-2 text-center">💰 Total CUP</th>
+                                <th class="pb-2 text-center">💵 Total USD</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                for (const s of stats) {
+                    const displayName = s.first_name || s.username || `ID ${s.telegram_id}`;
+                    const usernameStr = s.username ? `@${s.username}` : '';
+                    html += `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer" onclick="renderSubadminDetailView(${s.telegram_id})">
+                        <td class="py-2 pr-2 font-medium">
+                            ${escapeHTML(displayName)}
+                            <span class="text-xs text-gray-500 block">${escapeHTML(usernameStr)}</span>
+                        </td>
+                        <td class="py-2 pr-2 text-center text-cyan-300 font-bold">${s.deposit_count}</td>
+                        <td class="py-2 pr-2 text-center text-gray-200">${s.deposit_total_cup.toFixed(2)}</td>
+                        <td class="py-2 pr-2 text-center text-yellow-300">${s.deposit_total_usd.toFixed(2)}</td>
+                        <td class="py-2 pr-2 text-center text-pink-300 font-bold">${s.withdraw_count}</td>
+                        <td class="py-2 pr-2 text-center text-gray-200">${s.withdraw_total_cup.toFixed(2)}</td>
+                        <td class="py-2 text-center text-yellow-300">${s.withdraw_total_usd.toFixed(2)}</td>
+                    </tr>`;
+                }
+                html += '</tbody></table></div>';
+                adminViewContainer.innerHTML = html;
+            } catch (e) {
+                console.error('Error en renderSubadminStatsView:', e);
+                adminViewContainer.innerHTML = `<p class="text-red-400">Error al cargar: ${e.message}. <button onclick="renderSubadminStatsView()" class="underline text-cyan-400 ml-2">Reintentar</button></p>`;
+            }
+        }
+
+        window.renderSubadminDetailView = async (telegramId) => {
+            adminViewContainer.innerHTML = '<div class="loader"></div> Cargando detalle...';
+            try {
+                const res = await fetch(`/api/admin/subadmin-stats/${telegramId}`);
+                if (!res.ok) throw new Error('Error al cargar');
+                const data = await res.json();
+
+                let html = `<div class="mb-4">
+                    <button onclick="renderSubadminStatsView()" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm">
+                        <i class="fas fa-arrow-left mr-1"></i> Volver
+                    </button>
+                </div>
+                <h4 class="text-xl font-bold mb-2 flex items-center"><i class="fas fa-user-shield text-orange-400 mr-2"></i>${escapeHTML(data.first_name)} ${data.username ? '@'+escapeHTML(data.username) : ''}</h4>
+                <p class="text-sm text-gray-400 mb-4">ID: ${data.telegram_id}</p>`;
+
+                // Depósitos
+                html += `<div class="mb-6">
+                    <h5 class="text-cyan-300 font-semibold mb-2 flex items-center"><i class="fas fa-arrow-down mr-1"></i> Depósitos aprobados (${data.deposits.length})</h5>`;
+                if (data.deposits.length === 0) {
+                    html += '<p class="text-gray-500 text-sm">Sin depósitos procesados.</p>';
+                } else {
+                    html += `<div class="max-h-48 overflow-y-auto space-y-1">`;
+                    for (const d of data.deposits) {
+                        const cupLabel = d.currency === 'USD' ? '' : `<span class="text-gray-400 ml-1">(${d.amount_cup.toFixed(2)} CUP)</span>`;
+                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between">
+                            <span>${escapeHTML(d.user_name)} ${d.username ? '@'+escapeHTML(d.username) : ''}</span>
+                            <span class="${d.currency === 'USD' ? 'text-yellow-300' : 'text-cyan-300'}">${d.amount.toFixed(2)} ${d.currency}${cupLabel}</span>
+                        </div>`;
+                    }
+                    html += `</div>`;
+                }
+                html += `</div>`;
+
+                // Retiros
+                html += `<div class="mb-4">
+                    <h5 class="text-pink-300 font-semibold mb-2 flex items-center"><i class="fas fa-arrow-up mr-1"></i> Retiros aprobados (${data.withdrawals.length})</h5>`;
+                if (data.withdrawals.length === 0) {
+                    html += '<p class="text-gray-500 text-sm">Sin retiros procesados.</p>';
+                } else {
+                    html += `<div class="max-h-48 overflow-y-auto space-y-1">`;
+                    for (const w of data.withdrawals) {
+                        const cupLabel = w.currency === 'USD' ? '' : `<span class="text-gray-400 ml-1">(${w.amount_cup.toFixed(2)} CUP)</span>`;
+                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between">
+                            <span>${escapeHTML(w.user_name)} ${w.username ? '@'+escapeHTML(w.username) : ''}</span>
+                            <span class="${w.currency === 'USD' ? 'text-yellow-300' : 'text-pink-300'}">${w.amount.toFixed(2)} ${w.currency}${cupLabel}</span>
+                        </div>`;
+                    }
+                    html += `</div>`;
+                }
+                html += `</div>`;
+
+                adminViewContainer.innerHTML = html;
+            } catch (e) {
+                console.error('Error en renderSubadminDetailView:', e);
+                adminViewContainer.innerHTML = `<p class="text-red-400">Error al cargar detalle: ${e.message}. <button onclick="renderSubadminDetailView(${telegramId})" class="underline text-cyan-400 ml-2">Reintentar</button></p>`;
             }
         };
 
@@ -3992,12 +4161,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }
 
         // Añadir las funciones renderManageUsersView, searchUserByNameOrId y openBalanceModal
-        async function renderManageUsersView() {
+        async function renderManageUsersView(targetContainer) {
+            const container = targetContainer || adminViewContainer;
             if (!currentUser) {
-                adminViewContainer.innerHTML = '<p class="text-red-400">Error: Sesión no inicializada. <button onclick="renderManageUsersView()" class="underline text-cyan-400 ml-2">Reintentar</button></p>';
+                container.innerHTML = '<p class="text-red-400">Error: Sesión no inicializada. <button onclick="renderManageUsersView()" class="underline text-cyan-400 ml-2">Reintentar</button></p>';
                 return;
             }
-            adminViewContainer.innerHTML = `<div class="loader"></div> Cargando usuarios...`;
+            container.innerHTML = `<div class="loader"></div> Cargando usuarios...`;
             try {
                 const res = await fetch(`/api/admin/users?userId=${currentUser.telegram_id}`);
                 if (!res.ok) {
@@ -4056,7 +4226,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 html += renderUserCards(users);
                 html += `</div>`;
-                adminViewContainer.innerHTML = html;
+                container.innerHTML = html;
 
                 // Función de filtrado
                 function applyFilter(filter) {
@@ -4076,7 +4246,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         switch (filter) {
                             case 'all': break;
                             case 'withMainBalance':
-                                categoryMatch = (parseFloat(user.cup) > 0 || parseFloat(user.usd) > 0);
+                                categoryMatch = (parseFloat(user.cup) > 0);
                                 break;
                             case 'withUsdBalance':
                                 categoryMatch = (parseFloat(user.usd) > 0);
@@ -4130,7 +4300,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
             } catch (e) {
                 console.error('Error en renderManageUsersView:', e);
-                adminViewContainer.innerHTML = `<p class="text-red-400">Error al cargar usuarios: ${e.message}. <button onclick="renderManageUsersView()" class="underline text-cyan-400 ml-2">Reintentar</button></p>`;
+                container.innerHTML = `<p class="text-red-400">Error al cargar usuarios: ${e.message}. <button onclick="renderManageUsersView()" class="underline text-cyan-400 ml-2">Reintentar</button></p>`;
             }
         }
 
@@ -4175,7 +4345,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     </div>
                 </div>
                 <button id="saveBalanceBtn" onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
-                <button id="resetUserBtn" onclick="reiniciarUsuario(${telegramId})" class="w-full bg-yellow-700 py-3 rounded-xl mt-2 font-bold">🔄 Reiniciar Usuario</button>
+                <button id="resetUserBtn" onclick="reiniciarUsuario(${telegramId})" class="w-full bg-yellow-700 py-3 rounded-xl mt-2 font-bold">🗑 Eliminar Usuario</button>
                 ${banButtonHtml}
                 <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
             `;
@@ -4558,9 +4728,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         window.reiniciarUsuario = async (telegramId) => {
             const btn = document.getElementById('resetUserBtn');
             if (!btn || btn.disabled) return;
-            if (!confirm(`¿Estás seguro de REINICIAR al usuario ${telegramId}? Se borrará todo su saldo y se le asignará el bono de bienvenida actual.`)) return;
+            if (!confirm(`¿Estás seguro de ELIMINAR al usuario ${telegramId}? Se borrará completamente de la base de datos y podrá registrarse de nuevo como nuevo usuario.`)) return;
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Reiniciando...';
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Eliminando...';
             try {
                 const res = await fetch(`/api/admin/users/${telegramId}/reset`, {
                     method: 'POST',
@@ -4568,21 +4738,20 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     body: JSON.stringify({ userId: currentUser.telegram_id })
                 });
                 if (res.ok) {
-                    const data = await res.json();
-                    iziToast.success({ message: `Usuario reiniciado. Bono de bienvenida asignado: ${data.bonus_cup} CUP.` });
+                    iziToast.success({ message: 'Usuario eliminado correctamente. Podrá registrarse de nuevo.' });
                     adminModal.classList.add('hidden');
                     renderManageUsersView();
                 } else {
-                    let errMsg = 'Error al reiniciar';
+                    let errMsg = 'Error al eliminar';
                     try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
                     iziToast.error({ message: errMsg });
                     btn.disabled = false;
-                    btn.innerHTML = '🔄 Reiniciar Usuario';
+                    btn.innerHTML = '🗑 Eliminar Usuario';
                 }
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión' });
                 btn.disabled = false;
-                btn.innerHTML = '🔄 Reiniciar Usuario';
+                btn.innerHTML = '🗑 Eliminar Usuario';
             }
         };
     })();
