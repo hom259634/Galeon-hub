@@ -113,7 +113,7 @@ function isAdmin(userId) {
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
-let botRolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], lastFetch: 0 };
+let botRolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], userManagers: [], lastFetch: 0 };
 const BOT_ROLES_CACHE_TTL = 60000;
 
 async function refreshBotRolesCache() {
@@ -122,6 +122,7 @@ async function refreshBotRolesCache() {
         botRolesCache.withdrawApprovers = data?.filter(r => r.role === 'withdraw_approver').map(r => Number(r.telegram_id)) || [];
         botRolesCache.depositApprovers = data?.filter(r => r.role === 'deposit_approver').map(r => Number(r.telegram_id)) || [];
         botRolesCache.scheduleManagers = data?.filter(r => r.role === 'schedule_manager').map(r => Number(r.telegram_id)) || [];
+        botRolesCache.userManagers = data?.filter(r => r.role === 'user_manager').map(r => Number(r.telegram_id)) || [];
         botRolesCache.lastFetch = Date.now();
     } catch (e) {
         console.error('Error refreshing bot roles cache:', e);
@@ -140,6 +141,7 @@ async function hasRole(userId, role) {
         case 'withdraw_approver': return botRolesCache.withdrawApprovers.includes(id);
         case 'deposit_approver': return botRolesCache.depositApprovers.includes(id);
         case 'schedule_manager': return botRolesCache.scheduleManagers.includes(id);
+        case 'user_manager': return botRolesCache.userManagers.includes(id);
         default: return false;
     }
 }
@@ -149,7 +151,8 @@ function hasAnyRole(userId) {
     const id = Number(userId);
     return botRolesCache.withdrawApprovers.includes(id) ||
            botRolesCache.depositApprovers.includes(id) ||
-           botRolesCache.scheduleManagers.includes(id);
+           botRolesCache.scheduleManagers.includes(id) ||
+           botRolesCache.userManagers.includes(id);
 }
 
 refreshBotRolesCache();
@@ -4086,7 +4089,7 @@ bot.on(message('text'), async (ctx) => {
         if (!parsed) {
             const example = session.transferCurrency === 'USD' ? '10 usd' : '500 cup';
             // Si el usuario pone un monto inválido, NO limpiar la sesión, solo pedir de nuevo
-            await ctx.reply('❌ Formato inválido. Debe ser monto moneda (ej: ${example}).', getMainKeyboard(ctx));
+            await ctx.reply(`❌ Formato inválido. Debe ser monto moneda (ej: ${example}).`, getMainKeyboard(ctx));
             return;
         }
 
@@ -4884,7 +4887,7 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             `✅ <b>Retiro aprobado</b>\n\n` +
             `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
             `💵 Se debitaron ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
-            `En breve los fondos serán enviados a tu cuenta.`,
+            `📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
 

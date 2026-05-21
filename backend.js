@@ -62,7 +62,7 @@ function isAdmin(userId) {
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
-let rolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], lastFetch: 0 };
+let rolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], userManagers: [], lastFetch: 0 };
 const ROLES_CACHE_TTL = 60000;
 
 async function refreshRolesCache() {
@@ -71,6 +71,7 @@ async function refreshRolesCache() {
         rolesCache.withdrawApprovers = data?.filter(r => r.role === 'withdraw_approver').map(r => Number(r.telegram_id)) || [];
         rolesCache.depositApprovers = data?.filter(r => r.role === 'deposit_approver').map(r => Number(r.telegram_id)) || [];
         rolesCache.scheduleManagers = data?.filter(r => r.role === 'schedule_manager').map(r => Number(r.telegram_id)) || [];
+        rolesCache.userManagers = data?.filter(r => r.role === 'user_manager').map(r => Number(r.telegram_id)) || [];
         rolesCache.lastFetch = Date.now();
     } catch (e) {
         console.error('Error refreshing roles cache:', e);
@@ -88,6 +89,7 @@ async function getUserRoles(userId) {
     if (rolesCache.withdrawApprovers.includes(id)) roles.push('withdraw_approver');
     if (rolesCache.depositApprovers.includes(id)) roles.push('deposit_approver');
     if (rolesCache.scheduleManagers.includes(id)) roles.push('schedule_manager');
+    if (rolesCache.userManagers.includes(id)) roles.push('user_manager');
     return roles;
 }
 
@@ -99,6 +101,7 @@ async function hasRole(userId, role) {
         case 'withdraw_approver': return rolesCache.withdrawApprovers.includes(id);
         case 'deposit_approver': return rolesCache.depositApprovers.includes(id);
         case 'schedule_manager': return rolesCache.scheduleManagers.includes(id);
+        case 'user_manager': return rolesCache.userManagers.includes(id);
         default: return false;
     }
 }
@@ -3604,8 +3607,13 @@ app.post('/api/admin/pending-withdraws/:id/reject', requireAdmin, async (req, re
 
 // ========== NUEVO: GESTIÓN DE USUARIOS (ADMIN) ==========
 
-// Obtener todos los usuarios (solo admin) con campos extra para filtros
-app.get('/api/admin/users', requireAdmin, async (req, res) => {
+// Obtener todos los usuarios (admin o user_manager) con campos extra para filtros
+app.get('/api/admin/users', async (req, res) => {
+    const userId = req.verifiedTelegramId || req.query.userId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'user_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
     try {
         // 1. Obtener todos los usuarios (incluyendo ref_by)
         const { data: users, error } = await supabase
@@ -3656,8 +3664,13 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
     }
 });
 
-// Editar saldo de un usuario (admin)
-app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) => {
+// Editar saldo de un usuario (admin o user_manager)
+app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
+    const userId = req.verifiedTelegramId || req.body.userId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'user_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
     const telegramId = parseInt(req.params.telegramId);
     if (isNaN(telegramId)) {
         return res.status(400).json({ error: 'ID de usuario inválido' });
@@ -3846,7 +3859,12 @@ app.put('/api/admin/users/:telegramId/balance', requireAdmin, async (req, res) =
 });
 
 // Banear usuario permanentemente
-app.post('/api/admin/users/:telegramId/ban', requireAdmin, async (req, res) => {
+app.post('/api/admin/users/:telegramId/ban', async (req, res) => {
+    const userId = req.verifiedTelegramId || req.body.userId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'user_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
     const telegramId = parseInt(req.params.telegramId);
     if (isNaN(telegramId)) {
         return res.status(400).json({ error: 'ID de usuario inválido' });
@@ -3875,7 +3893,12 @@ app.post('/api/admin/users/:telegramId/ban', requireAdmin, async (req, res) => {
 });
 
 // Desbanear usuario
-app.post('/api/admin/users/:telegramId/unban', requireAdmin, async (req, res) => {
+app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
+    const userId = req.verifiedTelegramId || req.body.userId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'user_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
     const telegramId = parseInt(req.params.telegramId);
     if (isNaN(telegramId)) {
         return res.status(400).json({ error: 'ID de usuario inválido' });
@@ -3907,7 +3930,7 @@ app.post('/api/admin/users/:telegramId/unban', requireAdmin, async (req, res) =>
 app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
     const userId = req.verifiedTelegramId;
     if (!userId) return res.status(403).json({ error: 'No autorizado' });
-    if (!isAdmin(userId) && !hasAnyRole(userId)) {
+    if (!isAdmin(userId) && !(await hasRole(userId, 'user_manager'))) {
         return res.status(403).json({ error: 'No tienes permisos' });
     }
     const telegramId = parseInt(req.params.telegramId);
@@ -3915,28 +3938,28 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         return res.status(400).json({ error: 'ID de usuario inválido' });
     }
     try {
-        const currentBonus = await getBonusCupDefault();
-        const { data, error } = await supabase
+        const { data: user, error: findError } = await supabase
             .from('users')
-            .update({
-                cup: 0,
-                usd: 0,
-                bonus_cup: currentBonus,
-                is_banned: false,
-                updated_at: new Date().toISOString()
-            })
+            .select('telegram_id')
             .eq('telegram_id', telegramId)
-            .select();
+            .maybeSingle();
 
-        if (error) {
-            return res.status(500).json({ error: 'No se pudo reiniciar al usuario.' });
-        }
-        if (!data || data.length === 0) {
+        if (findError || !user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
-        res.json({ success: true, bonus_cup: currentBonus });
+
+        const { error: deleteError } = await supabase
+            .from('users')
+            .delete()
+            .eq('telegram_id', telegramId);
+
+        if (deleteError) {
+            return res.status(500).json({ error: 'No se pudo eliminar al usuario.' });
+        }
+
+        res.json({ success: true, message: 'Usuario eliminado. Podrá registrarse de nuevo como nuevo usuario.' });
     } catch (e) {
-        console.error('Error reiniciando usuario:', e);
+        console.error('Error eliminando usuario:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -3996,7 +4019,7 @@ app.put('/api/admin/admin-roles/:telegramId', requireAdmin, async (req, res) => 
             return res.status(400).json({ error: 'roles debe ser un array' });
         }
 
-        const validRoles = ['withdraw_approver', 'deposit_approver', 'schedule_manager'];
+        const validRoles = ['withdraw_approver', 'deposit_approver', 'schedule_manager', 'user_manager'];
         for (const role of roles) {
             if (!validRoles.includes(role)) {
                 return res.status(400).json({ error: `Rol inválido: ${role}` });
@@ -4034,6 +4057,147 @@ app.get('/api/my-roles', async (req, res) => {
     if (!userId) return res.json({ roles: [] });
     const roles = await getUserRoles(userId);
     res.json({ roles, isSuperAdmin: isAdmin(userId) });
+});
+
+// ========== ESTADÍSTICAS DE SUBADMINS (solo super admin) ==========
+
+// Resumen agregado de todos los subadmins
+app.get('/api/admin/subadmin-stats', requireAdmin, async (req, res) => {
+    try {
+        const { data: roleData } = await supabase.from('admin_roles').select('telegram_id');
+        const subadminIds = [...new Set((roleData || []).map(r => Number(r.telegram_id)))];
+
+        if (subadminIds.length === 0) return res.json([]);
+
+        const { data: users } = await supabase
+            .from('users')
+            .select('telegram_id, first_name, username')
+            .in('telegram_id', subadminIds);
+        const userMap = {};
+        for (const u of users || []) userMap[Number(u.telegram_id)] = u;
+
+        const { data: allDeposits } = await supabase
+            .from('deposit_requests')
+            .select('processed_by, amount, currency')
+            .eq('status', 'approved')
+            .in('processed_by', subadminIds);
+
+        const { data: allWithdrawals } = await supabase
+            .from('withdraw_requests')
+            .select('processed_by, amount, currency')
+            .eq('status', 'approved')
+            .in('processed_by', subadminIds);
+
+        const rates = await getExchangeRates();
+        const result = [];
+
+        for (const id of subadminIds) {
+            const userDeposits = (allDeposits || []).filter(d => Number(d.processed_by) === id);
+            const userWithdrawals = (allWithdrawals || []).filter(w => Number(w.processed_by) === id);
+
+            let depCount = 0, depCUP = 0, depUSD = 0;
+            for (const d of userDeposits) {
+                depCount++;
+                const amt = parseFloat(d.amount) || 0;
+                if (d.currency === 'USD') depUSD += amt;
+                else if (d.currency === 'CUP') depCUP += amt;
+                else depCUP += amt * (rates[d.currency.toLowerCase() === 'usdt' ? 'rate_usdt' : d.currency.toLowerCase() === 'trx' ? 'rate_trx' : 'rate_mlc'] || 0);
+            }
+
+            let wdCount = 0, wdCUP = 0, wdUSD = 0;
+            for (const w of userWithdrawals) {
+                wdCount++;
+                const amt = parseFloat(w.amount) || 0;
+                if (w.currency === 'USD') wdUSD += amt;
+                else if (w.currency === 'CUP') wdCUP += amt;
+                else wdCUP += amt * (rates[w.currency.toLowerCase() === 'usdt' ? 'rate_usdt' : w.currency.toLowerCase() === 'trx' ? 'rate_trx' : 'rate_mlc'] || 0);
+            }
+
+            const user = userMap[id] || {};
+            result.push({
+                telegram_id: id,
+                first_name: user.first_name || 'Desconocido',
+                username: user.username,
+                deposit_count: depCount,
+                deposit_total_cup: Math.round(depCUP * 100) / 100,
+                deposit_total_usd: Math.round(depUSD * 100) / 100,
+                withdraw_count: wdCount,
+                withdraw_total_cup: Math.round(wdCUP * 100) / 100,
+                withdraw_total_usd: Math.round(wdUSD * 100) / 100
+            });
+        }
+
+        result.sort((a, b) => a.first_name.localeCompare(b.first_name));
+        res.json(result);
+    } catch (e) {
+        console.error('Error obteniendo stats de subadmins:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Detalle individual de un subadmin
+app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) => {
+    try {
+        const telegramId = parseInt(req.params.telegramId);
+        if (isNaN(telegramId)) return res.status(400).json({ error: 'ID inválido' });
+
+        const rates = await getExchangeRates();
+        const rateMap = { cup: 1, usd: rates.rate, usdt: rates.rate_usdt, trx: rates.rate_trx, mlc: rates.rate_mlc };
+
+        const [depositsRes, withdrawalsRes, userRes] = await Promise.all([
+            supabase.from('deposit_requests')
+                .select(`id, user_id, amount, currency, created_at, processed_at,
+                    users (first_name, username)`)
+                .eq('processed_by', telegramId)
+                .eq('status', 'approved')
+                .order('processed_at', { ascending: false })
+                .limit(50),
+            supabase.from('withdraw_requests')
+                .select(`id, user_id, amount, currency, created_at, processed_at,
+                    users (first_name, username)`)
+                .eq('processed_by', telegramId)
+                .eq('status', 'approved')
+                .order('processed_at', { ascending: false })
+                .limit(50),
+            supabase.from('users')
+                .select('first_name, username')
+                .eq('telegram_id', telegramId)
+                .maybeSingle()
+        ]);
+
+        const formattedDeposits = (depositsRes.data || []).map(d => ({
+            id: d.id,
+            user_id: d.user_id,
+            user_name: d.users?.first_name || 'Desconocido',
+            username: d.users?.username,
+            amount: parseFloat(d.amount) || 0,
+            amount_cup: Math.round(((d.currency === 'CUP' ? (parseFloat(d.amount) || 0) : (parseFloat(d.amount) || 0) * (rateMap[d.currency?.toLowerCase()] || 0))) * 100) / 100,
+            currency: d.currency,
+            processed_at: d.processed_at
+        }));
+
+        const formattedWithdrawals = (withdrawalsRes.data || []).map(w => ({
+            id: w.id,
+            user_id: w.user_id,
+            user_name: w.users?.first_name || 'Desconocido',
+            username: w.users?.username,
+            amount: parseFloat(w.amount) || 0,
+            amount_cup: Math.round(((w.currency === 'CUP' ? (parseFloat(w.amount) || 0) : (parseFloat(w.amount) || 0) * (rateMap[w.currency?.toLowerCase()] || 0))) * 100) / 100,
+            currency: w.currency,
+            processed_at: w.processed_at
+        }));
+
+        res.json({
+            telegram_id: telegramId,
+            first_name: userRes.data?.first_name || 'Desconocido',
+            username: userRes.data?.username,
+            deposits: formattedDeposits,
+            withdrawals: formattedWithdrawals
+        });
+    } catch (e) {
+        console.error('Error obteniendo detalle de subadmin:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 
 // ========== ENDPOINTS ACCESIBLES POR ROLE-BASED USERS ==========
