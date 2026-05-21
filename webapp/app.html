@@ -4190,6 +4190,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-gray-600 px-3 py-1 rounded-full text-sm" data-filter="withMainBalance">Con saldo principal</button>
                         <button class="filter-btn bg-sky-600 px-3 py-1 rounded-full text-sm" data-filter="withUsdBalance">Con saldo USD</button>
                         <button class="filter-btn bg-purple-600 px-3 py-1 rounded-full text-sm" data-filter="withBonus">Con bono</button>
+                        <button class="filter-btn bg-pink-600 px-3 py-1 rounded-full text-sm" data-filter="withoutBonus">Sin bono</button>
                         <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="empty">Sin saldo ni bono</button>
                         <button class="filter-btn bg-yellow-600 px-3 py-1 rounded-full text-sm" data-filter="withReferrals">Con referidos</button>
                         <button class="filter-btn bg-blue-600 px-3 py-1 rounded-full text-sm" data-filter="referred">Refiriendo</button>
@@ -4225,13 +4226,28 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
 
                 html += renderUserCards(users);
+                html += `<div id="noUsersMessage" class="col-span-full text-center text-gray-400 py-8 hidden"></div>`;
                 html += `</div>`;
                 container.innerHTML = html;
+
+                const filterNames = {
+                    all: 'Todos',
+                    withMainBalance: 'Con saldo principal',
+                    withUsdBalance: 'Con saldo USD',
+                    withBonus: 'Con bono',
+                    withoutBonus: 'Sin bono',
+                    empty: 'Sin saldo ni bono',
+                    withReferrals: 'Con referidos',
+                    referred: 'Refiriendo',
+                    withBets: 'Con jugadas',
+                    banned: 'Baneados'
+                };
 
                 // Función de filtrado
                 function applyFilter(filter) {
                     const searchText = document.getElementById('userSearchInput').value.trim().toLowerCase();
                     const cards = document.querySelectorAll('#usersGrid .user-card');
+                    const noMsg = document.getElementById('noUsersMessage');
                     cards.forEach(card => {
                         const userId = parseInt(card.dataset.userid);
                         const user = window._allUsers.find(u => u.telegram_id === userId);
@@ -4253,6 +4269,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 break;
                             case 'withBonus':
                                 categoryMatch = (parseFloat(user.bonus_cup) > 0);
+                                break;
+                            case 'withoutBonus':
+                                categoryMatch = (parseFloat(user.bonus_cup) === 0);
                                 break;
                             case 'empty':
                                 categoryMatch = (
@@ -4276,6 +4295,20 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         }
                         card.style.display = categoryMatch ? '' : 'none';
                     });
+
+                    const visibleCount = Array.from(cards).filter(c => c.style.display !== 'none').length;
+                    if (visibleCount === 0) {
+                        if (searchText) {
+                            noMsg.textContent = '👤 Usuario no encontrado';
+                        } else if (filter !== 'all') {
+                            noMsg.textContent = `📭 No hay usuarios (${filterNames[filter] || filter})`;
+                        } else {
+                            noMsg.textContent = '📭 No hay usuarios';
+                        }
+                        noMsg.classList.remove('hidden');
+                    } else {
+                        noMsg.classList.add('hidden');
+                    }
                 }
 
                 // Eventos de búsqueda
