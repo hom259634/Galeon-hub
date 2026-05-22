@@ -3546,9 +3546,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             userRoles = freshRoles;
                             isAdmin = freshIsAdmin;
                         }
-                        loadFuncionesDepositos();
-                        loadFuncionesRetiros();
-                        loadFuncionesHorario();
+                        // No recargar contenedores visibles para no interrumpir edición del usuario
+                        ['funcionesDepositosContainer', 'funcionesRetirosContainer', 'funcionesHorarioContainer'].forEach(id => {
+                            const el = document.getElementById(id);
+                            if (el && el.classList.contains('hidden')) {
+                                if (id === 'funcionesDepositosContainer') loadFuncionesDepositos();
+                                else if (id === 'funcionesRetirosContainer') loadFuncionesRetiros();
+                                else if (id === 'funcionesHorarioContainer') loadFuncionesHorario();
+                            }
+                        });
                     } catch (e) { console.error(e); }
                 } else {
                     clearInterval(funcionesAdminInterval);
