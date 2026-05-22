@@ -3564,7 +3564,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             const privilegeLabels = {
                 deposit_approver: { icon: '✅', label: 'Aprobar o Denegar Depósitos' },
-                withdraw_approver: { icon: '❌', label: 'Aprobar o Denegar Retiros' },
+                withdraw_approver: { icon: '✅', label: 'Aprobar o Denegar Retiros' },
                 schedule_manager: { icon: '🕐', label: 'Gestionar Horario de Retiros' },
                 user_manager: { icon: '👥', label: 'Gestión de Usuarios' }
             };
@@ -3742,7 +3742,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <select id="schedStartHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${hourOptions(start.hour12)}</select>
                                 <span class="text-white self-center">:</span>
                                 <select id="schedStartMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${minOptions(start.min)}</select>
-                                <select id="schedStartAmPm" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">
+                                <select id="schedStartAmPm" class="w-20 p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none text-center">
                                     <option value="AM"${start.period === 'AM' ? ' selected' : ''}>AM</option>
                                     <option value="PM"${start.period === 'PM' ? ' selected' : ''}>PM</option>
                                 </select>
@@ -3754,7 +3754,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <select id="schedEndHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${hourOptions(end.hour12)}</select>
                                 <span class="text-white self-center">:</span>
                                 <select id="schedEndMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${minOptions(end.min)}</select>
-                                <select id="schedEndAmPm" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">
+                                <select id="schedEndAmPm" class="w-20 p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none text-center">
                                     <option value="AM"${end.period === 'AM' ? ' selected' : ''}>AM</option>
                                     <option value="PM"${end.period === 'PM' ? ' selected' : ''}>PM</option>
                                 </select>
@@ -4737,7 +4737,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     body: JSON.stringify({ userId: currentUser.telegram_id })
                 });
                 if (res.ok) {
-                    iziToast.success({ message: 'Usuario baneado permanentemente.' });
+                    iziToast.success({ message: 'Usuario baneado.' });
                     adminModal.classList.add('hidden');
                     renderManageUsersView();
                 } else {
