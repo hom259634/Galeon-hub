@@ -1158,7 +1158,7 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
             user_id: parseInt(userId),
             method_id: parseInt(methodId),
             screenshot_url: publicUrl,
-            amount: amount,
+            amount: parsed.amount,
             currency,
             status: 'pending'
         })
@@ -3369,7 +3369,7 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
         try {
             await bot.telegram.sendMessage(
                 request.user_id,
-                `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
+                `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
                 { parse_mode: 'HTML' }
             );
         } catch (e) {
@@ -3594,7 +3594,7 @@ app.post('/api/admin/pending-withdraws/:id/reject', requireAdmin, async (req, re
 
     try {
         await bot.telegram.sendMessage(request.user_id,
-            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
             { parse_mode: 'HTML' }
         );
     } catch (e) {}
@@ -3884,6 +3884,64 @@ app.post('/api/admin/users/:telegramId/ban', async (req, res) => {
         }
 
         res.json({ success: true });
+
+        const bannedUser = data[0];
+        if (bannedUser && bannedUser.ref_by) {
+            (async () => {
+                try {
+                    const referrerId = bannedUser.ref_by;
+                    const userName = bannedUser.first_name || bannedUser.username || 'Usuario';
+                    const referralRate = await getReferralCommissionRate();
+
+                    const { data: openSessions } = await supabase
+                        .from('lottery_sessions')
+                        .select('id')
+                        .eq('status', 'open');
+                    const openSessionIds = (openSessions || []).map(s => s.id);
+
+                    if (openSessionIds.length > 0) {
+                        const { data: activeBets } = await supabase
+                            .from('bets')
+                            .select('cost_cup, cost_usd')
+                            .eq('user_id', telegramId)
+                            .in('session_id', openSessionIds);
+
+                        if (activeBets && activeBets.length > 0) {
+                            const usdRate = await getExchangeRateUSD();
+                            let totalBetCUP = 0;
+                            for (const bet of activeBets) {
+                                totalBetCUP += (parseFloat(bet.cost_cup) || 0) + ((parseFloat(bet.cost_usd) || 0) * usdRate);
+                            }
+                            const deduction = totalBetCUP * referralRate;
+
+                            if (deduction > 0) {
+                                const { data: referrer } = await supabase
+                                    .from('users')
+                                    .select('cup')
+                                    .eq('telegram_id', referrerId)
+                                    .single();
+
+                                if (referrer) {
+                                    const newCup = Math.max(0, (parseFloat(referrer.cup) || 0) - deduction);
+                                    await supabase
+                                        .from('users')
+                                        .update({ cup: newCup, updated_at: new Date() })
+                                        .eq('telegram_id', referrerId);
+
+                                    const percent = Number.isInteger(referralRate * 100) ? (referralRate * 100).toString() : (referralRate * 100).toFixed(2);
+                                    await bot.telegram.sendMessage(referrerId,
+                                        `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser baneado. Ha sido restado de tu saldo actual el ${percent}% del monto apostado en su jugada activa.`,
+                                        { parse_mode: 'HTML' }
+                                    ).catch(e => console.error('Error notificando al referidor:', e));
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error al procesar deducción por referido baneado:', e);
+                }
+            })();
+        }
     } catch (e) {
         console.error('Error baneando usuario:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
@@ -3938,13 +3996,17 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
     try {
         const { data: user, error: findError } = await supabase
             .from('users')
-            .select('telegram_id')
+            .select('telegram_id, first_name, username, ref_by')
             .eq('telegram_id', telegramId)
             .maybeSingle();
 
         if (findError || !user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
+
+        const userRefBy = user.ref_by;
+        const userFirstName = user.first_name;
+        const userUsername = user.username;
 
         const { error: deleteError } = await supabase
             .from('users')
@@ -3956,6 +4018,63 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         }
 
         res.json({ success: true, message: 'Usuario eliminado. Podrá registrarse de nuevo como nuevo usuario.' });
+
+        if (userRefBy) {
+            (async () => {
+                try {
+                    const referrerId = userRefBy;
+                    const userName = userFirstName || userUsername || 'Usuario';
+                    const referralRate = await getReferralCommissionRate();
+
+                    const { data: openSessions } = await supabase
+                        .from('lottery_sessions')
+                        .select('id')
+                        .eq('status', 'open');
+                    const openSessionIds = (openSessions || []).map(s => s.id);
+
+                    if (openSessionIds.length > 0) {
+                        const { data: activeBets } = await supabase
+                            .from('bets')
+                            .select('cost_cup, cost_usd')
+                            .eq('user_id', telegramId)
+                            .in('session_id', openSessionIds);
+
+                        if (activeBets && activeBets.length > 0) {
+                            const usdRate = await getExchangeRateUSD();
+                            let totalBetCUP = 0;
+                            for (const bet of activeBets) {
+                                totalBetCUP += (parseFloat(bet.cost_cup) || 0) + ((parseFloat(bet.cost_usd) || 0) * usdRate);
+                            }
+                            const deduction = totalBetCUP * referralRate;
+
+                            if (deduction > 0) {
+                                const { data: referrer } = await supabase
+                                    .from('users')
+                                    .select('cup')
+                                    .eq('telegram_id', referrerId)
+                                    .single();
+
+                                if (referrer) {
+                                    const newCup = Math.max(0, (parseFloat(referrer.cup) || 0) - deduction);
+                                    await supabase
+                                        .from('users')
+                                        .update({ cup: newCup, updated_at: new Date() })
+                                        .eq('telegram_id', referrerId);
+
+                                    const percent = Number.isInteger(referralRate * 100) ? (referralRate * 100).toString() : (referralRate * 100).toFixed(2);
+                                    await bot.telegram.sendMessage(referrerId,
+                                        `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser eliminado. Ha sido restado de tu saldo actual el ${percent}% del monto apostado en su jugada activa.`,
+                                        { parse_mode: 'HTML' }
+                                    ).catch(e => console.error('Error notificando al referidor:', e));
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error al procesar deducción por referido eliminado:', e);
+                }
+            })();
+        }
     } catch (e) {
         console.error('Error eliminando usuario:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
@@ -4303,7 +4422,7 @@ app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
     res.json({ success: true });
     (async () => {
         try {
-            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`, { parse_mode: 'HTML' });
+            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`, { parse_mode: 'HTML' });
         } catch (e) {}
         updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
     })();
@@ -4380,7 +4499,7 @@ app.post('/api/admin/pending-withdraws-role/:id/reject', async (req, res) => {
     if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     try {
         if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id,
-            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
     updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`);
