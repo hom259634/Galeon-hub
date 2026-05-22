@@ -3556,47 +3556,68 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
             }, 15000);
 
-            let html = '<div class="space-y-4">';
+            const privilegeLabels = {
+                deposit_approver: { icon: 'fas fa-check-circle', label: 'Aprobar o Denegar Depósitos' },
+                withdraw_approver: { icon: 'fas fa-times-circle', label: 'Aprobar o Denegar Retiros' },
+                schedule_manager: { icon: 'fas fa-clock', label: 'Gestionar Horario de Retiros' },
+                user_manager: { icon: 'fas fa-user-edit', label: 'Gestión de Usuarios' }
+            };
+
+            let html = '<div class="space-y-3">';
 
             if (userRoles.length > 0) {
                 html += `<div class="text-sm text-gray-400 mb-2">Tus permisos: ${userRoles.map(r => {
-                    const labels = { withdraw_approver: '✅ Aprobar o Denegar Depósitos', deposit_approver: '✅ Aprobar o Denegar Retiros', schedule_manager: '🕐 Gestionar Horario de Retiros', user_manager: '👥 Gestión de Usuarios' };
-                    return labels[r] || r;
+                    const p = privilegeLabels[r];
+                    return p ? `${p.icon} ${p.label}` : r;
                 }).join(' · ')}</div>`;
             }
 
-            if (userRoles.includes('deposit_approver') || isAdmin) {
-                html += `<div id="funcionesDepositos"><div class="loader"></div> Cargando solicitudes de depósito...</div>`;
-            }
-
-            if (userRoles.includes('withdraw_approver') || isAdmin) {
-                html += `<div id="funcionesRetiros"><div class="loader"></div> Cargando solicitudes de retiro...</div>`;
-            }
-
-            if (userRoles.includes('schedule_manager') || isAdmin) {
-                html += `<div id="funcionesHorario"><div class="loader"></div> Cargando configuración de horario...</div>`;
-            }
-
-            if (userRoles.includes('user_manager') || isAdmin) {
+            const activePrivileges = Object.keys(privilegeLabels).filter(r => userRoles.includes(r));
+            for (const role of activePrivileges) {
+                const info = privilegeLabels[role];
+                const sectionId = role === 'deposit_approver' ? 'Depositos'
+                    : role === 'withdraw_approver' ? 'Retiros'
+                    : role === 'schedule_manager' ? 'Horario'
+                    : 'Users';
                 html += `<div class="mb-4">
-                    <button id="loadUsersBtn" onclick="loadFuncionesUsers()" class="w-full bg-emerald-600/80 p-3 rounded-xl hover:bg-emerald-700 font-bold text-left flex items-center gap-2">
-                        <i class="fas fa-user-edit"></i> Gestión de Usuarios
+                    <button class="privilege-btn w-full bg-gray-700/80 p-3 rounded-xl hover:bg-gray-600 font-bold text-left flex items-center gap-2" data-section="${role}">
+                        <i class="${info.icon}"></i> ${info.label} <span class="text-xs text-gray-400 ml-auto">▼</span>
                     </button>
-                    <div id="funcionesUsersContainer" class="mt-2 hidden"></div>
+                    <div id="funciones${sectionId}Container" class="mt-2 hidden"></div>
                 </div>`;
             }
 
             html += '</div>';
             container.innerHTML = html;
 
-            if (userRoles.includes('deposit_approver') || isAdmin) loadFuncionesDepositos();
-            if (userRoles.includes('withdraw_approver') || isAdmin) loadFuncionesRetiros();
-            if (userRoles.includes('schedule_manager') || isAdmin) loadFuncionesHorario();
-            if (userRoles.includes('user_manager') || isAdmin) loadFuncionesUsers();
+            container.querySelectorAll('.privilege-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const role = this.dataset.section;
+                    const sectionId = role === 'deposit_approver' ? 'Depositos'
+                        : role === 'withdraw_approver' ? 'Retiros'
+                        : role === 'schedule_manager' ? 'Horario'
+                        : 'Users';
+                    const contentDiv = document.getElementById(`funciones${sectionId}Container`);
+                    if (!contentDiv) return;
+                    const isHidden = contentDiv.classList.contains('hidden');
+                    if (isHidden) {
+                        contentDiv.classList.remove('hidden');
+                        contentDiv.innerHTML = '<div class="loader"></div> Cargando...';
+                        this.querySelector('span').textContent = '▲';
+                        if (role === 'deposit_approver') loadFuncionesDepositos();
+                        else if (role === 'withdraw_approver') loadFuncionesRetiros();
+                        else if (role === 'schedule_manager') loadFuncionesHorario();
+                        else if (role === 'user_manager') loadFuncionesUsers();
+                    } else {
+                        contentDiv.classList.add('hidden');
+                        this.querySelector('span').textContent = '▼';
+                    }
+                });
+            });
         }
 
         async function loadFuncionesDepositos() {
-            const container = document.getElementById('funcionesDepositos');
+            const container = document.getElementById('funcionesDepositosContainer');
             if (!container) return;
             try {
                 const res = await fetch('/api/admin/pending-deposits-role');
@@ -3632,7 +3653,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }
 
         async function loadFuncionesRetiros() {
-            const container = document.getElementById('funcionesRetiros');
+            const container = document.getElementById('funcionesRetirosContainer');
             if (!container) return;
             try {
                 const res = await fetch('/api/admin/pending-withdraws-role');
@@ -3691,7 +3712,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }
 
         async function loadFuncionesHorario() {
-            const container = document.getElementById('funcionesHorario');
+            const container = document.getElementById('funcionesHorarioContainer');
             if (!container) return;
             try {
                 const res = await fetch('/api/admin/schedule-config');
@@ -3747,15 +3768,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }
 
         window.loadFuncionesUsers = async () => {
-            const btn = document.getElementById('loadUsersBtn');
-            if (!btn || btn.disabled) return;
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Cargando...';
             const container = document.getElementById('funcionesUsersContainer');
-            container.classList.remove('hidden');
+            if (!container) return;
             await renderManageUsersView(container);
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-user-edit"></i> Gestión de Usuarios';
         };
 
         // Funciones globales para los botones de Funciones de Admin
@@ -4189,6 +4204,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-filter="all">Todos</button>
                         <button class="filter-btn bg-gray-600 px-3 py-1 rounded-full text-sm" data-filter="withMainBalance">Con saldo principal</button>
                         <button class="filter-btn bg-sky-600 px-3 py-1 rounded-full text-sm" data-filter="withUsdBalance">Con saldo USD</button>
+                        <button class="filter-btn bg-teal-600 px-3 py-1 rounded-full text-sm" data-filter="withMainAndUsdBalance">Con saldo principal y USD</button>
                         <button class="filter-btn bg-purple-600 px-3 py-1 rounded-full text-sm" data-filter="withBonus">Con bono</button>
                         <button class="filter-btn bg-pink-600 px-3 py-1 rounded-full text-sm" data-filter="withoutBonus">Sin bono</button>
                         <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="empty">Sin saldo ni bono</button>
@@ -4234,6 +4250,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     all: 'Todos',
                     withMainBalance: 'Con saldo principal',
                     withUsdBalance: 'Con saldo USD',
+                    withMainAndUsdBalance: 'Con saldo principal y USD',
                     withBonus: 'Con bono',
                     withoutBonus: 'Sin bono',
                     empty: 'Sin saldo ni bono',
@@ -4266,6 +4283,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 break;
                             case 'withUsdBalance':
                                 categoryMatch = (parseFloat(user.usd) > 0);
+                                break;
+                            case 'withMainAndUsdBalance':
+                                categoryMatch = (parseFloat(user.cup) > 0 && parseFloat(user.usd) > 0);
                                 break;
                             case 'withBonus':
                                 categoryMatch = (parseFloat(user.bonus_cup) > 0);
@@ -4301,7 +4321,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         if (searchText) {
                             noMsg.textContent = '👤 Usuario no encontrado';
                         } else if (filter !== 'all') {
-                            noMsg.textContent = `📭 No hay usuarios (${filterNames[filter] || filter})`;
+                            noMsg.textContent = `📭 No hay usuarios ${(filterNames[filter] || filter).toLowerCase()}`;
                         } else {
                             noMsg.textContent = '📭 No hay usuarios';
                         }
