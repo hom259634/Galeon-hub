@@ -5067,16 +5067,26 @@ async function withdrawNotifications() {
 
     // ✅ 1. APERTURA programada: notificar y limpiar cualquier override manual
     if (currentHour === startHour && currentMinute === startMinute) {
+        const { data: overrideBefore } = await supabase
+            .from('app_config')
+            .select('value')
+            .eq('key', 'withdraw_manual_override')
+            .single();
+        const wasManualOpen = (overrideBefore?.value || 'none') === 'open';
+
         await supabase
             .from('app_config')
             .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
         await clearManualOverrideExpiry();
 
-        await broadcastToAllUsers(
-            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-            `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
-            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
-        );
+        // No enviar notificación si ya estaba abierto manualmente
+        if (!wasManualOpen) {
+            await broadcastToAllUsers(
+                `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+                `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+                `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+            );
+        }
     }
 
     // ✅ 2. CIERRE programado: notificar y limpiar cualquier override manual
