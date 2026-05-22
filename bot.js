@@ -4828,7 +4828,7 @@ bot.action(/reject_deposit_(\d+)/, async (ctx) => {
             try {
                 await ctx.telegram.sendMessage(
                     request.user_id,
-                    `❌ Depósito rechazado\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Contacta con el administrador para más información.`,
+                    `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
@@ -4915,17 +4915,17 @@ bot.action(/reject_withdraw_(\d+)/, async (ctx) => {
             return;
         }
 
-        await ctx.telegram.sendMessage(request.user_id,
-            '❌ <b>Retiro rechazado</b>\n\n📌 Tu solicitud no pudo ser procesada. Por favor, contacta al administrador para más detalles.',
+        // Operaciones posteriores: si fallan no deben mostrar error al admin
+        ctx.telegram.sendMessage(request.user_id,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
             { parse_mode: 'HTML' }
-        );
+        ).catch(() => {});
         updatePendingNotifications(`withdraw_${requestId}`, `❌ <b>Retiro #${requestId} rechazado</b> por un administrador.`);
-        await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+        ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
         await ctx.reply('❌ Retiro rechazado.');
         await ctx.answerCbQuery();
     } catch (e) {
-        console.error(e);
-        await ctx.answerCbQuery('❌ Error al rechazar', { show_alert: true });
+        console.error('Error al rechazar retiro (BD):', e);
     }
 });
 
@@ -5198,5 +5198,11 @@ async function updatePendingNotifications(key, statusText) {
 
 // Exponer funciones para que backend.js pueda refrescar el caché al asignar roles
 bot.refreshBotRolesCache = refreshBotRolesCache;
+
+// Capturar errores no manejados en handlers del bot para evitar que crasheen el proceso
+bot.catch((err) => {
+    console.error('[bot.catch] Error no manejado en handler del bot:', err?.message || err);
+    if (err?.stack) console.error(err.stack);
+});
 
 module.exports = bot;

@@ -3369,7 +3369,7 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
         try {
             await bot.telegram.sendMessage(
                 request.user_id,
-                `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Contacta con el administrador para más información.`,
+                `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
                 { parse_mode: 'HTML' }
             );
         } catch (e) {
@@ -3594,9 +3594,7 @@ app.post('/api/admin/pending-withdraws/:id/reject', requireAdmin, async (req, re
 
     try {
         await bot.telegram.sendMessage(request.user_id,
-            `❌ <b>Retiro rechazado</b>\n\n` +
-            `💰 Monto: ${request.amount} ${request.currency}\n` +
-            `📌 Contacta con el administrador para más información.`,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
             { parse_mode: 'HTML' }
         );
     } catch (e) {}
@@ -4305,7 +4303,7 @@ app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
     res.json({ success: true });
     (async () => {
         try {
-            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Contacta con el administrador para más información.`, { parse_mode: 'HTML' });
+            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`, { parse_mode: 'HTML' });
         } catch (e) {}
         updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
     })();
@@ -4382,7 +4380,7 @@ app.post('/api/admin/pending-withdraws-role/:id/reject', async (req, res) => {
     if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     try {
         if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id,
-            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${request.currency}\n📌 Contacta con el administrador para más información.`,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${request.amount} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
     updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`);
@@ -4582,6 +4580,16 @@ setInterval(async () => {
         console.error('[Keep-Alive] Error:', e.message);
     }
 }, 5 * 60 * 1000);
+
+// ========== MANEJADORES GLOBALES DE ERRORES ==========
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason?.message || reason);
+    if (reason?.stack) console.error(reason.stack);
+});
+process.on('uncaughtException', (err) => {
+    console.error('❌ Uncaught Exception:', err?.message || err);
+    if (err?.stack) console.error(err.stack);
+});
 
 // ========== INICIAR SERVIDOR Y BOT ==========
 app.listen(PORT, () => {
