@@ -62,14 +62,14 @@ function isAdmin(userId) {
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
-let rolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], userManagers: [], lastFetch: 0 };
+let rolesCache = { depositApprovers: [], withdrawApprovers: [], scheduleManagers: [], userManagers: [], lastFetch: 0 };
 const ROLES_CACHE_TTL = 60000;
 
 async function refreshRolesCache() {
     try {
         const { data } = await supabase.from('admin_roles').select('telegram_id, role');
-        rolesCache.withdrawApprovers = data?.filter(r => r.role === 'withdraw_approver').map(r => Number(r.telegram_id)) || [];
         rolesCache.depositApprovers = data?.filter(r => r.role === 'deposit_approver').map(r => Number(r.telegram_id)) || [];
+        rolesCache.withdrawApprovers = data?.filter(r => r.role === 'withdraw_approver').map(r => Number(r.telegram_id)) || [];
         rolesCache.scheduleManagers = data?.filter(r => r.role === 'schedule_manager').map(r => Number(r.telegram_id)) || [];
         rolesCache.userManagers = data?.filter(r => r.role === 'user_manager').map(r => Number(r.telegram_id)) || [];
         rolesCache.lastFetch = Date.now();
@@ -86,8 +86,8 @@ async function getUserRoles(userId) {
     await ensureRolesCache();
     const id = Number(userId);
     const roles = [];
-    if (rolesCache.withdrawApprovers.includes(id)) roles.push('withdraw_approver');
     if (rolesCache.depositApprovers.includes(id)) roles.push('deposit_approver');
+    if (rolesCache.withdrawApprovers.includes(id)) roles.push('withdraw_approver');
     if (rolesCache.scheduleManagers.includes(id)) roles.push('schedule_manager');
     if (rolesCache.userManagers.includes(id)) roles.push('user_manager');
     return roles;
@@ -4136,7 +4136,7 @@ app.put('/api/admin/admin-roles/:telegramId', requireAdmin, async (req, res) => 
             return res.status(400).json({ error: 'roles debe ser un array' });
         }
 
-        const validRoles = ['withdraw_approver', 'deposit_approver', 'schedule_manager', 'user_manager'];
+        const validRoles = ['deposit_approver', 'withdraw_approver', 'schedule_manager', 'user_manager'];
         for (const role of roles) {
             if (!validRoles.includes(role)) {
                 return res.status(400).json({ error: `Rol inválido: ${role}` });
@@ -4258,31 +4258,53 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
         const telegramId = parseInt(req.params.telegramId);
         if (isNaN(telegramId)) return res.status(400).json({ error: 'ID inválido' });
 
-        const rates = await getExchangeRates();
-        const rateMap = { cup: 1, usd: rates.rate, usdt: rates.rate_usdt, trx: rates.rate_trx, mlc: rates.rate_mlc };
+        const { start_date, end_date, start_time, end_time } = req.query;
+
+        let depQuery = supabase.from('deposit_requests')
+            .select(`id, user_id, amount, currency, created_at, processed_at,
+                users (first_name, username)`)
+            .eq('processed_by', telegramId)
+            .eq('status', 'approved');
+
+        let wdQuery = supabase.from('withdraw_requests')
+            .select(`id, user_id, amount, currency, created_at, processed_at,
+                users (first_name, username)`)
+            .eq('processed_by', telegramId)
+            .eq('status', 'approved');
+
+        if (start_date && end_date) {
+            const startISO = `${start_date}T00:00:00.000Z`;
+            const endISO = `${end_date}T23:59:59.999Z`;
+            depQuery = depQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+            wdQuery = wdQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+        } else if (start_date) {
+            const startISO = `${start_date}T00:00:00.000Z`;
+            const endISO = `${start_date}T23:59:59.999Z`;
+            depQuery = depQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+            wdQuery = wdQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+        } else if (end_date) {
+            const startISO = `${end_date}T00:00:00.000Z`;
+            const endISO = `${end_date}T23:59:59.999Z`;
+            depQuery = depQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+            wdQuery = wdQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+        }
+
+        depQuery = depQuery.order('processed_at', { ascending: false }).limit(100);
+        wdQuery = wdQuery.order('processed_at', { ascending: false }).limit(100);
 
         const [depositsRes, withdrawalsRes, userRes] = await Promise.all([
-            supabase.from('deposit_requests')
-                .select(`id, user_id, amount, currency, created_at, processed_at,
-                    users (first_name, username)`)
-                .eq('processed_by', telegramId)
-                .eq('status', 'approved')
-                .order('processed_at', { ascending: false })
-                .limit(50),
-            supabase.from('withdraw_requests')
-                .select(`id, user_id, amount, currency, created_at, processed_at,
-                    users (first_name, username)`)
-                .eq('processed_by', telegramId)
-                .eq('status', 'approved')
-                .order('processed_at', { ascending: false })
-                .limit(50),
+            depQuery,
+            wdQuery,
             supabase.from('users')
                 .select('first_name, username')
                 .eq('telegram_id', telegramId)
                 .maybeSingle()
         ]);
 
-        const formattedDeposits = (depositsRes.data || []).map(d => ({
+        const rates = await getExchangeRates();
+        const rateMap = { cup: 1, usd: rates.rate, usdt: rates.rate_usdt, trx: rates.rate_trx, mlc: rates.rate_mlc };
+
+        let formattedDeposits = (depositsRes.data || []).map(d => ({
             id: d.id,
             user_id: d.user_id,
             user_name: d.users?.first_name || 'Desconocido',
@@ -4293,7 +4315,7 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
             processed_at: d.processed_at
         }));
 
-        const formattedWithdrawals = (withdrawalsRes.data || []).map(w => ({
+        let formattedWithdrawals = (withdrawalsRes.data || []).map(w => ({
             id: w.id,
             user_id: w.user_id,
             user_name: w.users?.first_name || 'Desconocido',
@@ -4304,12 +4326,51 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
             processed_at: w.processed_at
         }));
 
+        // Apply time filter in memory (converts Cuba time to UTC for DB comparison)
+        function filterByTime(items, startTime, endTime) {
+            if (!startTime && !endTime) return items;
+            let startUTC = null, endUTC = null;
+            if (startTime) {
+                const m = moment.tz(startTime, 'HH:mm', TIMEZONE).utc();
+                startUTC = m.hours() * 60 + m.minutes();
+            }
+            if (endTime) {
+                const m = moment.tz(endTime, 'HH:mm', TIMEZONE).utc();
+                endUTC = m.hours() * 60 + m.minutes();
+            }
+            return items.filter(item => {
+                if (!item.processed_at) return false;
+                const d = new Date(item.processed_at);
+                const totalMinutes = d.getUTCHours() * 60 + d.getUTCMinutes();
+                if (startUTC !== null && totalMinutes < startUTC) return false;
+                if (endUTC !== null && totalMinutes > endUTC) return false;
+                return true;
+            });
+        }
+
+        formattedDeposits = filterByTime(formattedDeposits, start_time, end_time);
+        formattedWithdrawals = filterByTime(formattedWithdrawals, start_time, end_time);
+
+        // Totals
+        const totalDepositAmount = formattedDeposits.reduce((sum, d) => sum + d.amount, 0);
+        const totalDepositCUP = formattedDeposits.reduce((sum, d) => sum + d.amount_cup, 0);
+        const totalWithdrawAmount = formattedWithdrawals.reduce((sum, w) => sum + w.amount, 0);
+        const totalWithdrawCUP = formattedWithdrawals.reduce((sum, w) => sum + w.amount_cup, 0);
+
         res.json({
             telegram_id: telegramId,
             first_name: userRes.data?.first_name || 'Desconocido',
             username: userRes.data?.username,
             deposits: formattedDeposits,
-            withdrawals: formattedWithdrawals
+            withdrawals: formattedWithdrawals,
+            totals: {
+                deposit_count: formattedDeposits.length,
+                deposit_amount_total: Math.round(totalDepositAmount * 100) / 100,
+                deposit_cup_total: Math.round(totalDepositCUP * 100) / 100,
+                withdraw_count: formattedWithdrawals.length,
+                withdraw_amount_total: Math.round(totalWithdrawAmount * 100) / 100,
+                withdraw_cup_total: Math.round(totalWithdrawCUP * 100) / 100
+            }
         });
     } catch (e) {
         console.error('Error obteniendo detalle de subadmin:', e);
