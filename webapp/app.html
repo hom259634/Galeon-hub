@@ -566,6 +566,7 @@
                         <button data-admin-view="userManager" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-user-cog mr-1"></i>Estadísticas de Usuarios</button>
                         <button data-admin-view="manageUsers" class="admin-nav-btn bg-emerald-600/80 p-3 rounded-xl hover:bg-emerald-700"><i class="fas fa-user-edit mr-1"></i> Gestión de Usuarios</button>
                         <button data-admin-view="roleManager" class="admin-nav-btn bg-fuchsia-600/80 p-3 rounded-xl hover:bg-fuchsia-700"><i class="fas fa-user-shield mr-1"></i> Designación de Admins</button>
+                        <button data-admin-view="subadminStats" class="admin-nav-btn bg-orange-600/80 p-3 rounded-xl hover:bg-orange-700"><i class="fas fa-user-shield mr-1"></i> Subadmins</button>
                         <button data-admin-view="pendingRequests" class="admin-nav-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700"><i class="fas fa-clock mr-1"></i> Solicitudes Pendientes</button>
                         <button data-admin-view="viewData" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-eye mr-1"></i> Ver Datos</button>
                         
@@ -4050,20 +4051,57 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        window.renderSubadminDetailView = async (telegramId) => {
+        window.renderSubadminDetailView = async (telegramId, filters = {}) => {
             adminViewContainer.innerHTML = '<div class="loader"></div> Cargando detalle...';
             try {
-                const res = await fetch(`/api/admin/subadmin-stats/${telegramId}`);
+                const params = new URLSearchParams();
+                if (filters.start_date) params.set('start_date', filters.start_date);
+                if (filters.end_date) params.set('end_date', filters.end_date);
+                if (filters.start_time) params.set('start_time', filters.start_time);
+                if (filters.end_time) params.set('end_time', filters.end_time);
+                const qs = params.toString();
+                const url = `/api/admin/subadmin-stats/${telegramId}${qs ? '?'+qs : ''}`;
+                const res = await fetch(url);
                 if (!res.ok) throw new Error('Error al cargar');
                 const data = await res.json();
 
-                let html = `<div class="mb-4">
+                const today = new Date().toISOString().split('T')[0];
+
+                let html = `<div class="flex flex-wrap gap-2 mb-4 items-center">
                     <button onclick="renderSubadminStatsView()" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm">
                         <i class="fas fa-arrow-left mr-1"></i> Volver
                     </button>
+                    <input type="date" id="filterStartDate" value="${filters.start_date || ''}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm">
+                    <input type="date" id="filterEndDate" value="${filters.end_date || ''}" max="${today}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm">
+                    <input type="time" id="filterStartTime" value="${filters.start_time || ''}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm">
+                    <input type="time" id="filterEndTime" value="${filters.end_time || ''}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm">
+                    <button onclick="applySubadminFilter(${telegramId})" class="bg-cyan-600 px-4 py-1.5 rounded-lg text-sm hover:bg-cyan-700"><i class="fas fa-search mr-1"></i>Filtrar</button>
                 </div>
-                <h4 class="text-xl font-bold mb-2 flex items-center"><i class="fas fa-user-shield text-orange-400 mr-2"></i>${escapeHTML(data.first_name)} ${data.username ? '@'+escapeHTML(data.username) : ''}</h4>
+                <h4 class="text-xl font-bold mb-1 flex items-center"><i class="fas fa-user-shield text-orange-400 mr-2"></i>${escapeHTML(data.first_name)} ${data.username ? '@'+escapeHTML(data.username) : ''}</h4>
                 <p class="text-sm text-gray-400 mb-4">ID: ${data.telegram_id}</p>`;
+
+                // Totals
+                if (data.totals) {
+                    const t = data.totals;
+                    html += `<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                        <div class="bg-gray-800/60 p-3 rounded-xl text-center">
+                            <p class="text-xs text-gray-400">📥 Depósitos</p>
+                            <p class="text-lg font-bold text-cyan-300">${t.deposit_count}</p>
+                        </div>
+                        <div class="bg-gray-800/60 p-3 rounded-xl text-center">
+                            <p class="text-xs text-gray-400">💰 Total Depósitos</p>
+                            <p class="text-lg font-bold text-green-300">${t.deposit_cup_total.toFixed(2)} CUP</p>
+                        </div>
+                        <div class="bg-gray-800/60 p-3 rounded-xl text-center">
+                            <p class="text-xs text-gray-400">📤 Retiros</p>
+                            <p class="text-lg font-bold text-pink-300">${t.withdraw_count}</p>
+                        </div>
+                        <div class="bg-gray-800/60 p-3 rounded-xl text-center">
+                            <p class="text-xs text-gray-400">💰 Total Retiros</p>
+                            <p class="text-lg font-bold text-red-300">${t.withdraw_cup_total.toFixed(2)} CUP</p>
+                        </div>
+                    </div>`;
+                }
 
                 // Depósitos
                 html += `<div class="mb-6">
@@ -4071,12 +4109,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (data.deposits.length === 0) {
                     html += '<p class="text-gray-500 text-sm">Sin depósitos procesados.</p>';
                 } else {
-                    html += `<div class="max-h-48 overflow-y-auto space-y-1">`;
+                    html += `<div class="max-h-64 overflow-y-auto space-y-1">`;
                     for (const d of data.deposits) {
-                        const cupLabel = d.currency === 'USD' ? '' : `<span class="text-gray-400 ml-1">(${d.amount_cup.toFixed(2)} CUP)</span>`;
-                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between">
-                            <span>${escapeHTML(d.user_name)} ${d.username ? '@'+escapeHTML(d.username) : ''}</span>
-                            <span class="${d.currency === 'USD' ? 'text-yellow-300' : 'text-cyan-300'}">${d.amount.toFixed(2)} ${d.currency}${cupLabel}</span>
+                        const cupLabel = d.currency !== 'CUP' ? `<span class="text-gray-400 ml-1">(${d.amount_cup.toFixed(2)} CUP)</span>` : '';
+                        const timeStr = d.processed_at ? new Date(d.processed_at).toLocaleString() : '';
+                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center">
+                            <div>
+                                <span>${escapeHTML(d.user_name)} ${d.username ? '@'+escapeHTML(d.username) : ''}</span>
+                                <span class="text-gray-500 text-xs ml-2">${timeStr}</span>
+                            </div>
+                            <span class="${d.currency === 'USD' ? 'text-yellow-300' : 'text-cyan-300'} font-medium">${d.amount.toFixed(2)} ${d.currency}${cupLabel}</span>
                         </div>`;
                     }
                     html += `</div>`;
@@ -4089,12 +4131,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (data.withdrawals.length === 0) {
                     html += '<p class="text-gray-500 text-sm">Sin retiros procesados.</p>';
                 } else {
-                    html += `<div class="max-h-48 overflow-y-auto space-y-1">`;
+                    html += `<div class="max-h-64 overflow-y-auto space-y-1">`;
                     for (const w of data.withdrawals) {
-                        const cupLabel = w.currency === 'USD' ? '' : `<span class="text-gray-400 ml-1">(${w.amount_cup.toFixed(2)} CUP)</span>`;
-                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between">
-                            <span>${escapeHTML(w.user_name)} ${w.username ? '@'+escapeHTML(w.username) : ''}</span>
-                            <span class="${w.currency === 'USD' ? 'text-yellow-300' : 'text-pink-300'}">${w.amount.toFixed(2)} ${w.currency}${cupLabel}</span>
+                        const cupLabel = w.currency !== 'CUP' ? `<span class="text-gray-400 ml-1">(${w.amount_cup.toFixed(2)} CUP)</span>` : '';
+                        const timeStr = w.processed_at ? new Date(w.processed_at).toLocaleString() : '';
+                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center">
+                            <div>
+                                <span>${escapeHTML(w.user_name)} ${w.username ? '@'+escapeHTML(w.username) : ''}</span>
+                                <span class="text-gray-500 text-xs ml-2">${timeStr}</span>
+                            </div>
+                            <span class="${w.currency === 'USD' ? 'text-yellow-300' : 'text-pink-300'} font-medium">${w.amount.toFixed(2)} ${w.currency}${cupLabel}</span>
                         </div>`;
                     }
                     html += `</div>`;
@@ -4106,6 +4152,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 console.error('Error en renderSubadminDetailView:', e);
                 adminViewContainer.innerHTML = `<p class="text-red-400">Error al cargar detalle: ${e.message}. <button onclick="renderSubadminDetailView(${telegramId})" class="underline text-cyan-400 ml-2">Reintentar</button></p>`;
             }
+        };
+
+        window.applySubadminFilter = (telegramId) => {
+            const start_date = document.getElementById('filterStartDate')?.value || '';
+            const end_date = document.getElementById('filterEndDate')?.value || '';
+            const start_time = document.getElementById('filterStartTime')?.value || '';
+            const end_time = document.getElementById('filterEndTime')?.value || '';
+            renderSubadminDetailView(telegramId, { start_date, end_date, start_time, end_time });
         };
 
         adminNavBtns.forEach(btn => {
@@ -4127,6 +4181,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 else if (view === 'deleteWithdraw') renderDeleteWithdrawView();
                 else if (view === 'setRate') renderSetRateView();
                 else if (view === 'setPrices') renderSetPricesView();
+                else if (view === 'subadminStats') renderSubadminStatsView();
                 else if (view === 'viewData') renderViewDataView();
                 else if (view === 'pendingRequests') renderPendingRequestsView();
                 else if (view === 'setBonus') renderSetBonusView();
@@ -4737,7 +4792,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     body: JSON.stringify({ userId: currentUser.telegram_id })
                 });
                 if (res.ok) {
-                    iziToast.success({ message: 'Usuario baneado.' });
+                    iziToast.success({ message: 'Usuario baneado correctamente.' });
                     adminModal.classList.add('hidden');
                     renderManageUsersView();
                 } else {
