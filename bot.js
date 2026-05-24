@@ -1130,7 +1130,7 @@ function getAllowedHours(lotteryKey) {
             emoji: '🦩',
             slots: [
                 { name: '🌅 Mañana', start: 9, end: 13.25 },
-                { name: '🌙 Noche',  start: 14, end: 21.25 }
+                { name: '🌙 Noche',  start: 15, end: 21.25 }
             ]
         },
         georgia: {
@@ -1138,7 +1138,7 @@ function getAllowedHours(lotteryKey) {
             emoji: '🍑',
             slots: [
                 { name: '🌅 Mañana', start: 9, end: 12.25 },
-                { name: '☀️ Tarde',  start: 14, end: 18.75 },
+                { name: '☀️ Tarde',  start: 15, end: 18.75 },
                 { name: '🌙 Noche',  start: 20, end: 23.25 }
             ]
         },

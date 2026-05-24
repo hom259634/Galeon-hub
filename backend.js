@@ -4292,9 +4292,44 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
         depQuery = depQuery.order('processed_at', { ascending: false }).limit(100);
         wdQuery = wdQuery.order('processed_at', { ascending: false }).limit(100);
 
-        const [depositsRes, withdrawalsRes, userRes] = await Promise.all([
+        // Rejected queries
+        let depRejQuery = supabase.from('deposit_requests')
+            .select(`id, user_id, amount, currency, created_at, processed_at,
+                users (first_name, username)`)
+            .eq('processed_by', telegramId)
+            .eq('status', 'rejected');
+
+        let wdRejQuery = supabase.from('withdraw_requests')
+            .select(`id, user_id, amount, currency, created_at, processed_at,
+                users (first_name, username)`)
+            .eq('processed_by', telegramId)
+            .eq('status', 'rejected');
+
+        if (start_date && end_date) {
+            const startISO = `${start_date}T00:00:00.000Z`;
+            const endISO = `${end_date}T23:59:59.999Z`;
+            depRejQuery = depRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+            wdRejQuery = wdRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+        } else if (start_date) {
+            const startISO = `${start_date}T00:00:00.000Z`;
+            const endISO = `${start_date}T23:59:59.999Z`;
+            depRejQuery = depRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+            wdRejQuery = wdRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+        } else if (end_date) {
+            const startISO = `${end_date}T00:00:00.000Z`;
+            const endISO = `${end_date}T23:59:59.999Z`;
+            depRejQuery = depRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+            wdRejQuery = wdRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+        }
+
+        depRejQuery = depRejQuery.order('processed_at', { ascending: false }).limit(100);
+        wdRejQuery = wdRejQuery.order('processed_at', { ascending: false }).limit(100);
+
+        const [depositsRes, withdrawalsRes, depRejRes, wdRejRes, userRes] = await Promise.all([
             depQuery,
             wdQuery,
+            depRejQuery,
+            wdRejQuery,
             supabase.from('users')
                 .select('first_name, username')
                 .eq('telegram_id', telegramId)
@@ -4326,6 +4361,30 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
             processed_at: w.processed_at
         }));
 
+        let rejectedDeposits = (depRejRes.data || []).map(d => ({
+            id: d.id,
+            user_id: d.user_id,
+            user_name: d.users?.first_name || 'Desconocido',
+            username: d.users?.username,
+            amount: parseFloat(d.amount) || 0,
+            amount_cup: Math.round(((d.currency === 'CUP' ? (parseFloat(d.amount) || 0) : (parseFloat(d.amount) || 0) * (rateMap[d.currency?.toLowerCase()] || 0))) * 100) / 100,
+            currency: d.currency,
+            processed_at: d.processed_at,
+            type: 'deposito'
+        }));
+
+        let rejectedWithdrawals = (wdRejRes.data || []).map(w => ({
+            id: w.id,
+            user_id: w.user_id,
+            user_name: w.users?.first_name || 'Desconocido',
+            username: w.users?.username,
+            amount: parseFloat(w.amount) || 0,
+            amount_cup: Math.round(((w.currency === 'CUP' ? (parseFloat(w.amount) || 0) : (parseFloat(w.amount) || 0) * (rateMap[w.currency?.toLowerCase()] || 0))) * 100) / 100,
+            currency: w.currency,
+            processed_at: w.processed_at,
+            type: 'retiro'
+        }));
+
         // Apply time filter in memory (converts Cuba time to UTC for DB comparison)
         function filterByTime(items, startTime, endTime) {
             if (!startTime && !endTime) return items;
@@ -4350,6 +4409,15 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
 
         formattedDeposits = filterByTime(formattedDeposits, start_time, end_time);
         formattedWithdrawals = filterByTime(formattedWithdrawals, start_time, end_time);
+        rejectedDeposits = filterByTime(rejectedDeposits, start_time, end_time);
+        rejectedWithdrawals = filterByTime(rejectedWithdrawals, start_time, end_time);
+
+        // Combine rejected items sorted by processed_at
+        const allRejected = [...rejectedDeposits, ...rejectedWithdrawals].sort((a, b) => {
+            const da = a.processed_at ? new Date(a.processed_at) : new Date(0);
+            const db = b.processed_at ? new Date(b.processed_at) : new Date(0);
+            return db - da;
+        });
 
         // Totals
         const totalDepositAmount = formattedDeposits.reduce((sum, d) => sum + d.amount, 0);
@@ -4357,19 +4425,30 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
         const totalWithdrawAmount = formattedWithdrawals.reduce((sum, w) => sum + w.amount, 0);
         const totalWithdrawCUP = formattedWithdrawals.reduce((sum, w) => sum + w.amount_cup, 0);
 
+        // Separate CUP and USD totals
+        const depositCupTotal = formattedDeposits.filter(d => d.currency === 'CUP').reduce((sum, d) => sum + d.amount, 0);
+        const depositUsdTotal = formattedDeposits.filter(d => d.currency === 'USD').reduce((sum, d) => sum + d.amount, 0);
+        const withdrawCupTotal = formattedWithdrawals.filter(w => w.currency === 'CUP').reduce((sum, w) => sum + w.amount, 0);
+        const withdrawUsdTotal = formattedWithdrawals.filter(w => w.currency === 'USD').reduce((sum, w) => sum + w.amount, 0);
+
         res.json({
             telegram_id: telegramId,
             first_name: userRes.data?.first_name || 'Desconocido',
             username: userRes.data?.username,
             deposits: formattedDeposits,
             withdrawals: formattedWithdrawals,
+            rejected: allRejected,
             totals: {
                 deposit_count: formattedDeposits.length,
                 deposit_amount_total: Math.round(totalDepositAmount * 100) / 100,
                 deposit_cup_total: Math.round(totalDepositCUP * 100) / 100,
+                deposit_cup: Math.round(depositCupTotal * 100) / 100,
+                deposit_usd: Math.round(depositUsdTotal * 100) / 100,
                 withdraw_count: formattedWithdrawals.length,
                 withdraw_amount_total: Math.round(totalWithdrawAmount * 100) / 100,
-                withdraw_cup_total: Math.round(totalWithdrawCUP * 100) / 100
+                withdraw_cup_total: Math.round(totalWithdrawCUP * 100) / 100,
+                withdraw_cup: Math.round(withdrawCupTotal * 100) / 100,
+                withdraw_usd: Math.round(withdrawUsdTotal * 100) / 100
             }
         });
     } catch (e) {
