@@ -566,7 +566,7 @@
                         <button data-admin-view="userManager" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-user-cog mr-1"></i>Estadísticas de Usuarios</button>
                         <button data-admin-view="manageUsers" class="admin-nav-btn bg-emerald-600/80 p-3 rounded-xl hover:bg-emerald-700"><i class="fas fa-user-edit mr-1"></i> Gestión de Usuarios</button>
                         <button data-admin-view="roleManager" class="admin-nav-btn bg-fuchsia-600/80 p-3 rounded-xl hover:bg-fuchsia-700"><i class="fas fa-user-shield mr-1"></i> Designación de Admins</button>
-                        <button data-admin-view="subadminStats" class="admin-nav-btn bg-orange-600/80 p-3 rounded-xl hover:bg-orange-700"><i class="fas fa-user-shield mr-1"></i> Subadmins</button>
+                        <button data-admin-view="subadminStats" class="admin-nav-btn bg-orange-600/80 p-3 rounded-xl hover:bg-orange-700"><i class="fas fa-user-shield mr-1"></i> Actividad de Subadmins</button>
                         <button data-admin-view="pendingRequests" class="admin-nav-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700"><i class="fas fa-clock mr-1"></i> Solicitudes Pendientes</button>
                         <button data-admin-view="viewData" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-eye mr-1"></i> Ver Datos</button>
                         
@@ -630,11 +630,11 @@
         const LOTTERY_SCHEDULES = {
             'Florida': [
                 { name: '🌅 Mañana', start: 9, end: 13.25 },
-                { name: '🌙 Noche', start: 14, end: 21.25 }
+                { name: '🌙 Noche', start: 15, end: 21.25 }
             ],
             'Georgia': [
                 { name: '🌅 Mañana', start: 9, end: 12.25 },
-                { name: '☀️ Tarde', start: 14, end: 18.75 },
+                { name: '☀️ Tarde', start: 15, end: 18.75 },
                 { name: '🌙 Noche', start: 20, end: 23.25 }
             ],
             'Nueva York': [
@@ -4052,7 +4052,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }
 
         window.renderSubadminDetailView = async (telegramId, filters = {}) => {
-            adminViewContainer.innerHTML = '<div class="loader"></div> Cargando detalle...';
+            adminViewContainer.innerHTML = '<div class="loader"></div> Cargando detalles...';
             try {
                 const params = new URLSearchParams();
                 if (filters.start_date) params.set('start_date', filters.start_date);
@@ -4067,15 +4067,57 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 const today = new Date().toISOString().split('T')[0];
 
-                let html = `<div class="flex flex-wrap gap-2 mb-4 items-center">
-                    <button onclick="renderSubadminStatsView()" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm">
+                function timeTo12h(t) {
+                    if (!t) return { h: '', m: 0, p: 'AM' };
+                    const [hh, mm] = t.split(':').map(Number);
+                    if (isNaN(hh) || isNaN(mm)) return { h: 1, m: 0, p: 'AM' };
+                    const p = hh >= 12 ? 'PM' : 'AM';
+                    const h12 = hh % 12 || 12;
+                    const m5 = Math.round(mm / 5) * 5;
+                    return { h: h12, m: m5 >= 60 ? 55 : m5, p };
+                }
+                const st = timeTo12h(filters.start_time);
+                const et = timeTo12h(filters.end_time);
+
+                let html = `<div class="mb-4">
+                    <button onclick="renderSubadminStatsView()" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
                         <i class="fas fa-arrow-left mr-1"></i> Volver
                     </button>
-                    <input type="date" id="filterStartDate" value="${filters.start_date || ''}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm">
-                    <input type="date" id="filterEndDate" value="${filters.end_date || ''}" max="${today}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm">
-                    <input type="time" id="filterStartTime" value="${filters.start_time || ''}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm">
-                    <input type="time" id="filterEndTime" value="${filters.end_time || ''}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm">
-                    <button onclick="applySubadminFilter(${telegramId})" class="bg-cyan-600 px-4 py-1.5 rounded-lg text-sm hover:bg-cyan-700"><i class="fas fa-search mr-1"></i>Filtrar</button>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                        <div>
+                            <label class="text-xs text-gray-400 block mb-1">Desde la fecha:</label>
+                            <input type="date" id="filterStartDate" value="${filters.start_date || ''}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm w-full">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400 block mb-1">Hasta la fecha:</label>
+                            <input type="date" id="filterEndDate" value="${filters.end_date || ''}" max="${today}" class="bg-gray-700 text-white px-2 py-1.5 rounded-lg text-sm w-full">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400 block mb-1">Desde la hora:</label>
+                            <div class="flex gap-1">
+                                <select id="filterStartHour" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center"><option value=""${st.h === '' ? ' selected' : ''}>--</option>${hourOptions(st.h)}</select>
+                                <span class="text-white self-center">:</span>
+                                <select id="filterStartMin" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">${minOptions(st.m)}</select>
+                                <select id="filterStartAmPm" class="w-16 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">
+                                    <option value="AM"${st.p === 'AM' ? ' selected' : ''}>AM</option>
+                                    <option value="PM"${st.p === 'PM' ? ' selected' : ''}>PM</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400 block mb-1">Hasta la hora:</label>
+                            <div class="flex gap-1">
+                                <select id="filterEndHour" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center"><option value=""${et.h === '' ? ' selected' : ''}>--</option>${hourOptions(et.h)}</select>
+                                <span class="text-white self-center">:</span>
+                                <select id="filterEndMin" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">${minOptions(et.m)}</select>
+                                <select id="filterEndAmPm" class="w-16 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">
+                                    <option value="AM"${et.p === 'AM' ? ' selected' : ''}>AM</option>
+                                    <option value="PM"${et.p === 'PM' ? ' selected' : ''}>PM</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <button onclick="applySubadminFilter(${telegramId})" class="bg-cyan-600 px-4 py-1.5 rounded-lg text-sm hover:bg-cyan-700 mt-2"><i class="fas fa-search mr-1"></i>Filtrar</button>
                 </div>
                 <h4 class="text-xl font-bold mb-1 flex items-center"><i class="fas fa-user-shield text-orange-400 mr-2"></i>${escapeHTML(data.first_name)} ${data.username ? '@'+escapeHTML(data.username) : ''}</h4>
                 <p class="text-sm text-gray-400 mb-4">ID: ${data.telegram_id}</p>`;
@@ -4083,14 +4125,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 // Totals
                 if (data.totals) {
                     const t = data.totals;
-                    html += `<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                    html += `<div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
                         <div class="bg-gray-800/60 p-3 rounded-xl text-center">
                             <p class="text-xs text-gray-400">📥 Depósitos</p>
                             <p class="text-lg font-bold text-cyan-300">${t.deposit_count}</p>
                         </div>
                         <div class="bg-gray-800/60 p-3 rounded-xl text-center">
                             <p class="text-xs text-gray-400">💰 Total Depósitos</p>
-                            <p class="text-lg font-bold text-green-300">${t.deposit_cup_total.toFixed(2)} CUP</p>
+                            <p class="text-lg font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
                         </div>
                         <div class="bg-gray-800/60 p-3 rounded-xl text-center">
                             <p class="text-xs text-gray-400">📤 Retiros</p>
@@ -4098,7 +4140,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         </div>
                         <div class="bg-gray-800/60 p-3 rounded-xl text-center">
                             <p class="text-xs text-gray-400">💰 Total Retiros</p>
-                            <p class="text-lg font-bold text-red-300">${t.withdraw_cup_total.toFixed(2)} CUP</p>
+                            <p class="text-lg font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
                         </div>
                     </div>`;
                 }
@@ -4147,6 +4189,44 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
                 html += `</div>`;
 
+                // Denegaciones
+                const rej = data.rejected || [];
+                html += `<div class="mb-4">
+                    <button onclick="toggleDenegaciones(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
+                        <span class="text-red-400 font-semibold flex items-center"><i class="fas fa-ban mr-2"></i> Denegaciones (${rej.length})</span>
+                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                    </button>
+                    <div class="denegaciones-body hidden mt-2">`;
+                if (rej.length === 0) {
+                    html += '<p class="text-gray-500 text-sm">No hay denegaciones de depósitos ni retiros.</p>';
+                } else {
+                    html += `<div class="max-h-72 overflow-y-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-left text-gray-400 border-b border-gray-600">
+                                    <th class="pb-2 pr-2">Usuario</th>
+                                    <th class="pb-2 pr-2">Tipo</th>
+                                    <th class="pb-2 pr-2">Monto</th>
+                                    <th class="pb-2">Fecha</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+                    for (const r of rej) {
+                        const timeStr = r.processed_at ? new Date(r.processed_at).toLocaleString() : '';
+                        const typeIcon = r.type === 'deposito' ? '📥' : '📤';
+                        const typeColor = r.type === 'deposito' ? 'text-cyan-300' : 'text-pink-300';
+                        const amtColor = r.currency === 'USD' ? 'text-yellow-300' : 'text-gray-200';
+                        html += `<tr class="border-b border-gray-700/50">
+                            <td class="py-2 pr-2">${escapeHTML(r.user_name)} ${r.username ? '@'+escapeHTML(r.username) : ''}</td>
+                            <td class="py-2 pr-2 ${typeColor}">${typeIcon} ${r.type}</td>
+                            <td class="py-2 pr-2 ${amtColor}">${r.amount.toFixed(2)} ${r.currency}</td>
+                            <td class="py-2 text-gray-400 text-xs">${timeStr}</td>
+                        </tr>`;
+                    }
+                    html += `</tbody></table></div>`;
+                }
+                html += `</div></div>`;
+
                 adminViewContainer.innerHTML = html;
             } catch (e) {
                 console.error('Error en renderSubadminDetailView:', e);
@@ -4157,9 +4237,28 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         window.applySubadminFilter = (telegramId) => {
             const start_date = document.getElementById('filterStartDate')?.value || '';
             const end_date = document.getElementById('filterEndDate')?.value || '';
-            const start_time = document.getElementById('filterStartTime')?.value || '';
-            const end_time = document.getElementById('filterEndTime')?.value || '';
+            const startHourVal = document.getElementById('filterStartHour')?.value;
+            const startMin = parseInt(document.getElementById('filterStartMin')?.value) || 0;
+            const startAmPm = document.getElementById('filterStartAmPm')?.value || 'AM';
+            const endHourVal = document.getElementById('filterEndHour')?.value;
+            const endMin = parseInt(document.getElementById('filterEndMin')?.value) || 0;
+            const endAmPm = document.getElementById('filterEndAmPm')?.value || 'AM';
+            const to24 = (h, period) => (period === 'PM' && h !== 12 ? h + 12 : period === 'AM' && h === 12 ? 0 : h);
+            const start_time = startHourVal ? `${String(to24(parseInt(startHourVal), startAmPm)).padStart(2, '0')}:${String(startMin).padStart(2, '0')}` : '';
+            const end_time = endHourVal ? `${String(to24(parseInt(endHourVal), endAmPm)).padStart(2, '0')}:${String(endMin).padStart(2, '0')}` : '';
             renderSubadminDetailView(telegramId, { start_date, end_date, start_time, end_time });
+        };
+
+        window.toggleDenegaciones = (btn) => {
+            const body = btn.nextElementSibling;
+            const icon = btn.querySelector('.fa-chevron-down');
+            if (body.classList.contains('hidden')) {
+                body.classList.remove('hidden');
+                icon.style.transform = 'rotate(180deg)';
+            } else {
+                body.classList.add('hidden');
+                icon.style.transform = 'rotate(0deg)';
+            }
         };
 
         adminNavBtns.forEach(btn => {
@@ -4499,7 +4598,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Saldo actualizado correctamente' });
                     adminModal.classList.add('hidden');
-                    renderManageUsersView();
+                    location.reload();
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error al actualizar' });
@@ -4794,7 +4893,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario baneado correctamente.' });
                     adminModal.classList.add('hidden');
-                    renderManageUsersView();
+                    location.reload();
                 } else {
                     let errMsg = 'Error al banear';
                     try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
@@ -4824,7 +4923,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario desbaneado correctamente.' });
                     adminModal.classList.add('hidden');
-                    renderManageUsersView();
+                    location.reload();
                 } else {
                     let errMsg = 'Error al desbanear';
                     try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
@@ -4854,7 +4953,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario eliminado correctamente. Podrá registrarse de nuevo.' });
                     adminModal.classList.add('hidden');
-                    renderManageUsersView();
+                    location.reload();
                 } else {
                     let errMsg = 'Error al eliminar';
                     try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
