@@ -484,7 +484,7 @@
                         </select>
                         <div id="withdrawMethodLimits" class="text-xs text-gray-400 mb-2"></div>
                         <input type="number" id="withdrawAmount" step="0.01" min="0" placeholder="Monto a retirar" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500 mb-3">
-                        <p class="text-sm text-gray-300 mb-2">Saldo disponible: <span id="withdrawAvailableBalance">0.00</span> <span id="withdrawCurrency">CUP</span></p>
+                        <p class="text-sm text-gray-300 mb-2">Saldo disponible: <span id="withdrawAvailableBalance">-.--</span> <span id="withdrawCurrency">CUP</span></p>
                         
                         <!-- Campos dinámicos para datos de cuenta -->
                         <div id="withdrawAccountFields" class="space-y-3 mt-3"></div>
@@ -3419,7 +3419,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                                 <p><strong>Usuario:</strong> ${escapeHTML(w.user_name)} (${w.user_id})</p>
                                                 <p><strong>Monto:</strong> ${w.amount} ${w.currency}</p>
                                                 <p><strong>Método:</strong> ${escapeHTML(w.method_name)}</p>
-                                                <p><strong>Cuenta:</strong> ${escapeHTML(w.account_info)}</p>
+                                                <p>${escapeHTML(w.account_info)}</p>
                                             </div>
                                             <div class="flex gap-2">
                                                 <button onclick="handlePending('withdraw', ${w.id}, 'approve', this)" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
@@ -4016,20 +4016,23 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const stats = await res.json();
 
                 if (stats.length === 0) {
-                    adminViewContainer.innerHTML = '<p class="text-gray-400">No hay subadmins registrados.</p>';
+                    adminViewContainer.innerHTML = '<p class="text-gray-400">No hay sub-admins registrados.</p>';
                     return;
                 }
 
-                let html = `<h4 class="text-xl font-bold mb-4 flex items-center"><i class="fas fa-chart-bar text-orange-400 mr-2"></i>Actividad de Sub-admins</h4>
+                let html = `<button onclick="adminViewContainer.innerHTML = ''" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
+                        <i class="fas fa-arrow-left mr-1"></i> Volver
+                    </button>
+                    <h4 class="text-xl font-bold mb-4 flex items-center"><i class="fas fa-chart-bar text-orange-400 mr-2"></i>Actividad de Sub-admins</h4>
                     <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead>
                             <tr class="text-left text-gray-400 border-b border-gray-600">
                                 <th class="pb-2 pr-2">Admin</th>
-                                <th class="pb-2 pr-2 text-center">📥 Depósitos</th>
+                                <th class="pb-2 pr-1 text-center whitespace-nowrap">📥 Depósitos</th>
                                 <th class="pb-2 pr-2 text-center">💰 Total CUP</th>
                                 <th class="pb-2 pr-2 text-center">💵 Total USD</th>
-                                <th class="pb-2 pr-2 text-center">📤 Retiros</th>
+                                <th class="pb-2 pr-1 text-center whitespace-nowrap">📤 Retiros</th>
                                 <th class="pb-2 pr-2 text-center">💰 Total CUP</th>
                                 <th class="pb-2 text-center">💵 Total USD</th>
                             </tr>
@@ -4043,10 +4046,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             ${escapeHTML(displayName)}
                             <span class="text-xs text-gray-500 block">${escapeHTML(usernameStr)}</span>
                         </td>
-                        <td class="py-2 pr-2 text-center text-cyan-300 font-bold">${s.deposit_count}</td>
+                        <td class="py-2 pr-1 text-center text-cyan-300 font-bold whitespace-nowrap">${s.deposit_count}</td>
                         <td class="py-2 pr-2 text-center text-gray-200">${s.deposit_total_cup.toFixed(2)}</td>
                         <td class="py-2 pr-2 text-center text-yellow-300">${s.deposit_total_usd.toFixed(2)}</td>
-                        <td class="py-2 pr-2 text-center text-pink-300 font-bold">${s.withdraw_count}</td>
+                        <td class="py-2 pr-1 text-center text-pink-300 font-bold whitespace-nowrap">${s.withdraw_count}</td>
                         <td class="py-2 pr-2 text-center text-gray-200">${s.withdraw_total_cup.toFixed(2)}</td>
                         <td class="py-2 text-center text-yellow-300">${s.withdraw_total_usd.toFixed(2)}</td>
                     </tr>`;
@@ -4078,7 +4081,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 function formatTime12h(dateStr) {
                     if (!dateStr) return '';
                     try {
-                        return new Date(dateStr).toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, month: 'numeric', day: 'numeric', year: 'numeric' });
+                        return new Date(dateStr).toLocaleString('es-CU', { hour: 'numeric', minute: '2-digit', hour12: true, day: 'numeric', month: 'numeric', year: 'numeric' });
                     } catch (_) { return ''; }
                 }
 
@@ -4094,7 +4097,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const et = timeTo12h(filters.end_time);
 
                 let html = `<div class="mb-4">
-                    <button onclick="adminViewContainer.innerHTML = ''" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
+                    <button onclick="renderSubadminStatsView()" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
                         <i class="fas fa-arrow-left mr-1"></i> Volver
                     </button>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
@@ -4141,7 +4144,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const t = data.totals;
                     html += `<div class="grid grid-cols-2 gap-2 mb-4">
                         <div class="flex gap-2 col-span-2 md:col-span-2">
-                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-1">
+                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-none">
                                 <p class="text-xs text-gray-400">📥 Depósitos</p>
                                 <p class="text-lg font-bold text-cyan-300">${t.deposit_count}</p>
                             </div>
@@ -4151,7 +4154,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                         </div>
                         <div class="flex gap-2 col-span-2 md:col-span-2">
-                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-1">
+                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-none">
                                 <p class="text-xs text-gray-400">📤 Retiros</p>
                                 <p class="text-lg font-bold text-pink-300">${t.withdraw_count}</p>
                             </div>
@@ -4164,16 +4167,24 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
 
                 // Depósitos
+                const allCurrencies = ['CUP', 'USD', 'USDT', 'TRX', 'MLC'];
+                const curColor = c => c === 'CUP' ? 'bg-green-600' : c === 'USD' ? 'bg-yellow-600' : c === 'USDT' ? 'bg-orange-600' : c === 'TRX' ? 'bg-red-600' : 'bg-purple-600';
                 html += `<div class="mb-6">
                     <h5 class="text-cyan-300 font-semibold mb-2 flex items-center"><i class="fas fa-arrow-down mr-1"></i> Depósitos aprobados (${data.deposits.length})</h5>`;
                 if (data.deposits.length === 0) {
                     html += '<p class="text-gray-500 text-sm">Sin depósitos procesados.</p>';
                 } else {
-                    html += `<div class="max-h-64 overflow-y-auto space-y-1">`;
+                    html += `<div class="flex flex-wrap gap-1 mb-3">
+                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="all" onclick="filterCurrency('deposits','all')">Todos</button>`;
+                    for (const cur of allCurrencies) {
+                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="${cur}" onclick="filterCurrency('deposits','${cur}')">${cur}</button>`;
+                    }
+                    html += `</div>`;
+                    html += `<div id="depositsList" class="max-h-64 overflow-y-auto space-y-1">`;
                     for (const d of data.deposits) {
                         const cupLabel = d.currency !== 'CUP' ? `<span class="text-gray-400 ml-1">(${d.amount_cup.toFixed(2)} CUP)</span>` : '';
                         const timeStr = formatTime12h(d.processed_at);
-                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center">
+                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center" data-currency="${d.currency}">
                             <div>
                                 <span>${escapeHTML(d.user_name)} ${d.username ? '@'+escapeHTML(d.username) : ''}</span>
                                 <span class="text-gray-500 text-xs ml-2">${timeStr}</span>
@@ -4191,11 +4202,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (data.withdrawals.length === 0) {
                     html += '<p class="text-gray-500 text-sm">Sin retiros procesados.</p>';
                 } else {
-                    html += `<div class="max-h-64 overflow-y-auto space-y-1">`;
+                    html += `<div class="flex flex-wrap gap-1 mb-3">
+                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="all" onclick="filterCurrency('withdrawals','all')">Todos</button>`;
+                    for (const cur of allCurrencies) {
+                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="${cur}" onclick="filterCurrency('withdrawals','${cur}')">${cur}</button>`;
+                    }
+                    html += `</div>`;
+                    html += `<div id="withdrawalsList" class="max-h-64 overflow-y-auto space-y-1">`;
                     for (const w of data.withdrawals) {
                         const cupLabel = w.currency !== 'CUP' ? `<span class="text-gray-400 ml-1">(${w.amount_cup.toFixed(2)} CUP)</span>` : '';
                         const timeStr = formatTime12h(w.processed_at);
-                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center">
+                        html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center" data-currency="${w.currency}">
                             <div>
                                 <span>${escapeHTML(w.user_name)} ${w.username ? '@'+escapeHTML(w.username) : ''}</span>
                                 <span class="text-gray-500 text-xs ml-2">${timeStr}</span>
@@ -4277,6 +4294,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 body.classList.add('hidden');
                 icon.style.transform = 'rotate(0deg)';
             }
+        };
+
+        window.filterCurrency = (section, currency) => {
+            document.querySelectorAll(`[data-section="${section}"]`).forEach(b => {
+                b.classList.remove('active', 'bg-emerald-600');
+            });
+            const clicked = document.querySelector(`[data-section="${section}"][data-filter="${currency}"]`);
+            if (clicked) clicked.classList.add('active', 'bg-emerald-600');
+            const listId = section === 'deposits' ? 'depositsList' : 'withdrawalsList';
+            document.querySelectorAll(`#${listId} > div`).forEach(item => {
+                item.style.display = (currency === 'all' || item.dataset.currency === currency) ? '' : 'none';
+            });
         };
 
         adminNavBtns.forEach(btn => {
@@ -4438,21 +4467,19 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     banned: 'Baneados'
                 };
 
-                // Función de filtrado
                 function applyFilter(filter) {
-                    const searchText = document.getElementById('userSearchInput').value.trim().toLowerCase();
-                    const cards = document.querySelectorAll('#usersGrid .user-card');
-                    const noMsg = document.getElementById('noUsersMessage');
+                    const searchText = container.querySelector('#userSearchInput')?.value.trim().toLowerCase() || '';
+                    const cards = container.querySelectorAll('#usersGrid .user-card');
+                    const noMsg = container.querySelector('#noUsersMessage');
+                    if (!noMsg) return;
                     cards.forEach(card => {
                         const userId = parseInt(card.dataset.userid);
                         const user = window._allUsers.find(u => u.telegram_id === userId);
                         if (!user) { card.style.display = 'none'; return; }
 
-                        // Filtro de búsqueda por texto
                         const textMatch = card.textContent.toLowerCase().includes(searchText);
                         if (!textMatch) { card.style.display = 'none'; return; }
 
-                        // Filtro por categoría
                         let categoryMatch = true;
                         switch (filter) {
                             case 'all': break;
@@ -4509,26 +4536,31 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     }
                 }
 
-                // Eventos de búsqueda
-                document.getElementById('searchUserBtn2').addEventListener('click', () => {
-                    const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
-                    applyFilter(activeFilter);
-                });
-                document.getElementById('userSearchInput').addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
-                        applyFilter(activeFilter);
-                    }
-                });
+                window._manageUsersApplyFilter = applyFilter;
 
-                // Eventos de filtros
-                document.querySelectorAll('.filter-btn').forEach(btn => {
-                    btn.addEventListener('click', function() {
-                        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active', 'bg-emerald-600'));
-                        this.classList.add('active', 'bg-emerald-600');
-                        applyFilter(this.dataset.filter);
+                if (!container.dataset.muvEvents) {
+                    container.dataset.muvEvents = '1';
+                    container.addEventListener('click', (e) => {
+                        const filterBtn = e.target.closest('.filter-btn');
+                        if (filterBtn && window._manageUsersApplyFilter) {
+                            container.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active', 'bg-emerald-600'));
+                            filterBtn.classList.add('active', 'bg-emerald-600');
+                            window._manageUsersApplyFilter(filterBtn.dataset.filter);
+                            return;
+                        }
+                        const searchBtn = e.target.closest('#searchUserBtn2');
+                        if (searchBtn && window._manageUsersApplyFilter) {
+                            const activeFilter = container.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+                            window._manageUsersApplyFilter(activeFilter);
+                        }
                     });
-                });
+                    container.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' && e.target.closest('#userSearchInput') && window._manageUsersApplyFilter) {
+                            const activeFilter = container.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+                            window._manageUsersApplyFilter(activeFilter);
+                        }
+                    });
+                }
             } catch (e) {
                 console.error('Error en renderManageUsersView:', e);
                 container.innerHTML = `<p class="text-red-400">Error al cargar usuarios: ${e.message}. <button onclick="renderManageUsersView()" class="underline text-cyan-400 ml-2">Reintentar</button></p>`;
@@ -4745,10 +4777,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     } else {
                         depositsHtml += '<div class="space-y-1">';
                         deposits.forEach(d => {
-                            const date = new Date(d.created_at).toLocaleString();
+                            const date = new Date(d.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                             depositsHtml += `
                                 <div class="bg-gray-800/40 p-2 rounded text-sm flex justify-between">
                                     <span>${d.amount} ${d.currency} · ${escapeHTML(d.deposit_methods?.name || '?')}</span>
+                                    <span class="text-gray-400 text-xs">${date}</span>
                                     <span class="${d.status === 'approved' ? 'text-green-400' : d.status === 'rejected' ? 'text-red-400' : 'text-yellow-400'}">${d.status}</span>
                                 </div>`;
                         });
@@ -4763,10 +4796,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     } else {
                         withdrawsHtml += '<div class="space-y-1">';
                         withdraws.forEach(w => {
-                            const date = new Date(w.created_at).toLocaleString();
+                            const date = new Date(w.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                             withdrawsHtml += `
                                 <div class="bg-gray-800/40 p-2 rounded text-sm flex justify-between">
                                     <span>${w.amount} ${w.currency} · ${escapeHTML(w.withdraw_methods?.name || '?')}</span>
+                                    <span class="text-gray-400 text-xs">${date}</span>
                                     <span class="${w.status === 'approved' ? 'text-green-400' : w.status === 'rejected' ? 'text-red-400' : 'text-yellow-400'}">${w.status}</span>
                                 </div>`;
                         });
