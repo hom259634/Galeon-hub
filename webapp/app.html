@@ -4139,22 +4139,26 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 // Totals
                 if (data.totals) {
                     const t = data.totals;
-                    html += `<div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-                        <div class="bg-gray-800/60 p-2 rounded-lg text-center">
-                            <p class="text-xs text-gray-400">📥 Depósitos</p>
-                            <p class="text-base font-bold text-cyan-300">${t.deposit_count}</p>
+                    html += `<div class="grid grid-cols-2 gap-2 mb-4">
+                        <div class="flex gap-2 col-span-2 md:col-span-2">
+                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-1">
+                                <p class="text-xs text-gray-400">📥 Depósitos</p>
+                                <p class="text-lg font-bold text-cyan-300">${t.deposit_count}</p>
+                            </div>
+                            <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
+                                <p class="text-xs text-gray-400">💰 Total Depósitos</p>
+                                <p class="text-lg font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
+                            </div>
                         </div>
-                        <div class="bg-gray-800/60 p-2 rounded-lg text-center">
-                            <p class="text-xs text-gray-400">💰 Total Depósitos</p>
-                            <p class="text-sm font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
-                        </div>
-                        <div class="bg-gray-800/60 p-2 rounded-lg text-center">
-                            <p class="text-xs text-gray-400">📤 Retiros</p>
-                            <p class="text-base font-bold text-pink-300">${t.withdraw_count}</p>
-                        </div>
-                        <div class="bg-gray-800/60 p-2 rounded-lg text-center">
-                            <p class="text-xs text-gray-400">💰 Total Retiros</p>
-                            <p class="text-sm font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
+                        <div class="flex gap-2 col-span-2 md:col-span-2">
+                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-1">
+                                <p class="text-xs text-gray-400">📤 Retiros</p>
+                                <p class="text-lg font-bold text-pink-300">${t.withdraw_count}</p>
+                            </div>
+                            <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
+                                <p class="text-xs text-gray-400">💰 Total Retiros</p>
+                                <p class="text-lg font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
+                            </div>
                         </div>
                     </div>`;
                 }
