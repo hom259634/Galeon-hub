@@ -4425,10 +4425,18 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
         const totalWithdrawAmount = formattedWithdrawals.reduce((sum, w) => sum + w.amount, 0);
         const totalWithdrawCUP = formattedWithdrawals.reduce((sum, w) => sum + w.amount_cup, 0);
 
-        // Separate CUP and USD totals
-        const depositCupTotal = formattedDeposits.filter(d => d.currency === 'CUP').reduce((sum, d) => sum + d.amount, 0);
+        // Separate CUP and USD totals (incluye crypto/MLC convertidos a CUP en deposit_cup)
+        const depositCupTotal = formattedDeposits.reduce((sum, d) => {
+            if (d.currency === 'CUP') return sum + d.amount;
+            if (d.currency === 'USD') return sum;
+            return sum + d.amount_cup;
+        }, 0);
         const depositUsdTotal = formattedDeposits.filter(d => d.currency === 'USD').reduce((sum, d) => sum + d.amount, 0);
-        const withdrawCupTotal = formattedWithdrawals.filter(w => w.currency === 'CUP').reduce((sum, w) => sum + w.amount, 0);
+        const withdrawCupTotal = formattedWithdrawals.reduce((sum, w) => {
+            if (w.currency === 'CUP') return sum + w.amount;
+            if (w.currency === 'USD') return sum;
+            return sum + w.amount_cup;
+        }, 0);
         const withdrawUsdTotal = formattedWithdrawals.filter(w => w.currency === 'USD').reduce((sum, w) => sum + w.amount, 0);
 
         res.json({

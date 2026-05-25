@@ -4710,13 +4710,14 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             return;
         }
 
-        const parsed = parseAmountWithCurrency(request.amount);
-        if (!parsed) {
+        const depositAmount = parseFloat(request.amount);
+        const depositCurrency = request.currency;
+        if (isNaN(depositAmount) || depositAmount <= 0) {
             await ctx.answerCbQuery('Monto no válido en la solicitud', { show_alert: true });
             return;
         }
 
-        const amountCUP = await convertToCUP(parsed.amount, parsed.currency);
+        const amountCUP = await convertToCUP(depositAmount, depositCurrency);
 
         const { data: user } = await supabase
             .from('users')
@@ -4740,8 +4741,8 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
 
         let bonusMovedCup = 0;
 
-        if (parsed.currency === 'USD') {
-            const newUsd = (parseFloat(user.usd) || 0) + parsed.amount;
+        if (depositCurrency === 'USD') {
+            const newUsd = (parseFloat(user.usd) || 0) + depositAmount;
             await supabase
                 .from('users')
                 .update({ usd: newUsd, updated_at: new Date() })
@@ -4783,9 +4784,9 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                     request.user_id,
                     buildDepositApprovedMessage({
                         depositedAmountText: request.amount,
-                        creditedAmount: parsed.currency === 'USD' ? parsed.amount : amountCUP,
-                        creditedCurrency: parsed.currency === 'USD' ? 'USD' : 'CUP',
-                        includeUsdFollowup: parsed.currency === 'USD',
+                        creditedAmount: depositCurrency === 'USD' ? depositAmount : amountCUP,
+                        creditedCurrency: depositCurrency === 'USD' ? 'USD' : 'CUP',
+                        includeUsdFollowup: depositCurrency === 'USD',
                         bonusMovedCup,
                         showBonusMovedNotice: isFirstDeposit
                     }),
@@ -4892,12 +4893,17 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
         );
 
         updatePendingNotifications(`withdraw_${requestId}`, `✅ <b>Retiro #${requestId} aprobado</b> por un administrador.`);
-        await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
-        await ctx.reply('✅ Retiro aprobado y saldo debitado correctamente.');
-        await ctx.answerCbQuery();
+        try {
+            await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+            await ctx.reply('✅ Retiro aprobado y saldo debitado correctamente.');
+            await ctx.answerCbQuery();
+        } catch (e2) {
+            console.error('Error en post-aprobación de retiro:', e2.message);
+            try { await ctx.answerCbQuery(); } catch (e3) {}
+        }
     } catch (e) {
         console.error(e);
-        await ctx.answerCbQuery('❌ Error al aprobar', { show_alert: true });
+        try { await ctx.answerCbQuery('❌ Error al aprobar', { show_alert: true }); } catch (e2) {}
     }
 });
 
