@@ -565,8 +565,8 @@
                         <button data-admin-view="transferMins" class="admin-nav-btn bg-teal-400/80 p-3 rounded-xl hover:bg-teal-500"><i class="fas fa-sliders-h mr-1"></i> Mín. Transferencia</button>
                         <button data-admin-view="userManager" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-user-cog mr-1"></i>Estadísticas de Usuarios</button>
                         <button data-admin-view="manageUsers" class="admin-nav-btn bg-emerald-600/80 p-3 rounded-xl hover:bg-emerald-700"><i class="fas fa-user-edit mr-1"></i> Gestión de Usuarios</button>
-                        <button data-admin-view="roleManager" class="admin-nav-btn bg-fuchsia-600/80 p-3 rounded-xl hover:bg-fuchsia-700"><i class="fas fa-user-shield mr-1"></i> Designación de Admins</button>
-                        <button data-admin-view="subadminStats" class="admin-nav-btn bg-orange-600/80 p-3 rounded-xl hover:bg-orange-700"><i class="fas fa-user-shield mr-1"></i> Actividad de Subadmins</button>
+                        <button data-admin-view="roleManager" class="admin-nav-btn bg-fuchsia-600/80 p-3 rounded-xl hover:bg-fuchsia-700"><i class="fas fa-user-shield mr-1"></i> Designación de Sub-admins</button>
+                        <button data-admin-view="subadminStats" class="admin-nav-btn bg-orange-600/80 p-3 rounded-xl hover:bg-orange-700"><i class="fas fa-user-shield mr-1"></i> Actividad de Sub-admins</button>
                         <button data-admin-view="pendingRequests" class="admin-nav-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700"><i class="fas fa-clock mr-1"></i> Solicitudes Pendientes</button>
                         <button data-admin-view="viewData" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-eye mr-1"></i> Ver Datos</button>
                         
@@ -3717,6 +3717,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
             return opts;
         }
+        function minOptionsFull(selected) {
+            let opts = '';
+            for (let i = 0; i < 60; i += 1) {
+                const v = i.toString().padStart(2, '0');
+                opts += `<option value="${i}"${i === selected ? ' selected' : ''}>${v}</option>`;
+            }
+            return opts;
+        }
 
         async function loadFuncionesHorario() {
             const container = document.getElementById('funcionesHorarioContainer');
@@ -3916,7 +3924,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     rolesMap[r.telegram_id].push(r.role);
                 }
 
-                let html = `<h4 class="text-xl font-bold mb-4">👥 Designación de Admins y Privilegios</h4>
+                let html = `<h4 class="text-xl font-bold mb-4">👥 Designación de Sub-admins y Privilegios</h4>
                     <p class="text-sm text-gray-400 mb-4">Selecciona los privilegios para cada usuario. Los cambios se guardan automáticamente.</p>
                     <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -3999,9 +4007,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         };
 
         // ========== VISTA: ACTIVIDAD DE ADMINS ==========
-        async function renderSubadminStatsView() {
+        window.renderSubadminStatsView = async function () {
             if (!isAdmin) return;
-            adminViewContainer.innerHTML = '<div class="loader"></div> Cargando actividad de admins...';
+            adminViewContainer.innerHTML = '<div class="loader"></div> Cargando actividad de Sub-admins...';
             try {
                 const res = await fetch('/api/admin/subadmin-stats');
                 if (!res.ok) throw new Error('Error al cargar');
@@ -4012,7 +4020,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     return;
                 }
 
-                let html = `<h4 class="text-xl font-bold mb-4 flex items-center"><i class="fas fa-chart-bar text-orange-400 mr-2"></i>Actividad de Admins</h4>
+                let html = `<h4 class="text-xl font-bold mb-4 flex items-center"><i class="fas fa-chart-bar text-orange-400 mr-2"></i>Actividad de Sub-admins</h4>
                     <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead>
@@ -4067,20 +4075,26 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 const today = new Date().toISOString().split('T')[0];
 
+                function formatTime12h(dateStr) {
+                    if (!dateStr) return '';
+                    try {
+                        return new Date(dateStr).toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, month: 'numeric', day: 'numeric', year: 'numeric' });
+                    } catch (_) { return ''; }
+                }
+
                 function timeTo12h(t) {
                     if (!t) return { h: '', m: 0, p: 'AM' };
                     const [hh, mm] = t.split(':').map(Number);
                     if (isNaN(hh) || isNaN(mm)) return { h: 1, m: 0, p: 'AM' };
                     const p = hh >= 12 ? 'PM' : 'AM';
                     const h12 = hh % 12 || 12;
-                    const m5 = Math.round(mm / 5) * 5;
-                    return { h: h12, m: m5 >= 60 ? 55 : m5, p };
+                    return { h: h12, m: mm, p };
                 }
                 const st = timeTo12h(filters.start_time);
                 const et = timeTo12h(filters.end_time);
 
                 let html = `<div class="mb-4">
-                    <button onclick="renderSubadminStatsView()" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
+                    <button onclick="adminViewContainer.innerHTML = ''" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
                         <i class="fas fa-arrow-left mr-1"></i> Volver
                     </button>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
@@ -4097,7 +4111,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <div class="flex gap-1">
                                 <select id="filterStartHour" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center"><option value=""${st.h === '' ? ' selected' : ''}>--</option>${hourOptions(st.h)}</select>
                                 <span class="text-white self-center">:</span>
-                                <select id="filterStartMin" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">${minOptions(st.m)}</select>
+                                <select id="filterStartMin" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">${minOptionsFull(st.m)}</select>
                                 <select id="filterStartAmPm" class="w-16 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">
                                     <option value="AM"${st.p === 'AM' ? ' selected' : ''}>AM</option>
                                     <option value="PM"${st.p === 'PM' ? ' selected' : ''}>PM</option>
@@ -4109,7 +4123,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <div class="flex gap-1">
                                 <select id="filterEndHour" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center"><option value=""${et.h === '' ? ' selected' : ''}>--</option>${hourOptions(et.h)}</select>
                                 <span class="text-white self-center">:</span>
-                                <select id="filterEndMin" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">${minOptions(et.m)}</select>
+                                <select id="filterEndMin" class="flex-1 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">${minOptionsFull(et.m)}</select>
                                 <select id="filterEndAmPm" class="w-16 bg-gray-700 text-white px-1 py-1.5 rounded-lg text-sm appearance-none text-center">
                                     <option value="AM"${et.p === 'AM' ? ' selected' : ''}>AM</option>
                                     <option value="PM"${et.p === 'PM' ? ' selected' : ''}>PM</option>
@@ -4125,22 +4139,22 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 // Totals
                 if (data.totals) {
                     const t = data.totals;
-                    html += `<div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                        <div class="bg-gray-800/60 p-3 rounded-xl text-center">
+                    html += `<div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                        <div class="bg-gray-800/60 p-2 rounded-lg text-center">
                             <p class="text-xs text-gray-400">📥 Depósitos</p>
-                            <p class="text-lg font-bold text-cyan-300">${t.deposit_count}</p>
+                            <p class="text-base font-bold text-cyan-300">${t.deposit_count}</p>
                         </div>
-                        <div class="bg-gray-800/60 p-3 rounded-xl text-center">
+                        <div class="bg-gray-800/60 p-2 rounded-lg text-center">
                             <p class="text-xs text-gray-400">💰 Total Depósitos</p>
-                            <p class="text-lg font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
+                            <p class="text-sm font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
                         </div>
-                        <div class="bg-gray-800/60 p-3 rounded-xl text-center">
+                        <div class="bg-gray-800/60 p-2 rounded-lg text-center">
                             <p class="text-xs text-gray-400">📤 Retiros</p>
-                            <p class="text-lg font-bold text-pink-300">${t.withdraw_count}</p>
+                            <p class="text-base font-bold text-pink-300">${t.withdraw_count}</p>
                         </div>
-                        <div class="bg-gray-800/60 p-3 rounded-xl text-center">
+                        <div class="bg-gray-800/60 p-2 rounded-lg text-center">
                             <p class="text-xs text-gray-400">💰 Total Retiros</p>
-                            <p class="text-lg font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
+                            <p class="text-sm font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
                         </div>
                     </div>`;
                 }
@@ -4154,7 +4168,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     html += `<div class="max-h-64 overflow-y-auto space-y-1">`;
                     for (const d of data.deposits) {
                         const cupLabel = d.currency !== 'CUP' ? `<span class="text-gray-400 ml-1">(${d.amount_cup.toFixed(2)} CUP)</span>` : '';
-                        const timeStr = d.processed_at ? new Date(d.processed_at).toLocaleString() : '';
+                        const timeStr = formatTime12h(d.processed_at);
                         html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center">
                             <div>
                                 <span>${escapeHTML(d.user_name)} ${d.username ? '@'+escapeHTML(d.username) : ''}</span>
@@ -4176,7 +4190,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     html += `<div class="max-h-64 overflow-y-auto space-y-1">`;
                     for (const w of data.withdrawals) {
                         const cupLabel = w.currency !== 'CUP' ? `<span class="text-gray-400 ml-1">(${w.amount_cup.toFixed(2)} CUP)</span>` : '';
-                        const timeStr = w.processed_at ? new Date(w.processed_at).toLocaleString() : '';
+                        const timeStr = formatTime12h(w.processed_at);
                         html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center">
                             <div>
                                 <span>${escapeHTML(w.user_name)} ${w.username ? '@'+escapeHTML(w.username) : ''}</span>
@@ -4212,7 +4226,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </thead>
                             <tbody>`;
                     for (const r of rej) {
-                        const timeStr = r.processed_at ? new Date(r.processed_at).toLocaleString() : '';
+                        const timeStr = formatTime12h(r.processed_at);
                         const typeIcon = r.type === 'deposito' ? '📥' : '📤';
                         const typeColor = r.type === 'deposito' ? 'text-cyan-300' : 'text-pink-300';
                         const amtColor = r.currency === 'USD' ? 'text-yellow-300' : 'text-gray-200';
@@ -4598,7 +4612,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Saldo actualizado correctamente' });
                     adminModal.classList.add('hidden');
-                    location.reload();
+                    renderManageUsersView();
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error al actualizar' });
@@ -4893,7 +4907,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario baneado correctamente.' });
                     adminModal.classList.add('hidden');
-                    location.reload();
+                    renderManageUsersView();
                 } else {
                     let errMsg = 'Error al banear';
                     try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
@@ -4923,7 +4937,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario desbaneado correctamente.' });
                     adminModal.classList.add('hidden');
-                    location.reload();
+                    renderManageUsersView();
                 } else {
                     let errMsg = 'Error al desbanear';
                     try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
@@ -4953,7 +4967,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario eliminado correctamente. Podrá registrarse de nuevo.' });
                     adminModal.classList.add('hidden');
-                    location.reload();
+                    renderManageUsersView();
                 } else {
                     let errMsg = 'Error al eliminar';
                     try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
