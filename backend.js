@@ -1285,7 +1285,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
         try {
             const sentMsg = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
-                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${user.first_name} (${userId})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n📞 Cuenta: ${accountInfo}\n🆔 Solicitud: ${request.id}`,
+                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${user.first_name} (${userId})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountInfo}\n🆔 Solicitud: ${request.id}`,
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[

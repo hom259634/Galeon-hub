@@ -255,7 +255,7 @@ function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, cred
     const currencySymbol = creditedCurrency === 'CUP' ? '🇨🇺' : '💵';
     let text =
         `✅ <b>Depósito aprobado</b>\n\n` +
-        `💰 Monto depositado: ${depositedAmountText}\n` +
+        `💰 Monto depositado: ${depositedAmountText} ${creditedCurrency}\n` +
         `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
 
     if (includeUsdFollowup) {
@@ -3646,7 +3646,7 @@ bot.on(message('text'), async (ctx) => {
                     await ctx.reply(
                         `✅ <b>Solicitud de retiro enviada</b>\n` +
                         `💰 Monto: ${amount} ${currency}\n` +
-                        `📞 Wallet: ${escapeHTML(existingWallet)}\n` +
+                        `👝 Wallet: ${escapeHTML(existingWallet)}\n` +
                         `🔗 Red: ${escapeHTML(existingNetwork)}\n` +
                         `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor espera a que sea aprobada.`,
                         { parse_mode: 'HTML' }
@@ -3710,7 +3710,7 @@ bot.on(message('text'), async (ctx) => {
                                 `🟨 <b>Nueva solicitud de retiro</b>\n` +
                                 `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                                 `Monto: ${amount} ${currency}\n` +
-                                `Cuenta: ${escapeHTML(accountInfo)}\n` +
+                                `${escapeHTML(accountInfo)}\n` +
                                 `Método: ${escapeHTML(method.name || '')}\n` +
                                 `ID solicitud: ${request.id}`,
                                 {
@@ -3725,16 +3725,19 @@ bot.on(message('text'), async (ctx) => {
                     }
                     if (wdEntries2.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(wdKey2, wdEntries2);
 
+                    const cardEmoji = { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
                     await ctx.reply(
                         `✅ <b>Solicitud de retiro enviada</b>\n` +
                         `💰 Monto: ${amount} ${currency}\n` +
+                        `${existingAccountCard ? `${cardEmoji} Tarjeta: ${escapeHTML(existingAccountCard)}\n` : ''}` +
+                        `${existingAccountMobile ? `📞 Móvil: ${escapeHTML(existingAccountMobile)}\n` : ''}` +
                         `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor espera a que sea aprobada.`,
                         { parse_mode: 'HTML' }
                     );
 
                     // Cleanup session
                     delete session.withdrawAccountCard;
-                    delete session.withdrawAccountMobile;
+                        delete session.withdrawAccountMobile;
                     delete session.withdrawMethod;
                     delete session.withdrawTemplateKey;
                     delete session.withdrawAmount;
@@ -3782,25 +3785,28 @@ bot.on(message('text'), async (ctx) => {
                                     `🟨 <b>Nueva solicitud de retiro</b>\n` +
                                     `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                                     `Monto: ${amount} ${currency}\n` +
-                                    `Cuenta: ${escapeHTML(accountInfo)}\n` +
-                                    `Método: ${escapeHTML(method.name || '')}\n` +
-                                    `ID solicitud: ${request.id}`,
-                                    {
-                                        parse_mode: 'HTML',
-                                        reply_markup: Markup.inlineKeyboard([
-                                            [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`),
-                                             Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
-                                        ]).reply_markup
-                                    }
-                                );
-                                if (sent?.message_id) wdEntries3.push({ chatId: adminId, messageId: sent.message_id });
+                                `${escapeHTML(accountInfo)}\n` +
+                                `Método: ${escapeHTML(method.name || '')}\n` +
+                                `ID solicitud: ${request.id}`,
+                                {
+                                    parse_mode: 'HTML',
+                                    reply_markup: Markup.inlineKeyboard([
+                                        [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`),
+                                         Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
+                                    ]).reply_markup
+                                }
+                            );
+                            if (sent?.message_id) wdEntries3.push({ chatId: adminId, messageId: sent.message_id });
                             } catch (e) {}
                         }
                         if (wdEntries3.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(wdKey3, wdEntries3);
 
+                        const cardEmoji = { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
                         await ctx.reply(
                             `✅ <b>Solicitud de retiro enviada</b>\n` +
                             `💰 Monto: ${amount} ${currency}\n` +
+                            `${existingCard ? `${cardEmoji} Tarjeta: ${escapeHTML(existingCard)}\n` : ''}` +
+                            `${existingMobile ? `📞 Móvil: ${escapeHTML(existingMobile)}\n` : ''}` +
                             `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor espera a que sea aprobada.`,
                             { parse_mode: 'HTML' }
                         );
@@ -3937,7 +3943,7 @@ bot.on(message('text'), async (ctx) => {
 
     // --- Flujo: retiro no cripto - cuenta ---
     if (session.awaitingWithdrawAccount) {
-        const accountInfo = text;
+        const accountInfo = /^\w+:\s/.test(text) ? text : `📞 Cuenta: ${text}`;
         const amount = session.withdrawAmount;
         const currency = session.withdrawCurrency;
         const method = session.withdrawMethod;
@@ -3970,7 +3976,7 @@ bot.on(message('text'), async (ctx) => {
                         `👤 Usuario: ${ctx.from.first_name} (${uid})\n` +
                         `💰 Monto: ${amount} ${currency}\n` +
                         `🏦 Método: ${escapeHTML(method.name)}\n` +
-                        `📞 Cuenta: ${escapeHTML(accountInfo)}\n` +
+                        `${escapeHTML(accountInfo)}\n` +
                         `🆔 Solicitud: ${request.id}`,
                         {
                             parse_mode: 'HTML',
@@ -3988,6 +3994,7 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply(
                 `✅ <b>Solicitud de retiro enviada</b>\n` +
                 `💰 Monto: ${amount} ${currency}\n` +
+                `${escapeHTML(accountInfo)}\n` +
                 `⏳ Procesaremos tu solicitud a la mayor brevedad. Te avisaremos cuando esté lista.`,
                 { parse_mode: 'HTML' }
             );
@@ -4655,7 +4662,7 @@ bot.on(message('photo'), async (ctx) => {
                     } catch (e) {}
                 }
                 if (depEntries.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(depKey, depEntries);
-                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\nMonto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n\n\n ¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
+                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\n💰 Monto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n\n¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
             } catch (e) {
                 console.error(e);
                 await ctx.reply('❌ Error al procesar la solicitud. Por favor, intenta más tarde o contacta a soporte.', getMainKeyboard(ctx));
