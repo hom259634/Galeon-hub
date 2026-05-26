@@ -484,7 +484,7 @@
                         </select>
                         <div id="withdrawMethodLimits" class="text-xs text-gray-400 mb-2"></div>
                         <input type="number" id="withdrawAmount" step="0.01" min="0" placeholder="Monto a retirar" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500 mb-3">
-                        <p class="text-sm text-gray-300 mb-2">Saldo disponible: <span id="withdrawAvailableBalance">-.--</span> <span id="withdrawCurrency">CUP</span></p>
+                        <p class="text-sm text-gray-300 mb-2">Saldo disponible: <span id="withdrawAvailableBalance">-.--</span> <span id="withdrawCurrency" class="hidden"></span></p>
                         
                         <!-- Campos dinámicos para datos de cuenta -->
                         <div id="withdrawAccountFields" class="space-y-3 mt-3"></div>
@@ -1498,7 +1498,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                     withdrawAvailableBalance.innerText = balance.toFixed(2);
                     withdrawCurrency.innerText = currency;
+                    withdrawCurrency.classList.remove('hidden');
                 }
+            } else {
+                withdrawCurrency.classList.add('hidden');
             }
         }
 
@@ -1627,6 +1630,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             const example = WITHDRAW_AMOUNT_EXAMPLES[currency] || `ej: 10 para 10 ${currency}`;
                             withdrawAmount.placeholder = `Monto (${example})`;
                             withdrawCurrency.innerText = currency;
+                            withdrawCurrency.classList.remove('hidden');
 
                             let limitsHtml = '';
                             if (method.min_amount !== null || method.max_amount !== null) {
@@ -1642,6 +1646,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             renderWithdrawFields(method);
                         }
                     } else {
+                        withdrawAvailableBalance.innerText = '-.--';
+                        withdrawCurrency.classList.add('hidden');
                         withdrawMethodLimits.innerHTML = '';
                         withdrawAccountFields.innerHTML = '';
                     }
@@ -4020,10 +4026,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     return;
                 }
 
-                let html = `<button onclick="adminViewContainer.innerHTML = ''" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
-                        <i class="fas fa-arrow-left mr-1"></i> Volver
-                    </button>
-                    <h4 class="text-xl font-bold mb-4 flex items-center"><i class="fas fa-chart-bar text-orange-400 mr-2"></i>Actividad de Sub-admins</h4>
+                let html = `<h4 class="text-xl font-bold mb-4 flex items-center"><i class="fas fa-chart-bar text-orange-400 mr-2"></i>Actividad de Sub-admins</h4>
                     <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead>
@@ -4144,7 +4147,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const t = data.totals;
                     html += `<div class="grid grid-cols-2 gap-2 mb-4">
                         <div class="flex gap-2 col-span-2 md:col-span-2">
-                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-none">
+                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-none w-24">
                                 <p class="text-xs text-gray-400">📥 Depósitos</p>
                                 <p class="text-lg font-bold text-cyan-300">${t.deposit_count}</p>
                             </div>
@@ -4154,7 +4157,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                         </div>
                         <div class="flex gap-2 col-span-2 md:col-span-2">
-                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-none">
+                            <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-none w-24">
                                 <p class="text-xs text-gray-400">📤 Retiros</p>
                                 <p class="text-lg font-bold text-pink-300">${t.withdraw_count}</p>
                             </div>
@@ -4187,11 +4190,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center" data-currency="${d.currency}">
                             <div>
                                 <span>${escapeHTML(d.user_name)} ${d.username ? '@'+escapeHTML(d.username) : ''}</span>
-                                <span class="text-gray-500 text-xs ml-2">${timeStr}</span>
+                                <span class="text-gray-400 text-xs ml-2">${timeStr}</span>
                             </div>
                             <span class="${d.currency === 'USD' ? 'text-yellow-300' : 'text-cyan-300'} font-medium">${d.amount.toFixed(2)} ${d.currency}${cupLabel}</span>
                         </div>`;
                     }
+                    html += `<div id="depositsEmpty" class="hidden text-gray-400 text-sm text-center py-4"></div>`;
                     html += `</div>`;
                 }
                 html += `</div>`;
@@ -4215,11 +4219,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center" data-currency="${w.currency}">
                             <div>
                                 <span>${escapeHTML(w.user_name)} ${w.username ? '@'+escapeHTML(w.username) : ''}</span>
-                                <span class="text-gray-500 text-xs ml-2">${timeStr}</span>
+                                <span class="text-gray-400 text-xs ml-2">${timeStr}</span>
                             </div>
                             <span class="${w.currency === 'USD' ? 'text-yellow-300' : 'text-pink-300'} font-medium">${w.amount.toFixed(2)} ${w.currency}${cupLabel}</span>
                         </div>`;
                     }
+                    html += `<div id="withdrawalsEmpty" class="hidden text-gray-400 text-sm text-center py-4"></div>`;
                     html += `</div>`;
                 }
                 html += `</div>`;
@@ -4303,9 +4308,27 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const clicked = document.querySelector(`[data-section="${section}"][data-filter="${currency}"]`);
             if (clicked) clicked.classList.add('active', 'bg-emerald-600');
             const listId = section === 'deposits' ? 'depositsList' : 'withdrawalsList';
+            const emptyId = section === 'deposits' ? 'depositsEmpty' : 'withdrawalsEmpty';
+            const currencyNames = { CUP: 'CUP', USD: 'USD', MLC: 'MLC' };
+            const sectionNames = { deposits: 'depósitos aprobados', withdrawals: 'retiros aprobados' };
+            let visibleCount = 0;
             document.querySelectorAll(`#${listId} > div`).forEach(item => {
-                item.style.display = (currency === 'all' || item.dataset.currency === currency) ? '' : 'none';
+                if (currency === 'all' || item.dataset.currency === currency) {
+                    item.style.display = '';
+                    if (item.id !== emptyId) visibleCount++;
+                } else {
+                    item.style.display = 'none';
+                }
             });
+            const emptyEl = document.getElementById(emptyId);
+            if (emptyEl) {
+                if (visibleCount === 0 && currency !== 'all') {
+                    emptyEl.textContent = `No hay ${sectionNames[section]} en ${currencyNames[currency]}.`;
+                    emptyEl.classList.remove('hidden');
+                } else {
+                    emptyEl.classList.add('hidden');
+                }
+            }
         };
 
         adminNavBtns.forEach(btn => {
