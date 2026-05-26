@@ -4302,14 +4302,25 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         };
 
         window.filterCurrency = (section, currency) => {
+            const curColor = c => c === 'CUP' ? 'bg-green-600' : c === 'USD' ? 'bg-yellow-600' : c === 'USDT' ? 'bg-orange-600' : c === 'TRX' ? 'bg-red-600' : c === 'MLC' ? 'bg-purple-600' : '';
             document.querySelectorAll(`[data-section="${section}"]`).forEach(b => {
                 b.classList.remove('active', 'bg-emerald-600');
+                const f = b.dataset.filter;
+                if (f && f !== 'all') {
+                    b.classList.remove('bg-green-600', 'bg-yellow-600', 'bg-orange-600', 'bg-red-600', 'bg-purple-600');
+                    b.classList.add(curColor(f));
+                }
             });
             const clicked = document.querySelector(`[data-section="${section}"][data-filter="${currency}"]`);
-            if (clicked) clicked.classList.add('active', 'bg-emerald-600');
+            if (clicked) {
+                if (currency !== 'all') {
+                    clicked.classList.remove('bg-green-600', 'bg-yellow-600', 'bg-orange-600', 'bg-red-600', 'bg-purple-600');
+                }
+                clicked.classList.add('active', 'bg-emerald-600');
+            }
             const listId = section === 'deposits' ? 'depositsList' : 'withdrawalsList';
             const emptyId = section === 'deposits' ? 'depositsEmpty' : 'withdrawalsEmpty';
-            const currencyNames = { CUP: 'CUP', USD: 'USD', MLC: 'MLC' };
+            const currencyNames = { CUP: 'CUP', USD: 'USD', USDT: 'USDT', TRX: 'TRX', MLC: 'MLC' };
             const sectionNames = { deposits: 'depósitos aprobados', withdrawals: 'retiros aprobados' };
             let visibleCount = 0;
             document.querySelectorAll(`#${listId} > div`).forEach(item => {
@@ -4323,7 +4334,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const emptyEl = document.getElementById(emptyId);
             if (emptyEl) {
                 if (visibleCount === 0 && currency !== 'all') {
-                    emptyEl.textContent = `No hay ${sectionNames[section]} en ${currencyNames[currency]}.`;
+                    emptyEl.textContent = `No hay ${sectionNames[section]} en ${currencyNames[currency] || currency}.`;
                     emptyEl.classList.remove('hidden');
                 } else {
                     emptyEl.classList.add('hidden');
@@ -4837,6 +4848,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <p><b>ID:</b> ${u.telegram_id}</p>
                             <p><b>Nombre:</b> ${escapeHTML(u.first_name || 'N/A')}</p>
                             <p><b>Username:</b> ${u.username ? '@' + escapeHTML(u.username) : 'N/A'}</p>
+                            ${u.created_at ? `<p class="text-xs text-gray-500 mt-1">Fecha y hora de entrada: ${new Date(u.created_at).toLocaleString('es-CU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>` : ''}
                             <p><b>Refiriendo a:</b> ${u.ref_by || 'Nadie'}</p>
                             <div class="mt-3 grid grid-cols-3 gap-2">
                                 <div class="bg-gray-800/50 p-2 rounded text-center">
