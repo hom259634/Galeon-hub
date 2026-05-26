@@ -485,7 +485,7 @@ async function setExchangeRateMLC(rate) {
 
 async function convertToCUP(amount, currency) {
     const rates = await getExchangeRates();
-    switch (currency) {
+    switch (String(currency).toUpperCase()) {
         case 'CUP': return amount;
         case 'USD': return amount * rates.rate;
         case 'USDT': return amount * rates.rate_usdt;
@@ -497,7 +497,7 @@ async function convertToCUP(amount, currency) {
 
 async function convertFromCUP(amountCUP, targetCurrency) {
     const rates = await getExchangeRates();
-    switch (targetCurrency) {
+    switch (String(targetCurrency).toUpperCase()) {
         case 'CUP': return amountCUP;
         case 'USD': return amountCUP / rates.rate;
         case 'USDT': return amountCUP / rates.rate_usdt;
@@ -775,7 +775,7 @@ function parseAmountWithCurrency(text) {
     const rawCurrency = trimmed.slice(match[1].length).trim();
     return {
         amount: parseFloat(match[1]),
-        currency: rawCurrency
+        currency: rawCurrency.toUpperCase()
     };
 }
 
@@ -1041,7 +1041,7 @@ async function createDepositRequest(userId, methodId, fileBuffer, amountText, cu
             method_id: methodId,
             screenshot_url: publicUrl,
             amount: parseFloat(amountText) || amountText,
-            currency: currency,
+            currency: String(currency || '').toUpperCase(),
             status: 'pending'
         })
         .select()
@@ -4721,7 +4721,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
         }
 
         const depositAmount = parseFloat(request.amount);
-        const depositCurrency = request.currency;
+        const depositCurrency = String(request.currency || '').toUpperCase();
         if (isNaN(depositAmount) || depositAmount <= 0) {
             await ctx.answerCbQuery('Monto no válido en la solicitud', { show_alert: true });
             return;

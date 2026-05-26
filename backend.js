@@ -322,7 +322,7 @@ async function setExchangeRateTRX(rate) {
 // Convertir cualquier moneda a CUP
 async function convertToCUP(amount, currency) {
     const rates = await getExchangeRates();
-    switch (currency) {
+    switch (String(currency).toUpperCase()) {
         case 'CUP': return amount;
         case 'USD': return amount * rates.rate;
         case 'USDT': return amount * rates.rate_usdt;
@@ -335,7 +335,7 @@ async function convertToCUP(amount, currency) {
 // Convertir de CUP a otra moneda
 async function convertFromCUP(amountCUP, targetCurrency) {
     const rates = await getExchangeRates();
-    switch (targetCurrency) {
+    switch (String(targetCurrency).toUpperCase()) {
         case 'CUP': return amountCUP;
         case 'USD': return amountCUP / rates.rate;
         case 'USDT': return amountCUP / rates.rate_usdt;
@@ -695,7 +695,7 @@ function parseAmountWithCurrency(text) {
     const rawCurrency = trimmed.slice(match[1].length).trim();
     return {
         amount: parseFloat(match[1]),
-        currency: rawCurrency
+        currency: rawCurrency.toUpperCase()
     };
 }
 
@@ -1124,12 +1124,12 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
         return res.status(400).json({ error: 'Método no encontrado' });
     }
 
-    if (method.currency !== currency) {
+    if (String(method.currency || '').toUpperCase() !== String(currency || '').toUpperCase()) {
         return res.status(400).json({ error: `La moneda del método es ${method.currency}, no coincide.` });
     }
 
     const parsed = parseAmountWithCurrency(amount);
-    if (!parsed || parsed.currency.toUpperCase() !== currency.toUpperCase()) {
+    if (!parsed || parsed.currency !== String(currency || '').toUpperCase()) {
         return res.status(400).json({ error: 'Formato de monto inválido' });
     }
 
@@ -1162,7 +1162,7 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
             method_id: parseInt(methodId),
             screenshot_url: publicUrl,
             amount: parsed.amount,
-            currency,
+            currency: currency.toUpperCase(),
             status: 'pending'
         })
         .select()
@@ -3272,6 +3272,8 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
         return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
 
+    const currencyNorm = String(request.currency || '').toUpperCase();
+
     const { data: user } = await supabase
         .from('users')
         .select('cup, usd, bonus_cup')
@@ -3282,12 +3284,12 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
     let newBonus = parseFloat(user?.bonus_cup) || 0;
     let bonusMovedCup = 0;
 
-    if (request.currency === 'CUP') {
+    if (currencyNorm === 'CUP') {
         newCup += parseFloat(request.amount);
-    } else if (request.currency === 'USD') {
+    } else if (currencyNorm === 'USD') {
         newUsd += parseFloat(request.amount);
     } else {
-        const cupAmount = await convertToCUP(parseFloat(request.amount), request.currency);
+        const cupAmount = await convertToCUP(parseFloat(request.amount), currencyNorm);
         newCup += cupAmount;
     }
 
@@ -3318,14 +3320,14 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
     res.json({ success: true });
     (async () => {
         try {
-            const creditedAmount = request.currency === 'USD'
+            const creditedAmount = currencyNorm === 'USD'
                 ? parseFloat(request.amount)
-                : await convertToCUP(parseFloat(request.amount), request.currency);
+                : await convertToCUP(parseFloat(request.amount), currencyNorm);
 
             const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
                 ? String(request.amount)
-                : `${request.amount} ${request.currency || ''}`;
-            const creditCurrency = request.currency === 'USD' ? 'USD' : 'CUP';
+                : `${request.amount} ${currencyNorm}`;
+            const creditCurrency = currencyNorm === 'USD' ? 'USD' : 'CUP';
             const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
 
             let text =
@@ -3333,7 +3335,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
                 `💰 Monto depositado: ${depositedAmountText}\n` +
                 `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
 
-            if (request.currency === 'USD') {
+            if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
             }
 
@@ -4016,6 +4018,10 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         const userFirstName = user.first_name;
         const userUsername = user.username;
 
+        await supabase.from('bets').delete().eq('user_id', telegramId);
+        await supabase.from('deposit_requests').delete().eq('user_id', telegramId);
+        await supabase.from('withdraw_requests').delete().eq('user_id', telegramId);
+
         const { error: deleteError } = await supabase
             .from('users')
             .delete()
@@ -4515,6 +4521,8 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
         .eq('id', id).eq('status', 'pending').select().single();
     if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
 
+    const currencyNorm = String(request.currency || '').toUpperCase();
+
     const { data: user } = await supabase
         .from('users')
         .select('cup, usd, bonus_cup')
@@ -4526,9 +4534,9 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
     let bonusCup = parseFloat(user?.bonus_cup) || 0;
     let bonusMovedCup = 0;
 
-    if (request.currency === 'CUP') newCup += parseFloat(request.amount);
-    else if (request.currency === 'USD') newUsd += parseFloat(request.amount);
-    else { const cupAmount = await convertToCUP(parseFloat(request.amount), request.currency); newCup += cupAmount; }
+    if (currencyNorm === 'CUP') newCup += parseFloat(request.amount);
+    else if (currencyNorm === 'USD') newUsd += parseFloat(request.amount);
+    else { const cupAmount = await convertToCUP(parseFloat(request.amount), currencyNorm); newCup += cupAmount; }
 
     if (bonusCup > 0) {
         const { data: prevApproved } = await supabase.from('deposit_requests').select('id').eq('user_id', request.user_id).eq('status', 'approved').neq('id', parseInt(id)).limit(1);
@@ -4544,11 +4552,11 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
     res.json({ success: true });
     (async () => {
         try {
-            const creditedAmount = request.currency === 'USD' ? parseFloat(request.amount) : await convertToCUP(parseFloat(request.amount), request.currency);
+            const creditedAmount = currencyNorm === 'USD' ? parseFloat(request.amount) : await convertToCUP(parseFloat(request.amount), currencyNorm);
             const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
                 ? String(request.amount)
-                : `${request.amount} ${request.currency || ''}`;
-            const creditCurrency = request.currency === 'USD' ? 'USD' : 'CUP';
+                : `${request.amount} ${currencyNorm}`;
+            const creditCurrency = currencyNorm === 'USD' ? 'USD' : 'CUP';
             const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
 
             let text =
@@ -4556,7 +4564,7 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
                 `💰 Monto depositado: ${depositedAmountText}\n` +
                 `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
 
-            if (request.currency === 'USD') {
+            if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
             }
             if (bonusMovedCup > 0) {
