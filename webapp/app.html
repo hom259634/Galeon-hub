@@ -4153,7 +4153,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Depósitos</p>
-                                <p class="text-lg font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
+                                <p class="text-sm font-bold text-green-300 whitespace-nowrap">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
                             </div>
                         </div>
                         <div class="flex gap-2 col-span-2 md:col-span-2">
@@ -4163,7 +4163,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Retiros</p>
-                                <p class="text-lg font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
+                                <p class="text-sm font-bold text-red-300 whitespace-nowrap">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
                             </div>
                         </div>
                     </div>`;
@@ -4493,16 +4493,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 const filterNames = {
                     all: 'Todos',
-                    withMainBalance: 'Con saldo principal',
-                    withUsdBalance: 'Con saldo USD',
-                    withMainAndUsdBalance: 'Con saldo principal y USD',
-                    withBonus: 'Con bono',
-                    withoutBonus: 'Sin bono',
-                    empty: 'Sin saldo ni bono',
-                    withReferrals: 'Con referidos',
-                    referred: 'Refiriendo',
-                    withBets: 'Con jugadas',
-                    banned: 'Baneados'
+                    withMainBalance: 'con saldo principal',
+                    withUsdBalance: 'con saldo USD',
+                    withMainAndUsdBalance: 'con saldo principal y USD',
+                    withBonus: 'con bono',
+                    withoutBonus: 'sin bono',
+                    empty: 'sin saldo ni bono',
+                    withReferrals: 'con referidos',
+                    referred: 'refiriendo',
+                    withBets: 'con jugadas',
+                    banned: 'baneados'
                 };
 
                 function applyFilter(filter) {
@@ -4564,7 +4564,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         if (searchText) {
                             noMsg.textContent = '👤 Usuario no encontrado';
                         } else if (filter !== 'all') {
-                            noMsg.textContent = `📭 No hay usuarios ${(filterNames[filter] || filter).toLowerCase()}`;
+                            noMsg.textContent = `📭 No hay usuarios ${filterNames[filter] || filter}`;
                         } else {
                             noMsg.textContent = '📭 No hay usuarios';
                         }
@@ -4646,7 +4646,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     </div>
                 </div>
                 <button id="saveBalanceBtn" onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
-                <button id="resetUserBtn" onclick="reiniciarUsuario(${telegramId})" class="w-full bg-yellow-700 py-3 rounded-xl mt-2 font-bold">🗑 Eliminar Usuario</button>
+                <button id="resetUserBtn" onclick="reiniciarUsuario(${telegramId})" class="w-full bg-yellow-700 py-3 rounded-xl mt-2 font-bold">🗑 Eliminar usuario</button>
                 ${banButtonHtml}
                 <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
             `;
@@ -4825,7 +4825,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         });
                         depositsHtml += '</div>';
                     }
-                    depositsHtml += `<p class="text-sm text-gray-400 mt-1">Total aprobado: ${totalDepCUP.toFixed(2)} CUP / ${totalDepUSD.toFixed(2)} USD</p>`;
+                    depositsHtml += `<p class="text-xs text-gray-400 mt-1 whitespace-nowrap">Total aprobado: ${totalDepCUP.toFixed(2)} CUP / ${totalDepUSD.toFixed(2)} USD</p>`;
 
                     // Retiros
                     let withdrawsHtml = '<h5 class="text-lg font-bold mb-2">📤 Últimos 20 retiros</h5>';
@@ -4844,7 +4844,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         });
                         withdrawsHtml += '</div>';
                     }
-                    withdrawsHtml += `<p class="text-sm text-gray-400 mt-1">Total aprobado: ${totalWithCUP.toFixed(2)} CUP / ${totalWithUSD.toFixed(2)} USD</p>`;
+                    withdrawsHtml += `<p class="text-xs text-gray-400 mt-1 whitespace-nowrap">Total aprobado: ${totalWithCUP.toFixed(2)} CUP / ${totalWithUSD.toFixed(2)} USD</p>`;
 
                     resultDiv.innerHTML = `
                         <div class="glass-card p-4 mb-4">
@@ -4852,7 +4852,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <p><b>ID:</b> ${u.telegram_id}</p>
                             <p><b>Nombre:</b> ${escapeHTML(u.first_name || 'N/A')}</p>
                             <p><b>Username:</b> ${u.username ? '@' + escapeHTML(u.username) : 'N/A'}</p>
-                            ${u.created_at ? `<p>Fecha y hora de entrada: ${new Date(u.created_at).toLocaleString('es-CU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>` : ''}
+                            ${u.created_at ? `<p><b>Fecha y hora de entrada:</b> ${new Date(u.created_at).toLocaleString('es-CU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>` : ''}
                             <p><b>Refiriendo a:</b> ${u.ref_by || 'Nadie'}</p>
                             <div class="mt-3 grid grid-cols-3 gap-2">
                                 <div class="bg-gray-800/50 p-2 rounded text-center">
