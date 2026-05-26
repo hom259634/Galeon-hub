@@ -451,7 +451,8 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
                         username: username,
                         bonus_cup: currentBonusDefault,
                         cup: 0,
-                        usd: 0
+                        usd: 0,
+                        created_at: new Date()
                     })
                     .select()
                     .single();
@@ -3322,8 +3323,8 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
             const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
                 ? String(request.amount)
                 : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
-            const currencySymbol = request.currency === 'USD' ? '💵' : request.currency === 'MLC' ? '🏦' : request.currency === 'USDT' ? '₮' : request.currency === 'TRX' ? '⚡' : '🇨🇺';
             const creditCurrency = request.currency === 'USD' ? 'USD' : 'CUP';
+            const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
 
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
@@ -4545,9 +4546,14 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
             const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
                 ? String(request.amount)
                 : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
-            const currencySymbol = request.currency === 'USD' ? '💵' : request.currency === 'MLC' ? '🏦' : request.currency === 'USDT' ? '₮' : request.currency === 'TRX' ? '⚡' : '🇨🇺';
             const creditCurrency = request.currency === 'USD' ? 'USD' : 'CUP';
-            let text = `✅ <b>Depósito aprobado</b>\n\n💰 Monto depositado: ${depositedAmountText}\n${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+            const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
+
+            let text =
+                `✅ <b>Depósito aprobado</b>\n\n` +
+                `💰 Monto depositado: ${depositedAmountText}\n` +
+                `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+
             if (request.currency === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
             }

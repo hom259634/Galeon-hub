@@ -255,7 +255,7 @@ function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, cred
     const currencySymbol = creditedCurrency === 'CUP' ? '🇨🇺' : '💵';
     let text =
         `✅ <b>Depósito aprobado</b>\n\n` +
-        `💰 Monto depositado: ${depositedAmountText} ${creditedCurrency}\n` +
+        `💰 Monto depositado: ${depositedAmountText}\n` +
         `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
 
     if (includeUsdFollowup) {
@@ -646,7 +646,8 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
                 username: username,
                 cup: 0,
                 usd: 0,
-                bonus_cup: currentBonus
+                bonus_cup: currentBonus,
+                created_at: new Date()
             })
             .select()
             .single();
@@ -4790,7 +4791,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                 await ctx.telegram.sendMessage(
                     request.user_id,
                     buildDepositApprovedMessage({
-                        depositedAmountText: request.amount,
+                        depositedAmountText: `${request.amount} ${request.currency}`,
                         creditedAmount: depositCurrency === 'USD' ? depositAmount : amountCUP,
                         creditedCurrency: depositCurrency === 'USD' ? 'USD' : 'CUP',
                         includeUsdFollowup: depositCurrency === 'USD',
