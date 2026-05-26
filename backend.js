@@ -3269,10 +3269,14 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
         return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
 
-    const user = await getOrCreateUser(request.user_id);
-    let newCup = parseFloat(user.cup) || 0;
-    let newUsd = parseFloat(user.usd) || 0;
-    let newBonus = parseFloat(user.bonus_cup) || 0;
+    const { data: user } = await supabase
+        .from('users')
+        .select('cup, usd, bonus_cup')
+        .eq('telegram_id', request.user_id)
+        .maybeSingle();
+    let newCup = parseFloat(user?.cup) || 0;
+    let newUsd = parseFloat(user?.usd) || 0;
+    let newBonus = parseFloat(user?.bonus_cup) || 0;
     let bonusMovedCup = 0;
 
     if (request.currency === 'CUP') {
@@ -3318,12 +3322,13 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
             const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
                 ? String(request.amount)
                 : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
-            const currencySymbol = request.currency === 'USD' ? '💵' : '🇨🇺';
+            const currencySymbol = request.currency === 'USD' ? '💵' : request.currency === 'MLC' ? '🏦' : request.currency === 'USDT' ? '₮' : request.currency === 'TRX' ? '⚡' : '🇨🇺';
+            const creditCurrency = request.currency === 'USD' ? 'USD' : 'CUP';
 
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
                 `💰 Monto depositado: ${depositedAmountText}\n` +
-                `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
+                `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
 
             if (request.currency === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -3335,7 +3340,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
                 text += `🎁 Tu bono de bienvenida se ha movido a tu saldo principal.\n`;
             }
 
-            text += `\n¡Gracias por confiar en nosotros!`;
+            text += `\n\n¡Gracias por confiar en nosotros!`;
 
             await bot.telegram.sendMessage(request.user_id,
                 text,
@@ -4540,8 +4545,9 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
             const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
                 ? String(request.amount)
                 : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
-            const currencySymbol = request.currency === 'USD' ? '💵' : '🇨🇺';
-            let text = `✅ <b>Depósito aprobado</b>\n\n💰 Monto depositado: ${depositedAmountText}\n${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${request.currency === 'USD' ? 'USD' : 'CUP'} a tu saldo ${request.currency === 'USD' ? 'USD' : 'CUP'}.\n`;
+            const currencySymbol = request.currency === 'USD' ? '💵' : request.currency === 'MLC' ? '🏦' : request.currency === 'USDT' ? '₮' : request.currency === 'TRX' ? '⚡' : '🇨🇺';
+            const creditCurrency = request.currency === 'USD' ? 'USD' : 'CUP';
+            let text = `✅ <b>Depósito aprobado</b>\n\n💰 Monto depositado: ${depositedAmountText}\n${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
             if (request.currency === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
             }
