@@ -688,12 +688,14 @@ async function setMinWithdrawUSD(value) {
 
 // Parsear monto con moneda (ej: "500 cup", "10 usdt")
 function parseAmountWithCurrency(text) {
-    const lower = text.toLowerCase().replace(',', '.').trim();
+    const trimmed = text.replace(',', '.').trim();
+    const lower = trimmed.toLowerCase();
     const match = lower.match(/^(\d+(?:\.\d+)?)\s*(cup|usd|usdt|trx|mlc)$/);
     if (!match) return null;
+    const rawCurrency = trimmed.slice(match[1].length).trim();
     return {
         amount: parseFloat(match[1]),
-        currency: match[2].toUpperCase()
+        currency: rawCurrency
     };
 }
 
@@ -1127,7 +1129,7 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
     }
 
     const parsed = parseAmountWithCurrency(amount);
-    if (!parsed || parsed.currency !== currency) {
+    if (!parsed || parsed.currency.toUpperCase() !== currency.toUpperCase()) {
         return res.status(400).json({ error: 'Formato de monto inválido' });
     }
 
@@ -3322,7 +3324,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
 
             const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
                 ? String(request.amount)
-                : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
+                : `${request.amount} ${request.currency || ''}`;
             const creditCurrency = request.currency === 'USD' ? 'USD' : 'CUP';
             const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
 
@@ -4545,7 +4547,7 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
             const creditedAmount = request.currency === 'USD' ? parseFloat(request.amount) : await convertToCUP(parseFloat(request.amount), request.currency);
             const depositedAmountText = request.amount && /[a-zA-Z]/.test(String(request.amount))
                 ? String(request.amount)
-                : `${request.amount} ${String(request.currency || '').toLowerCase()}`;
+                : `${request.amount} ${request.currency || ''}`;
             const creditCurrency = request.currency === 'USD' ? 'USD' : 'CUP';
             const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
 

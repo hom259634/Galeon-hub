@@ -768,12 +768,14 @@ async function setMinWithdrawUSD(value) {
 }
 
 function parseAmountWithCurrency(text) {
-    const lower = text.toLowerCase().replace(',', '.').trim();
+    const trimmed = text.replace(',', '.').trim();
+    const lower = trimmed.toLowerCase();
     const match = lower.match(/^(\d+(?:\.\d+)?)\s*(cup|usd|usdt|trx|mlc)$/);
     if (!match) return null;
+    const rawCurrency = trimmed.slice(match[1].length).trim();
     return {
         amount: parseFloat(match[1]),
-        currency: match[2].toUpperCase()
+        currency: rawCurrency
     };
 }
 
@@ -3385,7 +3387,7 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-        if (parsed.currency !== method.currency) {
+        if (parsed.currency.toUpperCase() !== method.currency.toUpperCase()) {
             await ctx.reply(`❌ La moneda del monto solicitado no coincide con la del método. Por favor, envía el monto en ${method.currency}.`, getMainKeyboard(ctx));
             return;
         }
