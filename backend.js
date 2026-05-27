@@ -62,7 +62,7 @@ function isAdmin(userId) {
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
-let rolesCache = { depositApprovers: [], withdrawApprovers: [], scheduleManagers: [], userManagers: [], lastFetch: 0 };
+let rolesCache = { depositApprovers: [], withdrawApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], lastFetch: 0 };
 const ROLES_CACHE_TTL = 60000;
 
 async function refreshRolesCache() {
@@ -72,6 +72,7 @@ async function refreshRolesCache() {
         rolesCache.withdrawApprovers = data?.filter(r => r.role === 'withdraw_approver').map(r => Number(r.telegram_id)) || [];
         rolesCache.scheduleManagers = data?.filter(r => r.role === 'schedule_manager').map(r => Number(r.telegram_id)) || [];
         rolesCache.userManagers = data?.filter(r => r.role === 'user_manager').map(r => Number(r.telegram_id)) || [];
+        rolesCache.userDeleters = data?.filter(r => r.role === 'user_deleter').map(r => Number(r.telegram_id)) || [];
         rolesCache.lastFetch = Date.now();
     } catch (e) {
         console.error('Error refreshing roles cache:', e);
@@ -90,6 +91,7 @@ async function getUserRoles(userId) {
     if (rolesCache.withdrawApprovers.includes(id)) roles.push('withdraw_approver');
     if (rolesCache.scheduleManagers.includes(id)) roles.push('schedule_manager');
     if (rolesCache.userManagers.includes(id)) roles.push('user_manager');
+    if (rolesCache.userDeleters.includes(id)) roles.push('user_deleter');
     return roles;
 }
 
@@ -102,6 +104,7 @@ async function hasRole(userId, role) {
         case 'deposit_approver': return rolesCache.depositApprovers.includes(id);
         case 'schedule_manager': return rolesCache.scheduleManagers.includes(id);
         case 'user_manager': return rolesCache.userManagers.includes(id);
+        case 'user_deleter': return rolesCache.userDeleters.includes(id);
         default: return false;
     }
 }
@@ -2241,6 +2244,18 @@ app.get('/api/user/:userId/bets', async (req, res) => {
     res.json(data || []);
 });
 
+// --- Verificar si el usuario tiene un retiro pendiente ---
+app.get('/api/user/:userId/pending-withdraw', async (req, res) => {
+    const { userId } = req.params;
+    const { data } = await supabase
+        .from('withdraw_requests')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('status', 'pending')
+        .limit(1);
+    res.json({ pending: !!(data && data.length > 0) });
+});
+
 // --- Cantidad de referidos ---
 app.get('/api/user/:userId/referrals/count', async (req, res) => {
     const { userId } = req.params;
@@ -3333,7 +3348,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
                 `💰 Monto depositado: ${depositedAmountText}\n` +
-                `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+                `${currencySymbol} ${creditedAmount === 1 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
 
             if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -3790,18 +3805,24 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
         const adminAddedBonus = diffBonusReq > 0.001;
         const bonusMigrated = (adminAddedBonus && finalBonus === 0) || existingBonusMigrated;
 
+        const verbForm = (diff, esRestTotal, singular, plural, singularEl, pluralLos) => {
+            const amt = Math.abs(diff);
+            if (diff > 0) return amt === 1 ? singular : plural;
+            return esRestTotal ? (amt === 1 ? singularEl : pluralLos) : (amt === 1 ? singular : plural);
+        };
+
         // 1. Si el admin añadió bono y migró a CUP
         if (bonusMigrated) {
             const cupUsdParts = [];
             if (Math.abs(diffCupReq) > 0.001) {
                 const esRestaTotal = diffCupReq < 0 && Math.abs(Math.abs(diffCupReq) - oldCup) < 0.001;
-                const verbo = diffCupReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
+                const verbo = verbForm(diffCupReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
                 const prep = diffCupReq > 0 ? 'a' : 'de';
                 cupUsdParts.push(`${verbo} ${Math.abs(diffCupReq).toFixed(2)} CUP ${prep} tu saldo principal`);
             }
             if (Math.abs(diffUsdReq) > 0.001) {
                 const esRestaTotal = diffUsdReq < 0 && Math.abs(Math.abs(diffUsdReq) - oldUsd) < 0.001;
-                const verbo = diffUsdReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
+                const verbo = verbForm(diffUsdReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
                 const prep = diffUsdReq > 0 ? 'a' : 'de';
                 cupUsdParts.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD ${prep} tu saldo USD`);
             }
@@ -3809,12 +3830,14 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
             let msg;
             if (cupUsdParts.length > 0) {
                 const movido = Math.abs(diffUsdReq) <= 0.001 ? 'al mismo' : 'a tu saldo principal';
-                msg = `⚠️ Han sido ${cupUsdParts.join(' y ')}. Tu bono de bienvenida actual se ha movido ${movido}.`;
+                const prefix = cupUsdParts.length === 1 && (Math.abs(diffCupReq) === 1 || Math.abs(diffUsdReq) === 1) ? 'Ha sido' : 'Han sido';
+                msg = `⚠️ ${prefix} ${cupUsdParts.join(' y ')}. Tu bono de bienvenida actual se ha movido ${movido}.`;
             } else {
                 const esRestaTotal = diffBonusReq < 0 && Math.abs(Math.abs(diffBonusReq) - oldBonus) < 0.001;
-                const verbo = diffBonusReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
+                const verbo = verbForm(diffBonusReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
                 const prep = diffBonusReq > 0 ? 'a' : 'de';
-                msg = `⚠️ Han sido ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual, este se ha movido a tu saldo principal.`;
+                const prefix = Math.abs(diffBonusReq) === 1 ? 'Ha sido' : 'Han sido';
+                msg = `⚠️ ${prefix} ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual, este se ha movido a tu saldo principal.`;
             }
 
             try {
@@ -3827,11 +3850,12 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
         // 2. Cambio en el bono (aumento o reducción) que NO migró
         else if (Math.abs(diffBonusReq) > 0.001) {
             const esRestaTotal = diffBonusReq < 0 && Math.abs(Math.abs(diffBonusReq) - oldBonus) < 0.001;
-            const verbo = diffBonusReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
+            const verbo = verbForm(diffBonusReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
             const prep = diffBonusReq > 0 ? 'a' : 'de';
+            const prefix = Math.abs(diffBonusReq) === 1 ? 'Ha sido' : 'Han sido';
             try {
                 await bot.telegram.sendMessage(telegramId,
-                    adminHeader + `⚠️ Han sido ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual. Si crees que esto es incorrecto, por favor, contáctanos.`,
+                    adminHeader + `⚠️ ${prefix} ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual. Si crees que esto es incorrecto, por favor, contáctanos.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
@@ -3842,18 +3866,20 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
             const partes = [];
             if (Math.abs(diffCupReq) > 0.001) {
                 const esRestaTotal = diffCupReq < 0 && Math.abs(Math.abs(diffCupReq) - oldCup) < 0.001;
-                const verbo = diffCupReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
+                const verbo = verbForm(diffCupReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
                 const prep = diffCupReq > 0 ? 'a' : 'de';
                 partes.push(`${verbo} ${Math.abs(diffCupReq).toFixed(2)} CUP ${prep} tu saldo principal`);
             }
             if (Math.abs(diffUsdReq) > 0.001) {
                 const esRestaTotal = diffUsdReq < 0 && Math.abs(Math.abs(diffUsdReq) - oldUsd) < 0.001;
-                const verbo = diffUsdReq > 0 ? 'sumados' : (esRestaTotal ? 'restados los' : 'restados');
+                const verbo = verbForm(diffUsdReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
                 const prep = diffUsdReq > 0 ? 'a' : 'de';
                 partes.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD ${prep} tu saldo USD`);
             }
 
-            const mensaje = adminHeader + `⚠️ Han sido ${partes.join(' y ')}. Si crees que esto es incorrecto, por favor, contáctanos.`;
+            const allSingular = partes.length === 1 && (Math.abs(diffCupReq) === 1 || Math.abs(diffUsdReq) === 1);
+            const prefix = allSingular ? 'Ha sido' : 'Han sido';
+            const mensaje = adminHeader + `⚠️ ${prefix} ${partes.join(' y ')}. Si crees que esto es incorrecto, por favor, contáctanos.`;
             try {
                 await bot.telegram.sendMessage(telegramId, mensaje, { parse_mode: 'HTML' });
             } catch (e) {}
@@ -3996,7 +4022,7 @@ app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
 app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
     const userId = req.verifiedTelegramId;
     if (!userId) return res.status(403).json({ error: 'No autorizado' });
-    if (!isAdmin(userId) && !(await hasRole(userId, 'user_manager'))) {
+    if (!isAdmin(userId) && !(await hasRole(userId, 'user_deleter'))) {
         return res.status(403).json({ error: 'No tienes permisos' });
     }
     const telegramId = parseInt(req.params.telegramId);
@@ -4006,7 +4032,7 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
     try {
         const { data: user, error: findError } = await supabase
             .from('users')
-            .select('telegram_id, first_name, username, ref_by')
+            .select('telegram_id, first_name, username, ref_by, cup, usd, bonus_cup')
             .eq('telegram_id', telegramId)
             .maybeSingle();
 
@@ -4017,6 +4043,18 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         const userRefBy = user.ref_by;
         const userFirstName = user.first_name;
         const userUsername = user.username;
+
+        await supabase.from('deleted_users').upsert({
+            telegram_id: user.telegram_id,
+            first_name: user.first_name,
+            username: user.username,
+            cup: user.cup,
+            usd: user.usd,
+            bonus_cup: user.bonus_cup,
+            ref_by: user.ref_by,
+            deleted_at: new Date(),
+            deleted_by: userId
+        }).then().catch(e => console.error('Error guardando en deleted_users:', e));
 
         await supabase.from('bets').delete().eq('user_id', telegramId);
         await supabase.from('deposit_requests').delete().eq('user_id', telegramId);
@@ -4095,6 +4133,20 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
     }
 });
 
+// Obtener usuarios eliminados
+app.get('/api/admin/deleted-users', async (req, res) => {
+    const userId = req.verifiedTelegramId || req.query.userId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'user_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const { data } = await supabase
+        .from('deleted_users')
+        .select('*')
+        .order('deleted_at', { ascending: false });
+    res.json(data || []);
+});
+
 // ========== ENDPOINTS DE GESTIÓN DE ROLES (solo super admin) ==========
 
 // Obtener todos los roles asignados
@@ -4150,7 +4202,7 @@ app.put('/api/admin/admin-roles/:telegramId', requireAdmin, async (req, res) => 
             return res.status(400).json({ error: 'roles debe ser un array' });
         }
 
-        const validRoles = ['deposit_approver', 'withdraw_approver', 'schedule_manager', 'user_manager'];
+        const validRoles = ['deposit_approver', 'withdraw_approver', 'schedule_manager', 'user_manager', 'user_deleter'];
         for (const role of roles) {
             if (!validRoles.includes(role)) {
                 return res.status(400).json({ error: `Rol inválido: ${role}` });
@@ -4562,7 +4614,7 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
                 `💰 Monto depositado: ${depositedAmountText}\n` +
-                `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+                `${currencySymbol} ${creditedAmount === 1 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
 
             if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;

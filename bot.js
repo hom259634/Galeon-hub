@@ -113,7 +113,7 @@ function isAdmin(userId) {
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
-let botRolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], userManagers: [], lastFetch: 0 };
+let botRolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], lastFetch: 0 };
 const BOT_ROLES_CACHE_TTL = 60000;
 
 async function refreshBotRolesCache() {
@@ -123,6 +123,7 @@ async function refreshBotRolesCache() {
         botRolesCache.depositApprovers = data?.filter(r => r.role === 'deposit_approver').map(r => Number(r.telegram_id)) || [];
         botRolesCache.scheduleManagers = data?.filter(r => r.role === 'schedule_manager').map(r => Number(r.telegram_id)) || [];
         botRolesCache.userManagers = data?.filter(r => r.role === 'user_manager').map(r => Number(r.telegram_id)) || [];
+        botRolesCache.userDeleters = data?.filter(r => r.role === 'user_deleter').map(r => Number(r.telegram_id)) || [];
         botRolesCache.lastFetch = Date.now();
     } catch (e) {
         console.error('Error refreshing bot roles cache:', e);
@@ -142,6 +143,7 @@ async function hasRole(userId, role) {
         case 'deposit_approver': return botRolesCache.depositApprovers.includes(id);
         case 'schedule_manager': return botRolesCache.scheduleManagers.includes(id);
         case 'user_manager': return botRolesCache.userManagers.includes(id);
+        case 'user_deleter': return botRolesCache.userDeleters.includes(id);
         default: return false;
     }
 }
@@ -152,7 +154,8 @@ function hasAnyRole(userId) {
     return botRolesCache.withdrawApprovers.includes(id) ||
            botRolesCache.depositApprovers.includes(id) ||
            botRolesCache.scheduleManagers.includes(id) ||
-           botRolesCache.userManagers.includes(id);
+           botRolesCache.userManagers.includes(id) ||
+           botRolesCache.userDeleters.includes(id);
 }
 
 refreshBotRolesCache();
@@ -256,7 +259,7 @@ function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, cred
     let text =
         `✅ <b>Depósito aprobado</b>\n\n` +
         `💰 Monto depositado: ${depositedAmountText}\n` +
-        `${currencySymbol} Se acreditaron ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
+        `${currencySymbol} ${creditedAmount === 1 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
 
     if (includeUsdFollowup) {
         text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -1618,10 +1621,24 @@ bot.action('withdraw', async (ctx) => {
             `\n\n⏰ Los retiros están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.`,
             { show_alert: true }
         );
-        return; // 🛑 Aquí se detiene, el usuario se queda en la misma pantalla
+        return;
     }
 
-    // Solo si está abierto continúa
+    const { data: pendingWd } = await supabase
+        .from('withdraw_requests')
+        .select('id')
+        .eq('user_id', ctx.from.id)
+        .eq('status', 'pending')
+        .limit(1);
+
+    if (pendingWd && pendingWd.length > 0) {
+        await ctx.answerCbQuery(
+            '⚠️ Tienes una solicitud en espera de aprobación. Por favor, vuelve cuando sea procesada.',
+            { show_alert: true }
+        );
+        return;
+    }
+
     if (ctx.session) ctx.session.withdrawFlowAllowed = true;
 
     const { data: methods } = await supabase
