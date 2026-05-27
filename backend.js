@@ -3348,7 +3348,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
                 `💰 Monto depositado: ${depositedAmountText}\n` +
-                `${currencySymbol} ${creditedAmount === 1 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+                `${currencySymbol} ${Math.abs(creditedAmount - 1) < 0.001 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
 
             if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -3807,8 +3807,9 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
 
         const verbForm = (diff, esRestTotal, singular, plural, singularEl, pluralLos) => {
             const amt = Math.abs(diff);
-            if (diff > 0) return amt === 1 ? singular : plural;
-            return esRestTotal ? (amt === 1 ? singularEl : pluralLos) : (amt === 1 ? singular : plural);
+            const esSingular = Math.abs(amt - 1) < 0.001;
+            if (diff > 0) return esSingular ? singular : plural;
+            return esRestTotal ? (esSingular ? singularEl : pluralLos) : (esSingular ? singular : plural);
         };
 
         // 1. Si el admin añadió bono y migró a CUP
@@ -3830,13 +3831,14 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
             let msg;
             if (cupUsdParts.length > 0) {
                 const movido = Math.abs(diffUsdReq) <= 0.001 ? 'al mismo' : 'a tu saldo principal';
-                const prefix = cupUsdParts.length === 1 && (Math.abs(diffCupReq) === 1 || Math.abs(diffUsdReq) === 1) ? 'Ha sido' : 'Han sido';
+                const allSingular = (Math.abs(diffCupReq) <= 0.001 || Math.abs(Math.abs(diffCupReq) - 1) < 0.001) && (Math.abs(diffUsdReq) <= 0.001 || Math.abs(Math.abs(diffUsdReq) - 1) < 0.001);
+                const prefix = allSingular ? 'Ha sido' : 'Han sido';
                 msg = `⚠️ ${prefix} ${cupUsdParts.join(' y ')}. Tu bono de bienvenida actual se ha movido ${movido}.`;
             } else {
                 const esRestaTotal = diffBonusReq < 0 && Math.abs(Math.abs(diffBonusReq) - oldBonus) < 0.001;
                 const verbo = verbForm(diffBonusReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
                 const prep = diffBonusReq > 0 ? 'a' : 'de';
-                const prefix = Math.abs(diffBonusReq) === 1 ? 'Ha sido' : 'Han sido';
+                const prefix = Math.abs(Math.abs(diffBonusReq) - 1) < 0.001 ? 'Ha sido' : 'Han sido';
                 msg = `⚠️ ${prefix} ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual, este se ha movido a tu saldo principal.`;
             }
 
@@ -3852,7 +3854,7 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
             const esRestaTotal = diffBonusReq < 0 && Math.abs(Math.abs(diffBonusReq) - oldBonus) < 0.001;
             const verbo = verbForm(diffBonusReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
             const prep = diffBonusReq > 0 ? 'a' : 'de';
-            const prefix = Math.abs(diffBonusReq) === 1 ? 'Ha sido' : 'Han sido';
+            const prefix = Math.abs(Math.abs(diffBonusReq) - 1) < 0.001 ? 'Ha sido' : 'Han sido';
             try {
                 await bot.telegram.sendMessage(telegramId,
                     adminHeader + `⚠️ ${prefix} ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual. Si crees que esto es incorrecto, por favor, contáctanos.`,
@@ -3877,7 +3879,7 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
                 partes.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD ${prep} tu saldo USD`);
             }
 
-            const allSingular = partes.length === 1 && (Math.abs(diffCupReq) === 1 || Math.abs(diffUsdReq) === 1);
+            const allSingular = (Math.abs(diffCupReq) <= 0.001 || Math.abs(Math.abs(diffCupReq) - 1) < 0.001) && (Math.abs(diffUsdReq) <= 0.001 || Math.abs(Math.abs(diffUsdReq) - 1) < 0.001);
             const prefix = allSingular ? 'Ha sido' : 'Han sido';
             const mensaje = adminHeader + `⚠️ ${prefix} ${partes.join(' y ')}. Si crees que esto es incorrecto, por favor, contáctanos.`;
             try {
@@ -4054,7 +4056,7 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
             ref_by: user.ref_by,
             deleted_at: new Date(),
             deleted_by: userId
-        }).then().catch(e => console.error('Error guardando en deleted_users:', e));
+        }).catch(e => console.error('Error guardando en deleted_users:', e));
 
         await supabase.from('bets').delete().eq('user_id', telegramId);
         await supabase.from('deposit_requests').delete().eq('user_id', telegramId);
@@ -4614,7 +4616,7 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
                 `💰 Monto depositado: ${depositedAmountText}\n` +
-                `${currencySymbol} ${creditedAmount === 1 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+                `${currencySymbol} ${Math.abs(creditedAmount - 1) < 0.001 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
 
             if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
