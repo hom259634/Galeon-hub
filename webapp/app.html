@@ -1916,7 +1916,6 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             document.getElementById('transferSection').classList.add('hidden');
         });
         document.getElementById('withdrawBtn').addEventListener('click', async () => {
-            // Asegurar que tenemos el estado más reciente antes de decidir
             await updateWithdrawTimeStatus();
 
             if (!withdrawAvailable) {
@@ -1926,7 +1925,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     position: 'topCenter',
                     timeout: 5000
                 });
-                return; // 🛑 Se queda en la vista de "Mi dinero", no muestra el formulario
+                return;
+            }
+
+            const pendingRes = await fetch(`/api/user/${currentUser.telegram_id}/pending-withdraw`);
+            const pendingData = await pendingRes.json();
+            if (pendingData.pending) {
+                iziToast.warning({
+                    message: '⚠️ Tienes una solicitud en espera de aprobación. Por favor, vuelve cuando sea procesada.',
+                    position: 'topCenter',
+                    timeout: 5000
+                });
+                return;
             }
 
             document.getElementById('withdrawSection').classList.toggle('hidden');
@@ -3941,6 +3951,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <th class="pb-2 pr-2 text-center" title="Aprobar retiros">📤 Retiros</th>
                                 <th class="pb-2 pr-2 text-center" title="Gestionar horario de retiros">🕐 Horario</th>
                                 <th class="pb-2 text-center" title="Gestión de Usuarios">👥 Usuarios</th>
+                                <th class="pb-2 pl-2 text-center text-xs text-gray-500" title="Eliminar usuarios">🗑️</th>
                             </tr>
                         </thead>
                         <tbody>`;
@@ -3969,6 +3980,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <td class="py-2 text-center">
                             <input type="checkbox" ${hasUsers ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'user_manager', this.checked)" class="w-5 h-5 accent-emerald-500 cursor-pointer">
                         </td>
+                        <td class="py-2 pl-2 text-center">
+                            <input type="checkbox" id="delChk_${u.telegram_id}" ${userRolesList.includes('user_deleter') ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'user_deleter', this.checked)" class="w-4 h-4 accent-red-500 cursor-pointer" ${!hasUsers ? 'disabled' : ''}>
+                        </td>
                     </tr>`;
                 }
                 html += `</tbody></table></div>`;
@@ -3982,7 +3996,6 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         // Función global para toggle de roles
         window.toggleUserRole = async (telegramId, role, enabled) => {
             try {
-                // Obtener roles actuales del usuario
                 const res = await fetch(`/api/admin/admin-roles/${telegramId}`);
                 if (!res.ok) throw new Error('Error al obtener roles');
                 const data = await res.json();
@@ -3992,6 +4005,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     if (!roles.includes(role)) roles.push(role);
                 } else {
                     roles = roles.filter(r => r !== role);
+                    if (role === 'user_manager') {
+                        roles = roles.filter(r => r !== 'user_deleter');
+                        const delChk = document.getElementById(`delChk_${telegramId}`);
+                        if (delChk) { delChk.checked = false; delChk.disabled = true; }
+                    }
+                }
+
+                if (role === 'user_manager' && enabled) {
+                    const delChk = document.getElementById(`delChk_${telegramId}`);
+                    if (delChk) delChk.disabled = false;
                 }
 
                 const saveRes = await fetch(`/api/admin/admin-roles/${telegramId}`, {
@@ -4153,7 +4176,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Depósitos</p>
-                                <p class="text-sm font-bold text-green-300 whitespace-nowrap">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
+                                <p class="text-base font-bold text-green-300 whitespace-nowrap">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
                             </div>
                         </div>
                         <div class="flex gap-2 col-span-2 md:col-span-2">
@@ -4163,7 +4186,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Retiros</p>
-                                <p class="text-sm font-bold text-red-300 whitespace-nowrap">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
+                                <p class="text-base font-bold text-red-300 whitespace-nowrap">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
                             </div>
                         </div>
                     </div>`;
@@ -4440,6 +4463,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 // Guardar los usuarios en una variable accesible para el filtrado
                 window._allUsers = users;
 
+                // Cargar usuarios eliminados
+                let deletedUsers = [];
+                try {
+                    const delRes = await fetch(`/api/admin/deleted-users?userId=${currentUser.telegram_id}`);
+                    if (delRes.ok) deletedUsers = await delRes.json();
+                } catch (_) {}
+                window._deletedUsers = deletedUsers;
+
                 let html = `<h4 class="text-xl font-semibold mb-4">👥 Gestión de Usuarios</h4>
                     <div class="flex gap-2 mb-4">
                         <input type="text" id="userSearchInput" placeholder="Buscar por ID o nombre..." class="w-auto min-w-0 p-3 rounded-xl bg-gray-800 text-white border border-cyan-500" size="22">
@@ -4457,12 +4488,37 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-blue-600 px-3 py-1 rounded-full text-sm" data-filter="referred">Refiriendo</button>
                         <button class="filter-btn bg-cyan-600 px-3 py-1 rounded-full text-sm" data-filter="withBets">Con jugadas</button>
                         <button class="filter-btn bg-red-700 px-3 py-1 rounded-full text-sm" data-filter="banned">🚫 Baneados</button>
+                        <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="deleted">🗑 Eliminados</button>
                     </div>
                     <div id="usersGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto pr-1">`;
+
+                function formatDate(dateStr) {
+                    if (!dateStr) return '';
+                    const d = new Date(dateStr);
+                    return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                }
 
                 function renderUserCards(filteredUsers) {
                     let cardsHtml = '';
                     filteredUsers.forEach(u => {
+                        const isDeleted = !!u._isDeleted;
+                        if (isDeleted) {
+                            const deletedClass = 'opacity-70 border border-gray-600';
+                            const deletedAt = formatDate(u.deleted_at);
+                            cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-default hover:bg-gray-700/60 transition user-card ${deletedClass}" data-userid="${u.telegram_id}" title="Eliminado el ${deletedAt}">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''} <span class="text-red-400 text-xs ml-2">🗑 ELIMINADO</span></p>
+                                        <p class="text-xs text-gray-400">ID: ${u.telegram_id}</p>
+                                        <p class="text-xs text-gray-500 mt-1">🗓 Eliminado: ${deletedAt}</p>
+                                    </div>
+                                    <div class="text-right text-sm text-gray-500 italic">
+                                        <p>Usuario eliminado</p>
+                                    </div>
+                                </div>
+                            </div>`;
+                            return;
+                        }
                         const cup = parseFloat(u.cup) || 0;
                         const usd = parseFloat(u.usd) || 0;
                         const bonus = parseFloat(u.bonus_cup) || 0;
@@ -4502,14 +4558,50 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     withReferrals: 'con referidos',
                     referred: 'refiriendo',
                     withBets: 'con jugadas',
-                    banned: 'baneados'
+                    banned: 'baneados',
+                    deleted: 'eliminados'
                 };
 
                 function applyFilter(filter) {
                     const searchText = container.querySelector('#userSearchInput')?.value.trim().toLowerCase() || '';
-                    const cards = container.querySelectorAll('#usersGrid .user-card');
                     const noMsg = container.querySelector('#noUsersMessage');
                     if (!noMsg) return;
+
+                    // Si veníamos del filtro deleted, re-renderizar la grilla con todos los usuarios
+                    const hasDeletedCards = container.querySelector('#usersGrid .user-card:not([onclick])');
+                    if (filter !== 'deleted' && hasDeletedCards) {
+                        const grid = container.querySelector('#usersGrid');
+                        grid.innerHTML = renderUserCards(window._allUsers || []);
+                    }
+
+                    // Manejar filtro de eliminados aparte
+                    if (filter === 'deleted') {
+                        const grid = container.querySelector('#usersGrid');
+                        let deletedCards = (window._deletedUsers || []).map(u => ({
+                            ...u,
+                            _isDeleted: true,
+                            cup: 0, usd: 0, bonus_cup: 0
+                        }));
+                        // Aplicar búsqueda por texto
+                        if (searchText) {
+                            deletedCards = deletedCards.filter(u =>
+                                (u.first_name || '').toLowerCase().includes(searchText) ||
+                                (u.username || '').toLowerCase().includes(searchText) ||
+                                String(u.telegram_id).includes(searchText)
+                            );
+                        }
+                        grid.innerHTML = renderUserCards(deletedCards);
+                        const count = deletedCards.length;
+                        if (count === 0) {
+                            noMsg.textContent = searchText ? '👤 Usuario no encontrado' : '📭 No hay usuarios eliminados';
+                            noMsg.classList.remove('hidden');
+                        } else {
+                            noMsg.classList.add('hidden');
+                        }
+                        return;
+                    }
+
+                    const cards = container.querySelectorAll('#usersGrid .user-card');
                     cards.forEach(card => {
                         const userId = parseInt(card.dataset.userid);
                         const user = window._allUsers.find(u => u.telegram_id === userId);
@@ -4646,7 +4738,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     </div>
                 </div>
                 <button id="saveBalanceBtn" onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
-                <button id="resetUserBtn" onclick="reiniciarUsuario(${telegramId})" class="w-full bg-yellow-700 py-3 rounded-xl mt-2 font-bold">🗑 Eliminar usuario</button>
+                ${isAdmin || userRoles.includes('user_deleter') ? `<button id="resetUserBtn" onclick="reiniciarUsuario(${telegramId})" class="w-full bg-yellow-700 py-3 rounded-xl mt-2 font-bold">🗑 Eliminar usuario</button>` : ''}
                 ${banButtonHtml}
                 <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
             `;
