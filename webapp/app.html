@@ -2088,6 +2088,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 return;
             }
 
+            const pendingCheck = await fetch(`/api/user/${currentUser.telegram_id}/pending-withdraw`);
+            const pendingData = await pendingCheck.json();
+            if (pendingData.pending) {
+                iziToast.warning({
+                    message: '⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.'
+                });
+                return;
+            }
+
             // Recoger datos de cuenta según el tipo
             let accountInfo = '';
             if (currency === 'USDT' || currency === 'TRX') {
@@ -4045,7 +4054,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const stats = await res.json();
 
                 if (stats.length === 0) {
-                    adminViewContainer.innerHTML = '<p class="text-gray-400">No hay sub-admins registrados.</p>';
+                    adminViewContainer.innerHTML = '<p class="text-gray-400">No hay Sub-admins registrados.</p>';
                     return;
                 }
 
@@ -4420,6 +4429,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }, 15000); // 15 segundos
 
         function escapeHTML(str) {
+            if (str == null) return '';
             return String(str).replace(/[&<>"]/g, function(m) {
                 if (m === '&') return '&amp;';
                 if (m === '<') return '&lt;';
@@ -4469,7 +4479,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const delRes = await fetch(`/api/admin/deleted-users?userId=${currentUser.telegram_id}`);
                     if (delRes.ok) deletedUsers = await delRes.json();
                 } catch (_) {}
-                window._deletedUsers = deletedUsers;
+                window._deletedUsers = Array.isArray(deletedUsers) ? deletedUsers : [];
 
                 let html = `<h4 class="text-xl font-semibold mb-4">👥 Gestión de Usuarios</h4>
                     <div class="flex gap-2 mb-4">
@@ -4499,6 +4509,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
 
                 function renderUserCards(filteredUsers) {
+                    if (!filteredUsers || !Array.isArray(filteredUsers)) return '';
                     let cardsHtml = '';
                     filteredUsers.forEach(u => {
                         const isDeleted = !!u._isDeleted;
@@ -4542,7 +4553,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     return cardsHtml;
                 }
 
-                html += renderUserCards(users);
+                html += renderUserCards(users || []);
                 html += `<div id="noUsersMessage" class="col-span-full text-center text-gray-400 py-8 hidden"></div>`;
                 html += `</div>`;
                 container.innerHTML = html;
@@ -4593,7 +4604,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         grid.innerHTML = renderUserCards(deletedCards);
                         const count = deletedCards.length;
                         if (count === 0) {
-                            noMsg.textContent = searchText ? '👤 Usuario no encontrado' : '📭 No hay usuarios eliminados';
+                            noMsg.textContent = searchText ? '👤 Usuario no encontrado' : 'No hay historial de usuarios eliminados.';
                             noMsg.classList.remove('hidden');
                         } else {
                             noMsg.classList.add('hidden');
@@ -4749,7 +4760,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const input = document.getElementById(field === 'cup' ? 'editCup' : (field === 'usd' ? 'editUsd' : 'editBonus'));
             if (input) {
                 let current = parseFloat(input.value) || 0;
-                input.value = Math.max(0, current + amount).toFixed(2);
+                const newVal = Math.max(0, current + amount);
+                console.log(`adjustBalance: field=${field}, amount=${amount}, current=${current}, newVal=${newVal}, input.value antes="${input.value}"`);
+                input.value = newVal.toFixed(2);
             }
         };
 
