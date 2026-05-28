@@ -4358,7 +4358,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             if (clicked) {
                 if (currency !== 'all') {
                     clicked.classList.remove('bg-green-600', 'bg-yellow-600', 'bg-orange-600', 'bg-red-600', 'bg-purple-600');
-                    clicked.textContent = `${currency} ${clicked.dataset.count || 0}`;
+                    clicked.textContent = `${currency} (${clicked.dataset.count || 0})`;
                 }
                 clicked.classList.add('active', 'bg-emerald-600');
             }
@@ -4513,14 +4513,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="deleted">🗑 Eliminados</button>
                     </div>
                     <div class="flex justify-between items-center mb-2 text-gray-400 text-sm px-1">
-                        <span>Total de usuarios registrados: <span id="userTotalCount" class="text-white font-semibold">${users ? users.length : 0}</span></span>
+                        <span><span id="userTotalLabel">Total de usuarios registrados</span>: <span id="userTotalCount" class="text-white font-semibold">${users ? users.length : 0}</span></span>
                     </div>
                     <div id="usersGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto pr-1">`;
 
                 function formatDate(dateStr) {
                     if (!dateStr) return '';
                     const d = new Date(dateStr);
-                    return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
                 }
 
                 function renderUserCards(filteredUsers) {
@@ -4534,9 +4534,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-default hover:bg-gray-700/60 transition user-card ${deletedClass}" data-userid="${u.telegram_id}" title="Eliminado el ${deletedAt}">
                                 <div class="flex justify-between items-start">
                                     <div>
-                                        <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''} <span class="text-red-400 text-xs ml-2">🗑 ELIMINADO</span></p>
+                                        <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''} <span class="text-red-400 text-xs ml-2">\n🗑 ELIMINADO</span></p>
                                         <p class="text-xs text-gray-400">ID: ${u.telegram_id}</p>
-                                        <p class="text-xs text-gray-500 mt-1">🗓 Eliminado: ${deletedAt}</p>
+                                        <p class="text-xs text-white mt-1">🗓 Eliminado: ${deletedAt}</p>
                                     </div>
                                     <div class="text-right text-sm text-gray-500 italic">
                                         <p>Usuario eliminado</p>
@@ -4593,11 +4593,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const noMsg = container.querySelector('#noUsersMessage');
                     if (!noMsg) return;
 
-                    // Si veníamos del filtro deleted, re-renderizar la grilla con todos los usuarios
-                    const hasDeletedCards = container.querySelector('#usersGrid .user-card:not([onclick])');
-                    if (filter !== 'deleted' && hasDeletedCards) {
+                    // Si veníamos del filtro deleted o la grilla está vacía, re-renderizar con todos los usuarios
+                    if (filter !== 'deleted') {
                         const grid = container.querySelector('#usersGrid');
-                        grid.innerHTML = renderUserCards(window._allUsers || []);
+                        if (!grid.querySelector('.user-card[onclick]')) {
+                            grid.innerHTML = renderUserCards(window._allUsers || []);
+                            grid.appendChild(noMsg);
+                        }
                     }
 
                     // Manejar filtro de eliminados aparte
@@ -4617,9 +4619,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             );
                         }
                         grid.innerHTML = renderUserCards(deletedCards);
+                        grid.appendChild(noMsg);
                         const count = deletedCards.length;
                         const countEl = document.getElementById('userTotalCount');
                         if (countEl) countEl.textContent = count;
+                        const labelEl = document.getElementById('userTotalLabel');
+                        if (labelEl) labelEl.textContent = `Total de usuarios ${filterNames[filter] || filter}`;
                         if (count === 0) {
                             noMsg.textContent = searchText ? '👤 Usuario no encontrado' : 'No hay historial de usuarios eliminados.';
                             noMsg.classList.remove('hidden');
@@ -4682,6 +4687,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const visibleCount = Array.from(cards).filter(c => c.style.display !== 'none').length;
                     const countEl = document.getElementById('userTotalCount');
                     if (countEl) countEl.textContent = visibleCount;
+                    const labelEl2 = document.getElementById('userTotalLabel');
+                    if (labelEl2) labelEl2.textContent = filter === 'all' ? 'Total de usuarios registrados' : `Total de usuarios ${filterNames[filter] || filter}`;
                     if (visibleCount === 0) {
                         if (searchText) {
                             noMsg.textContent = '👤 Usuario no encontrado';
@@ -4701,23 +4708,31 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (!container.dataset.muvEvents) {
                     container.dataset.muvEvents = '1';
                     container.addEventListener('click', (e) => {
-                        const filterBtn = e.target.closest('.filter-btn');
-                        if (filterBtn && window._manageUsersApplyFilter) {
-                            container.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active', 'bg-emerald-600'));
-                            filterBtn.classList.add('active', 'bg-emerald-600');
-                            window._manageUsersApplyFilter(filterBtn.dataset.filter);
-                            return;
-                        }
-                        const searchBtn = e.target.closest('#searchUserBtn2');
-                        if (searchBtn && window._manageUsersApplyFilter) {
-                            const activeFilter = container.querySelector('.filter-btn.active')?.dataset.filter || 'all';
-                            window._manageUsersApplyFilter(activeFilter);
+                        try {
+                            const filterBtn = e.target.closest('.filter-btn');
+                            if (filterBtn && window._manageUsersApplyFilter) {
+                                container.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active', 'bg-emerald-600'));
+                                filterBtn.classList.add('active', 'bg-emerald-600');
+                                window._manageUsersApplyFilter(filterBtn.dataset.filter);
+                                return;
+                            }
+                            const searchBtn = e.target.closest('#searchUserBtn2');
+                            if (searchBtn && window._manageUsersApplyFilter) {
+                                const activeFilter = container.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+                                window._manageUsersApplyFilter(activeFilter);
+                            }
+                        } catch (e) {
+                            console.error('Error en filtro:', e);
                         }
                     });
                     container.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter' && e.target.closest('#userSearchInput') && window._manageUsersApplyFilter) {
-                            const activeFilter = container.querySelector('.filter-btn.active')?.dataset.filter || 'all';
-                            window._manageUsersApplyFilter(activeFilter);
+                        try {
+                            if (e.key === 'Enter' && e.target.closest('#userSearchInput') && window._manageUsersApplyFilter) {
+                                const activeFilter = container.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+                                window._manageUsersApplyFilter(activeFilter);
+                            }
+                        } catch (e) {
+                            console.error('Error en búsqueda:', e);
                         }
                     });
                 }
@@ -4764,7 +4779,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 1)" class="bg-green-700 px-3 rounded-lg">+1</button>
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 10)" class="bg-green-600 px-3 rounded-lg">+10</button>
                         </div>
-                        <p class="text-xs text-gray-400 mt-1">Si el bono supera el mínimo de depósito, se migrará automáticamente a CUP.</p>
+                        <p class="text-xs text-gray-400 mt-1">Si el bono supera o iguala el mínimo de depósito, se migrará automáticamente a CUP.</p>
                     </div>
                 </div>
                 <button id="saveBalanceBtn" onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
