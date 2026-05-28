@@ -4209,10 +4209,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (data.deposits.length === 0) {
                     html += '<p class="text-gray-500 text-sm">Sin depósitos procesados.</p>';
                 } else {
+                    const depCounts = {};
+                    for (const d of data.deposits) depCounts[d.currency] = (depCounts[d.currency] || 0) + 1;
                     html += `<div class="flex flex-wrap gap-1 mb-3">
                         <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="all" onclick="filterCurrency('deposits','all')">Todos</button>`;
                     for (const cur of allCurrencies) {
-                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="${cur}" onclick="filterCurrency('deposits','${cur}')">${cur}</button>`;
+                        const cnt = depCounts[cur] || 0;
+                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('deposits','${cur}')">${cur}</button>`;
                     }
                     html += `</div>`;
                     html += `<div id="depositsList" class="max-h-64 overflow-y-auto space-y-1">`;
@@ -4238,10 +4241,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (data.withdrawals.length === 0) {
                     html += '<p class="text-gray-500 text-sm">Sin retiros procesados.</p>';
                 } else {
+                    const wdCounts = {};
+                    for (const w of data.withdrawals) wdCounts[w.currency] = (wdCounts[w.currency] || 0) + 1;
                     html += `<div class="flex flex-wrap gap-1 mb-3">
                         <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="all" onclick="filterCurrency('withdrawals','all')">Todos</button>`;
                     for (const cur of allCurrencies) {
-                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="${cur}" onclick="filterCurrency('withdrawals','${cur}')">${cur}</button>`;
+                        const cnt = wdCounts[cur] || 0;
+                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('withdrawals','${cur}')">${cur}</button>`;
                     }
                     html += `</div>`;
                     html += `<div id="withdrawalsList" class="max-h-64 overflow-y-auto space-y-1">`;
@@ -4343,10 +4349,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     b.classList.add(curColor(f));
                 }
             });
+            document.querySelectorAll(`[data-section="${section}"]`).forEach(b => {
+                const f = b.dataset.filter;
+                if (f === 'all') b.textContent = 'Todos';
+                else b.textContent = f;
+            });
             const clicked = document.querySelector(`[data-section="${section}"][data-filter="${currency}"]`);
             if (clicked) {
                 if (currency !== 'all') {
                     clicked.classList.remove('bg-green-600', 'bg-yellow-600', 'bg-orange-600', 'bg-red-600', 'bg-purple-600');
+                    clicked.textContent = `${currency} ${clicked.dataset.count || 0}`;
                 }
                 clicked.classList.add('active', 'bg-emerald-600');
             }
@@ -4500,6 +4512,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-red-700 px-3 py-1 rounded-full text-sm" data-filter="banned">🚫 Baneados</button>
                         <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="deleted">🗑 Eliminados</button>
                     </div>
+                    <div class="flex justify-between items-center mb-2 text-gray-400 text-sm px-1">
+                        <span>Total de usuarios registrados: <span id="userTotalCount" class="text-white font-semibold">${users ? users.length : 0}</span></span>
+                    </div>
                     <div id="usersGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto pr-1">`;
 
                 function formatDate(dateStr) {
@@ -4603,6 +4618,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         }
                         grid.innerHTML = renderUserCards(deletedCards);
                         const count = deletedCards.length;
+                        const countEl = document.getElementById('userTotalCount');
+                        if (countEl) countEl.textContent = count;
                         if (count === 0) {
                             noMsg.textContent = searchText ? '👤 Usuario no encontrado' : 'No hay historial de usuarios eliminados.';
                             noMsg.classList.remove('hidden');
@@ -4663,6 +4680,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     });
 
                     const visibleCount = Array.from(cards).filter(c => c.style.display !== 'none').length;
+                    const countEl = document.getElementById('userTotalCount');
+                    if (countEl) countEl.textContent = visibleCount;
                     if (visibleCount === 0) {
                         if (searchText) {
                             noMsg.textContent = '👤 Usuario no encontrado';
