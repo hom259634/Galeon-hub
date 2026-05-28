@@ -488,11 +488,14 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
             }
         } else {
             if (username && user.username !== username) {
-                await supabase
-                    .from('users')
-                    .update({ username })
-                    .eq('telegram_id', telegramId)
-                    .catch(e => console.error('Error actualizando username:', e));
+                try {
+                    await supabase
+                        .from('users')
+                        .update({ username })
+                        .eq('telegram_id', telegramId);
+                } catch (e) {
+                    console.error('Error actualizando username:', e);
+                }
             }
         }
         // Migrar el bono al saldo principal solo si el usuario ya tuvo al menos
@@ -1247,6 +1250,17 @@ app.post('/api/withdraw-requests', async (req, res) => {
     }
     if (method.max_amount !== null && parsedAmount > method.max_amount) {
         return res.status(400).json({ error: `Monto máximo: ${method.max_amount} ${currency}` });
+    }
+
+    const { data: existingPending } = await supabase
+        .from('withdraw_requests')
+        .select('id')
+        .eq('user_id', parseInt(userId))
+        .eq('status', 'pending')
+        .limit(1);
+
+    if (existingPending && existingPending.length > 0) {
+        return res.status(400).json({ error: 'Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.' });
     }
 
     // Calcular amount_usd igual que en el bot
@@ -3805,11 +3819,12 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
         const adminAddedBonus = diffBonusReq > 0.001;
         const bonusMigrated = (adminAddedBonus && finalBonus === 0) || existingBonusMigrated;
 
-        const verbForm = (diff, esRestTotal, singular, plural, singularEl, pluralLos) => {
+        const verbForm = (diff, esRestTotal, sumSingular, sumPlural, totalSingularEl, totalPluralLos) => {
             const amt = Math.abs(diff);
             const esSingular = Math.abs(amt - 1) < 0.001;
-            if (diff > 0) return esSingular ? singular : plural;
-            return esRestTotal ? (esSingular ? singularEl : pluralLos) : (esSingular ? singular : plural);
+            if (diff > 0) return esSingular ? sumSingular : sumPlural;
+            if (esRestTotal) return esSingular ? totalSingularEl : totalPluralLos;
+            return esSingular ? 'restado' : 'restados';
         };
 
         // 1. Si el admin añadió bono y migró a CUP
@@ -4046,17 +4061,22 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         const userFirstName = user.first_name;
         const userUsername = user.username;
 
-        await supabase.from('deleted_users').upsert({
-            telegram_id: user.telegram_id,
-            first_name: user.first_name,
-            username: user.username,
-            cup: user.cup,
-            usd: user.usd,
-            bonus_cup: user.bonus_cup,
-            ref_by: user.ref_by,
-            deleted_at: new Date(),
-            deleted_by: userId
-        }).catch(e => console.error('Error guardando en deleted_users:', e));
+        try {
+            const { error: upsertError } = await supabase.from('deleted_users').upsert({
+                telegram_id: user.telegram_id,
+                first_name: user.first_name,
+                username: user.username,
+                cup: user.cup,
+                usd: user.usd,
+                bonus_cup: user.bonus_cup,
+                ref_by: user.ref_by,
+                deleted_at: new Date(),
+                deleted_by: userId
+            });
+            if (upsertError) console.error('Error guardando en deleted_users:', upsertError);
+        } catch (e) {
+            console.error('Error guardando en deleted_users:', e);
+        }
 
         await supabase.from('bets').delete().eq('user_id', telegramId);
         await supabase.from('deposit_requests').delete().eq('user_id', telegramId);
