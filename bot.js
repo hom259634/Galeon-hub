@@ -3621,6 +3621,22 @@ bot.on(message('text'), async (ctx) => {
             if (existingWallet && existingNetwork) {
                 const accountInfo = `Wallet: ${existingWallet} (Red: ${existingNetwork})`;
                 try {
+                    // Re-verificar que no haya una solicitud pendiente creada por otro canal
+                    const { data: existingPending } = await supabase
+                        .from('withdraw_requests')
+                        .select('id')
+                        .eq('user_id', uid)
+                        .eq('status', 'pending')
+                        .limit(1);
+                    if (existingPending && existingPending.length > 0) {
+                        await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.');
+                        delete session.withdrawWallet; delete session.withdrawNetwork;
+                        delete session.withdrawMethod; delete session.withdrawTemplateKey;
+                        delete session.withdrawAmount; delete session.withdrawCurrency;
+                        delete session.withdrawAmountUSD; delete session.awaitingWithdrawAmount;
+                        delete session.withdrawFlowAllowed;
+                        return;
+                    }
                     const { data: request, error } = await supabase
                         .from('withdraw_requests')
                         .insert({
@@ -3644,13 +3660,12 @@ bot.on(message('text'), async (ctx) => {
                     for (const adminId of withdrawNotifyIds) {
                         try {
                             const sent = await ctx.telegram.sendMessage(adminId,
-                                `🟨 <b>Nueva solicitud de retiro</b>\n` +
-                                `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
-                                `Monto: ${amount} ${currency}\n` +
-                                `Wallet: ${escapeHTML(existingWallet)}\n` +
-                                `Red: ${escapeHTML(existingNetwork)}\n` +
-                                `Método: ${escapeHTML(method.name || '')}\n` +
-                                `ID solicitud: ${request.id}`,
+                                `📤 <b>Nueva solicitud de RETIRO</b>\n` +
+                                `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
+                                `💰 Monto: ${amount} ${currency}\n` +
+                                `🏦 Método: ${escapeHTML(method.name || '')}\n` +
+                                `📱 Wallet: ${escapeHTML(existingWallet)} (Red: ${escapeHTML(existingNetwork)})\n` +
+                                `✅ Confirmación: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
@@ -3704,6 +3719,21 @@ bot.on(message('text'), async (ctx) => {
             if (existingAccountCard || existingAccountMobile) {
                 const accountInfo = `${existingAccountCard ? `Tarjeta: ${existingAccountCard}` : ''}${existingAccountCard && existingAccountMobile ? ' · ' : ''}${existingAccountMobile ? `Móvil: ${existingAccountMobile}` : ''}`;
                 try {
+                    const { data: existingPending } = await supabase
+                        .from('withdraw_requests')
+                        .select('id')
+                        .eq('user_id', uid)
+                        .eq('status', 'pending')
+                        .limit(1);
+                    if (existingPending && existingPending.length > 0) {
+                        await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.');
+                        delete session.withdrawAccountCard; delete session.withdrawAccountMobile;
+                        delete session.withdrawMethod; delete session.withdrawTemplateKey;
+                        delete session.withdrawAmount; delete session.withdrawCurrency;
+                        delete session.withdrawAmountUSD; delete session.awaitingWithdrawAmount;
+                        delete session.awaitingWithdrawAccount; delete session.withdrawFlowAllowed;
+                        return;
+                    }
                     const { data: request, error } = await supabase
                         .from('withdraw_requests')
                         .insert({
@@ -3727,12 +3757,12 @@ bot.on(message('text'), async (ctx) => {
                     for (const adminId of withdrawNotifyIds2) {
                         try {
                             const sent = await ctx.telegram.sendMessage(adminId,
-                                `🟨 <b>Nueva solicitud de retiro</b>\n` +
-                                `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
-                                `Monto: ${amount} ${currency}\n` +
-                                `${escapeHTML(accountInfo)}\n` +
-                                `Método: ${escapeHTML(method.name || '')}\n` +
-                                `ID solicitud: ${request.id}`,
+                                `📤 <b>Nueva solicitud de RETIRO</b>\n` +
+                                `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
+                                `💰 Monto: ${amount} ${currency}\n` +
+                                `🏦 Método: ${escapeHTML(method.name || '')}\n` +
+                                `${existingAccountCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingAccountCard)}` : ''}${existingAccountCard && existingAccountMobile ? '\n' : ''}${existingAccountMobile ? `📞 Móvil: ${escapeHTML(existingAccountMobile)}` : ''}\n` +
+                                `✅ Confirmación: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
@@ -3778,6 +3808,21 @@ bot.on(message('text'), async (ctx) => {
                 if (existingCard || existingMobile) {
                     const accountInfo = `${existingCard ? `Tarjeta: ${existingCard}` : ''}${existingCard && existingMobile ? ' · ' : ''}${existingMobile ? `Móvil: ${existingMobile}` : ''}`;
                     try {
+                        const { data: existingPending } = await supabase
+                            .from('withdraw_requests')
+                            .select('id')
+                            .eq('user_id', uid)
+                            .eq('status', 'pending')
+                            .limit(1);
+                        if (existingPending && existingPending.length > 0) {
+                            await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.');
+                            delete session.withdrawAccountCard; delete session.withdrawAccountMobile;
+                            delete session.withdrawMethod; delete session.withdrawTemplateKey;
+                            delete session.withdrawAmount; delete session.withdrawCurrency;
+                            delete session.withdrawAmountUSD; delete session.awaitingWithdrawAmount;
+                            delete session.withdrawFlowAllowed;
+                            return;
+                        }
                         const { data: request, error } = await supabase
                             .from('withdraw_requests')
                             .insert({
@@ -3802,12 +3847,12 @@ bot.on(message('text'), async (ctx) => {
                         for (const adminId of withdrawNotifyIds3) {
                             try {
                                 const sent = await ctx.telegram.sendMessage(adminId,
-                                    `🟨 <b>Nueva solicitud de retiro</b>\n` +
-                                    `Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
-                                    `Monto: ${amount} ${currency}\n` +
-                                `${escapeHTML(accountInfo)}\n` +
-                                `Método: ${escapeHTML(method.name || '')}\n` +
-                                `ID solicitud: ${request.id}`,
+                                    `📤 <b>Nueva solicitud de RETIRO</b>\n` +
+                                    `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
+                                    `💰 Monto: ${amount} ${currency}\n` +
+                                    `🏦 Método: ${escapeHTML(method.name || '')}\n` +
+                                    `${existingCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingCard)}` : ''}${existingCard && existingMobile ? '\n' : ''}${existingMobile ? `📞 Móvil: ${escapeHTML(existingMobile)}` : ''}\n` +
+                                    `✅ Confirmación: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
@@ -3969,6 +4014,20 @@ bot.on(message('text'), async (ctx) => {
         const method = session.withdrawMethod;
         const amountUSD = session.withdrawAmountUSD;
         try {
+            const { data: existingPending } = await supabase
+                .from('withdraw_requests')
+                .select('id')
+                .eq('user_id', uid)
+                .eq('status', 'pending')
+                .limit(1);
+            if (existingPending && existingPending.length > 0) {
+                await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.');
+                delete session.awaitingWithdrawAccount; delete session.withdrawMethod;
+                delete session.withdrawTemplateKey; delete session.withdrawAmount;
+                delete session.withdrawCurrency; delete session.withdrawAmountUSD;
+                delete session.withdrawFlowAllowed;
+                return;
+            }
             const { data: request, error } = await supabase
                 .from('withdraw_requests')
                 .insert({
@@ -3997,7 +4056,7 @@ bot.on(message('text'), async (ctx) => {
                         `💰 Monto: ${amount} ${currency}\n` +
                         `🏦 Método: ${escapeHTML(method.name)}\n` +
                         `${escapeHTML(accountInfo)}\n` +
-                        `🆔 Solicitud: ${request.id}`,
+                        `✅ Confirmación: ${request.id}`,
                         {
                             parse_mode: 'HTML',
                             reply_markup: Markup.inlineKeyboard([

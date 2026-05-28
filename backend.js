@@ -1279,6 +1279,17 @@ app.post('/api/withdraw-requests', async (req, res) => {
         amount_usd = parseFloat(amount); // Asumimos 1:1
     }
 
+    // Safety check: re-verificar justo antes del insert para cerrar la ventana de race condition
+    const { data: safetyCheck } = await supabase
+        .from('withdraw_requests')
+        .select('id')
+        .eq('user_id', parseInt(userId))
+        .eq('status', 'pending')
+        .limit(1);
+    if (safetyCheck && safetyCheck.length > 0) {
+        return res.status(409).json({ error: 'Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.' });
+    }
+
     const { data: request, error: insertError } = await supabase
         .from('withdraw_requests')
         .insert({
@@ -1303,9 +1314,10 @@ app.post('/api/withdraw-requests', async (req, res) => {
     const wdEntries = [];
     for (const adminId of notifyIds) {
         try {
+            const accountEmoji = currency === 'USDT' || currency === 'TRX' ? '📱' : { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
             const sentMsg = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
-                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${user.first_name} (${userId})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountInfo}\n🆔 Solicitud: ${request.id}`,
+                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${user.first_name} (${userId})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountEmoji} ${accountInfo}\n✅ Confirmación: ${request.id}`,
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[
@@ -3846,8 +3858,8 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
             let msg;
             if (cupUsdParts.length > 0) {
                 const movido = Math.abs(diffUsdReq) <= 0.001 ? 'al mismo' : 'a tu saldo principal';
-                const allSingular = (Math.abs(diffCupReq) <= 0.001 || Math.abs(Math.abs(diffCupReq) - 1) < 0.001) && (Math.abs(diffUsdReq) <= 0.001 || Math.abs(Math.abs(diffUsdReq) - 1) < 0.001);
-                const prefix = allSingular ? 'Ha sido' : 'Han sido';
+                const hasSingular = (Math.abs(diffCupReq) > 0.001 && Math.abs(Math.abs(diffCupReq) - 1) < 0.001) || (Math.abs(diffUsdReq) > 0.001 && Math.abs(Math.abs(diffUsdReq) - 1) < 0.001);
+                const prefix = hasSingular ? 'Ha sido' : 'Han sido';
                 msg = `⚠️ ${prefix} ${cupUsdParts.join(' y ')}. Tu bono de bienvenida actual se ha movido ${movido}.`;
             } else {
                 const esRestaTotal = diffBonusReq < 0 && Math.abs(Math.abs(diffBonusReq) - oldBonus) < 0.001;
@@ -3894,8 +3906,8 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
                 partes.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD ${prep} tu saldo USD`);
             }
 
-            const allSingular = (Math.abs(diffCupReq) <= 0.001 || Math.abs(Math.abs(diffCupReq) - 1) < 0.001) && (Math.abs(diffUsdReq) <= 0.001 || Math.abs(Math.abs(diffUsdReq) - 1) < 0.001);
-            const prefix = allSingular ? 'Ha sido' : 'Han sido';
+            const hasSingular = (Math.abs(diffCupReq) > 0.001 && Math.abs(Math.abs(diffCupReq) - 1) < 0.001) || (Math.abs(diffUsdReq) > 0.001 && Math.abs(Math.abs(diffUsdReq) - 1) < 0.001);
+            const prefix = hasSingular ? 'Ha sido' : 'Han sido';
             const mensaje = adminHeader + `⚠️ ${prefix} ${partes.join(' y ')}. Si crees que esto es incorrecto, por favor, contáctanos.`;
             try {
                 await bot.telegram.sendMessage(telegramId, mensaje, { parse_mode: 'HTML' });
@@ -4862,6 +4874,15 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
 
+    // Guardar estado del override manual ANTES del upsert para distinguir
+    // si la sesión estaba abierta por horario programado o por apertura manual
+    const { data: prevOverrideData } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'withdraw_manual_override')
+        .single();
+    const prevManualOverride = prevOverrideData?.value;
+
     await supabase
         .from('app_config')
         .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
@@ -4869,11 +4890,15 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
     const nowOpen = await isWithdrawTime();
 
     if (wasOpen === nowOpen) {
-        return res.status(400).json({
-            error: wasOpen
-                ? 'La sesión ya está abierta por el horario programado. No se puede cerrar manualmente.'
-                : 'La sesión ya está cerrada fuera del horario programado.'
-        });
+        let errorMsg;
+        if (wasOpen) {
+            errorMsg = prevManualOverride === 'open'
+                ? 'La sesión ya está abierta fuera del horario programado.'
+                : 'La sesión ya está abierta por el horario programado.';
+        } else {
+            errorMsg = 'La sesión ya está cerrada fuera del horario programado.';
+        }
+        return res.status(400).json({ error: errorMsg });
     }
 
     // Apply expiry logic matching admin endpoint
