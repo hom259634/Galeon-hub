@@ -2092,7 +2092,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const pendingData = await pendingCheck.json();
             if (pendingData.pending) {
                 iziToast.warning({
-                    message: '⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.'
+                    message: '⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.'
                 });
                 return;
             }
@@ -2106,7 +2106,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.warning({ message: 'Debes ingresar dirección de wallet y red' });
                     return;
                 }
-                accountInfo = `Wallet: ${wallet} (Red: ${network})`;
+                accountInfo = `👝 Wallet: ${wallet} (Red: ${network})`;
             } else {
                 const card = document.getElementById('withdrawCard')?.value.trim();
                 const confirm = document.getElementById('withdrawConfirm')?.value.trim();
@@ -2114,7 +2114,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.warning({ message: 'Debes ingresar todos los datos de la cuenta' });
                     return;
                 }
-                accountInfo = `Tarjeta: ${card} | Confirmación: ${confirm}`;
+                accountInfo = `Tarjeta: ${card} | 📞 Confirmación: ${confirm}`;
             }
 
             // Limpiar campos y bloquear botón
@@ -3667,7 +3667,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <p class="font-medium">${escapeHTML(d.user_name)} ${d.username ? '@' + escapeHTML(d.username) : ''}</p>
                                 <p class="text-sm text-gray-300">💰 ${d.amount} ${d.currency}</p>
                                 <p class="text-xs text-gray-400">🏦 ${escapeHTML(d.method_name || 'N/A')}</p>
-                                <p class="text-xs text-gray-400">🆔 Solicitud #${d.id}</p>
+                                <p class="text-xs text-gray-400">🆔 Solicitud: ${d.id}</p>
                             </div>
                             <div class="flex gap-2">
                                 <button onclick="procesarDepositoRol(${d.id},'approve',this)" class="bg-green-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700">✅</button>
@@ -3704,7 +3704,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <p class="text-sm text-gray-300">💰 ${w.amount} ${w.currency}</p>
                                 <p class="text-xs text-gray-400">🏦 ${escapeHTML(w.method_name || 'N/A')}</p>
                                 <p class="text-xs text-gray-400">📞 ${escapeHTML(w.account_info || '')}</p>
-                                <p class="text-xs text-gray-400">🆔 Solicitud #${w.id}</p>
+                                <p class="text-xs text-gray-400">🆔 Solicitud: ${w.id}</p>
                             </div>
                             <div class="flex gap-2">
                                 <button onclick="procesarRetiroRol(${w.id},'approve',this)" class="bg-green-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700">✅</button>
@@ -4551,11 +4551,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const isBanned = !!u.is_banned;
                         const bannedClass = isBanned ? 'opacity-60 border border-red-500' : '';
                         const bannedBadge = isBanned ? '<span class="text-red-400 text-xs ml-2">🚫 BANEADO</span>' : '';
-                        cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-pointer hover:bg-gray-700/60 transition user-card ${bannedClass}" data-userid="${u.telegram_id}" onclick="openBalanceModal(${u.telegram_id}, '${escapeHTML(u.first_name || 'Sin nombre')}', ${cup}, ${usd}, ${bonus}, ${isBanned})">
+                        const bannedAtStr = u.banned_at ? formatDate(u.banned_at) : '';
+                        cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-pointer hover:bg-gray-700/60 transition user-card ${bannedClass}" data-userid="${u.telegram_id}" onclick="openBalanceModal(${u.telegram_id}, '${escapeHTML(u.first_name || 'Sin nombre')}', ${cup}, ${usd}, ${bonus}, ${isBanned}, '${bannedAtStr}')">
                             <div class="flex justify-between items-start">
                                 <div>
                                     <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''}${bannedBadge}</p>
                                     <p class="text-xs text-gray-400">ID: ${u.telegram_id}</p>
+                                    ${isBanned && bannedAtStr ? `<p class="text-xs text-white mt-1">🚫 Baneado: ${bannedAtStr}</p>` : ''}
                                 </div>
                                 <div class="text-right text-sm">
                                     <p>CUP: <span class="text-cyan-300">${cup.toFixed(2)}</span></p>
@@ -4742,13 +4744,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false) => {
+        window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false, bannedAt = '') => {
             const banButtonHtml = isBanned
                 ? `<button id="banUserBtn" onclick="desbanearUsuario(${telegramId})" class="w-full bg-green-700 py-3 rounded-xl mt-2 font-bold">✅ Desbanear usuario</button>`
                 : `<button id="banUserBtn" onclick="banearUsuario(${telegramId})" class="w-full bg-red-700 py-3 rounded-xl mt-2 font-bold">🚫 Banear usuario</button>`;
             modalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-4">Editar saldo de ${escapeHTML(name)} (ID: ${telegramId})</h4>
-                ${isBanned ? '<p class="text-red-400 font-bold mb-3">🚫 Este usuario está BANEADO</p>' : ''}
+                ${isBanned ? `<p class="text-red-400 font-bold mb-3">🚫 Este usuario está BANEADO</p>${bannedAt ? `<p class="text-white text-sm mb-3">🚫 Baneado: ${bannedAt}</p>` : ''}` : ''}
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm mb-1">CUP</label>
@@ -4779,7 +4781,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 1)" class="bg-green-700 px-3 rounded-lg">+1</button>
                             <button onclick="adjustBalance(${telegramId}, 'bonus_cup', 10)" class="bg-green-600 px-3 rounded-lg">+10</button>
                         </div>
-                        <p class="text-xs text-gray-400 mt-1">Si el bono supera o iguala el mínimo de depósito, se migrará automáticamente a CUP.</p>
+                        <p class="text-xs text-gray-400 mt-1">Si el bono iguala o supera el mínimo de depósito, se migrará automáticamente a CUP.</p>
                     </div>
                 </div>
                 <button id="saveBalanceBtn" onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
