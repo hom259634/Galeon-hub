@@ -2092,7 +2092,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const pendingData = await pendingCheck.json();
             if (pendingData.pending) {
                 iziToast.warning({
-                    message: '⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.'
+                    message: '⚠️ Tienes una solicitud en espera de aprobación. Por favor, vuelve cuando sea procesada.'
                 });
                 return;
             }
@@ -2106,7 +2106,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.warning({ message: 'Debes ingresar dirección de wallet y red' });
                     return;
                 }
-                accountInfo = `👝 Wallet: ${wallet} (Red: ${network})`;
+                accountInfo = `Wallet: ${wallet} (Red: ${network})`;
             } else {
                 const card = document.getElementById('withdrawCard')?.value.trim();
                 const confirm = document.getElementById('withdrawConfirm')?.value.trim();
@@ -3444,7 +3444,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                                 <p><strong>Usuario:</strong> ${escapeHTML(w.user_name)} (${w.user_id})</p>
                                                 <p><strong>Monto:</strong> ${w.amount} ${w.currency}</p>
                                                 <p><strong>Método:</strong> ${escapeHTML(w.method_name)}</p>
-                                                <p>${escapeHTML(w.account_info)}</p>
+                                                <p>${w.currency === 'USDT' || w.currency === 'TRX' ? '👝' : ({ CUP: '🇨🇺', USD: '💵', MLC: '🏦' }[w.currency] || '📞')} ${escapeHTML(w.account_info)}</p>
                                             </div>
                                             <div class="flex gap-2">
                                                 <button onclick="handlePending('withdraw', ${w.id}, 'approve', this)" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
@@ -3703,7 +3703,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <p class="font-medium">${escapeHTML(w.user_name)} ${w.username ? '@' + escapeHTML(w.username) : ''}</p>
                                 <p class="text-sm text-gray-300">💰 ${w.amount} ${w.currency}</p>
                                 <p class="text-xs text-gray-400">🏦 ${escapeHTML(w.method_name || 'N/A')}</p>
-                                <p class="text-xs text-gray-400">📞 ${escapeHTML(w.account_info || '')}</p>
+                                <p class="text-xs text-gray-400">${w.currency === 'USDT' || w.currency === 'TRX' ? '👝' : ({ CUP: '🇨🇺', USD: '💵', MLC: '🏦' }[w.currency] || '📞')} ${escapeHTML(w.account_info || '')}</p>
                                 <p class="text-xs text-gray-400">🆔 Solicitud: ${w.id}</p>
                             </div>
                             <div class="flex gap-2">
