@@ -931,7 +931,16 @@ app.use(async (req, res, next) => {
     if (userStr) {
         try {
             const tgUser = JSON.parse(userStr);
-            req.verifiedTelegramId = tgUser.id;   // <-- ID confiable
+            req.verifiedTelegramId = tgUser.id;
+
+            const { data: banCheck } = await supabase
+                .from('users')
+                .select('is_banned')
+                .eq('telegram_id', tgUser.id)
+                .single();
+            if (banCheck && banCheck.is_banned) {
+                return res.status(403).json({ error: 'Tu cuenta ha sido baneada.' });
+            }
         } catch (e) {}
     }
     next();
@@ -1260,7 +1269,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
         .limit(1);
 
     if (existingPending && existingPending.length > 0) {
-        return res.status(400).json({ error: 'Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.' });
+        return res.status(400).json({ error: 'Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.' });
     }
 
     // Calcular amount_usd igual que en el bot
@@ -1287,7 +1296,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
         .eq('status', 'pending')
         .limit(1);
     if (safetyCheck && safetyCheck.length > 0) {
-        return res.status(409).json({ error: 'Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.' });
+        return res.status(409).json({ error: 'Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.' });
     }
 
     const { data: request, error: insertError } = await supabase
@@ -1314,10 +1323,10 @@ app.post('/api/withdraw-requests', async (req, res) => {
     const wdEntries = [];
     for (const adminId of notifyIds) {
         try {
-            const accountEmoji = currency === 'USDT' || currency === 'TRX' ? '📱' : { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
+            const accountEmoji = currency === 'USDT' || currency === 'TRX' ? '👝' : { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
             const sentMsg = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
-                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${user.first_name} (${userId})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountEmoji} ${accountInfo}\n✅ Confirmación: ${request.id}`,
+                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${user.first_name} (${userId})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountEmoji} ${accountInfo}\n📞 Confirmación: ${request.id}`,
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[
@@ -3667,7 +3676,7 @@ app.get('/api/admin/users', async (req, res) => {
         // 1. Obtener todos los usuarios (incluyendo ref_by)
         const { data: users, error } = await supabase
             .from('users')
-            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by, is_banned')
+            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by, is_banned, banned_at')
             .order('first_name', { ascending: true });
 
         if (error) {
@@ -3703,7 +3712,8 @@ app.get('/api/admin/users', async (req, res) => {
             is_referred: !!u.ref_by,
             has_bets: usersWithBets.has(u.telegram_id),
             referral_count: referralCounts.get(u.telegram_id) || 0,
-            is_banned: !!u.is_banned
+            is_banned: !!u.is_banned,
+            banned_at: u.banned_at
         }));
 
         res.json(enrichedUsers);
@@ -3936,12 +3946,12 @@ app.post('/api/admin/users/:telegramId/ban', async (req, res) => {
     try {
         const { data, error } = await supabase
             .from('users')
-            .update({ is_banned: true, updated_at: new Date().toISOString() })
+            .update({ is_banned: true, banned_at: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq('telegram_id', telegramId)
             .select();
 
         if (error) {
-            return res.status(500).json({ error: 'No se pudo banear al usuario. Verifica que la columna is_banned exista en la tabla users.' });
+            return res.status(500).json({ error: 'No se pudo banear al usuario. Verifica que la columna is_banned y banned_at existan en la tabla users.' });
         }
 
         if (!data || data.length === 0) {
@@ -4028,7 +4038,7 @@ app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
     try {
         const { data, error } = await supabase
             .from('users')
-            .update({ is_banned: false, updated_at: new Date().toISOString() })
+            .update({ is_banned: false, banned_at: null, updated_at: new Date().toISOString() })
             .eq('telegram_id', telegramId)
             .select();
 

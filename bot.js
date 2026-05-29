@@ -3619,7 +3619,7 @@ bot.on(message('text'), async (ctx) => {
             const existingWallet = session.withdrawWallet;
             const existingNetwork = session.withdrawNetwork;
             if (existingWallet && existingNetwork) {
-                const accountInfo = `Wallet: ${existingWallet} (Red: ${existingNetwork})`;
+                const accountInfo = `👝 Wallet: ${existingWallet} (Red: ${existingNetwork})`;
                 try {
                     // Re-verificar que no haya una solicitud pendiente creada por otro canal
                     const { data: existingPending } = await supabase
@@ -3629,7 +3629,7 @@ bot.on(message('text'), async (ctx) => {
                         .eq('status', 'pending')
                         .limit(1);
                     if (existingPending && existingPending.length > 0) {
-                        await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.');
+                        await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.');
                         delete session.withdrawWallet; delete session.withdrawNetwork;
                         delete session.withdrawMethod; delete session.withdrawTemplateKey;
                         delete session.withdrawAmount; delete session.withdrawCurrency;
@@ -3664,8 +3664,8 @@ bot.on(message('text'), async (ctx) => {
                                 `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
                                 `💰 Monto: ${amount} ${currency}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
-                                `📱 Wallet: ${escapeHTML(existingWallet)} (Red: ${escapeHTML(existingNetwork)})\n` +
-                                `✅ Confirmación: ${request.id}`,
+                                `👝 Wallet: ${escapeHTML(existingWallet)} (Red: ${escapeHTML(existingNetwork)})\n` +
+                                `📞 Confirmación: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
@@ -3726,7 +3726,7 @@ bot.on(message('text'), async (ctx) => {
                         .eq('status', 'pending')
                         .limit(1);
                     if (existingPending && existingPending.length > 0) {
-                        await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.');
+                        await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.');
                         delete session.withdrawAccountCard; delete session.withdrawAccountMobile;
                         delete session.withdrawMethod; delete session.withdrawTemplateKey;
                         delete session.withdrawAmount; delete session.withdrawCurrency;
@@ -3762,7 +3762,7 @@ bot.on(message('text'), async (ctx) => {
                                 `💰 Monto: ${amount} ${currency}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                 `${existingAccountCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingAccountCard)}` : ''}${existingAccountCard && existingAccountMobile ? '\n' : ''}${existingAccountMobile ? `📞 Móvil: ${escapeHTML(existingAccountMobile)}` : ''}\n` +
-                                `✅ Confirmación: ${request.id}`,
+                                `📞 Confirmación: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
@@ -3815,7 +3815,7 @@ bot.on(message('text'), async (ctx) => {
                             .eq('status', 'pending')
                             .limit(1);
                         if (existingPending && existingPending.length > 0) {
-                            await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.');
+                            await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.');
                             delete session.withdrawAccountCard; delete session.withdrawAccountMobile;
                             delete session.withdrawMethod; delete session.withdrawTemplateKey;
                             delete session.withdrawAmount; delete session.withdrawCurrency;
@@ -3852,7 +3852,7 @@ bot.on(message('text'), async (ctx) => {
                                     `💰 Monto: ${amount} ${currency}\n` +
                                     `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                     `${existingCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingCard)}` : ''}${existingCard && existingMobile ? '\n' : ''}${existingMobile ? `📞 Móvil: ${escapeHTML(existingMobile)}` : ''}\n` +
-                                    `✅ Confirmación: ${request.id}`,
+                                    `📞 Confirmación: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
@@ -4021,7 +4021,7 @@ bot.on(message('text'), async (ctx) => {
                 .eq('status', 'pending')
                 .limit(1);
             if (existingPending && existingPending.length > 0) {
-                await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Espera a que sea procesada.');
+                await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.');
                 delete session.awaitingWithdrawAccount; delete session.withdrawMethod;
                 delete session.withdrawTemplateKey; delete session.withdrawAmount;
                 delete session.withdrawCurrency; delete session.withdrawAmountUSD;
@@ -4056,7 +4056,7 @@ bot.on(message('text'), async (ctx) => {
                         `💰 Monto: ${amount} ${currency}\n` +
                         `🏦 Método: ${escapeHTML(method.name)}\n` +
                         `${escapeHTML(accountInfo)}\n` +
-                        `✅ Confirmación: ${request.id}`,
+                        `📞 Confirmación: ${request.id}`,
                         {
                             parse_mode: 'HTML',
                             reply_markup: Markup.inlineKeyboard([
