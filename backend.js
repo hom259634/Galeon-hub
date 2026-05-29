@@ -1269,7 +1269,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
         .limit(1);
 
     if (existingPending && existingPending.length > 0) {
-        return res.status(400).json({ error: 'Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.' });
+        return res.status(400).json({ error: '⚠️ Tienes una solicitud en espera de aprobación. Por favor, vuelve cuando sea procesada.' });
     }
 
     // Calcular amount_usd igual que en el bot
@@ -1296,7 +1296,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
         .eq('status', 'pending')
         .limit(1);
     if (safetyCheck && safetyCheck.length > 0) {
-        return res.status(409).json({ error: 'Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.' });
+        return res.status(409).json({ error: '⚠️ Tienes una solicitud en espera de aprobación. Por favor, vuelve cuando sea procesada.' });
     }
 
     const { data: request, error: insertError } = await supabase
@@ -1326,7 +1326,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
             const accountEmoji = currency === 'USDT' || currency === 'TRX' ? '👝' : { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
             const sentMsg = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
-                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${user.first_name} (${userId})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountEmoji} ${accountInfo}\n📞 Confirmación: ${request.id}`,
+                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${user.first_name} (${userId})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountEmoji} ${accountInfo}\n🆔 Solicitud: ${request.id}`,
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[

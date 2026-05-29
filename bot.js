@@ -1172,7 +1172,12 @@ bot.use(async (ctx, next) => {
             ctx.dbUser = user || { cup: 0, usd: 0 };
 
             if (ctx.dbUser?.is_banned) {
-                await ctx.reply('⛔ Tu cuenta ha sido baneada.');
+                if (ctx.updateType === 'message' && ctx.message?.text) {
+                    return next();
+                }
+                if (ctx.updateType === 'callback_query') {
+                    await ctx.answerCbQuery('⛔ Bloqueado', { show_alert: true });
+                }
                 return;
             }
         } catch (e) {
@@ -2763,6 +2768,45 @@ bot.action(/support_reply_(\d+)/, async (ctx) => {
     await ctx.answerCbQuery();
 });
 
+// Acción para silenciar/desilenciar a un usuario del soporte
+bot.action(/support_mute_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id) && !hasAnyRole(ctx.from.id)) {
+        await ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
+        return;
+    }
+    const targetUid = parseInt(ctx.match[1]);
+    const { data: targetUser } = await supabase
+        .from('users')
+        .select('support_muted')
+        .eq('telegram_id', targetUid)
+        .maybeSingle();
+    const currentlyMuted = !!targetUser?.support_muted;
+    const newMuted = !currentlyMuted;
+    await supabase
+        .from('users')
+        .update({ support_muted: newMuted, updated_at: new Date() })
+        .eq('telegram_id', targetUid);
+    try {
+        await bot.telegram.sendMessage(targetUid,
+            newMuted ? '⛔ Sin acceso al soporte.' : '✅ Con acceso al soporte.');
+    } catch (e) {
+        console.warn(`Error notificando mute a ${targetUid}:`, e.message);
+    }
+    const muteBtnLabel = newMuted ? '🔊 Desilenciar' : '🔇 Silenciar';
+    try {
+        await ctx.editMessageText(ctx.callbackQuery.message.text || '', {
+            parse_mode: 'HTML',
+            reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('📩 Responder', `support_reply_${targetUid}`),
+                 Markup.button.callback(muteBtnLabel, `support_mute_${targetUid}`)]
+            ]).reply_markup
+        });
+    } catch (e) {
+        console.warn('Error editando mensaje de soporte:', e.message);
+    }
+    await ctx.answerCbQuery(newMuted ? '🔇 Silenciado' : '🔊 Desilenciado');
+});
+
 function hasActiveAdminFlow(session) {
     return !!(
         session.adminAction ||
@@ -2790,7 +2834,32 @@ bot.on(message('text'), async (ctx) => {
     const text = ctx.message.text.trim();
     const session = ctx.session;
     const user = ctx.dbUser;
-    //const broadcastMap = new Map();
+
+    if (user?.is_banned) {
+        if (!!user?.support_muted) {
+            await ctx.reply('⛔ Sin acceso al soporte.');
+            return;
+        }
+        const supportNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers]);
+        for (const adminId of supportNotifyIds) {
+            try {
+                await bot.telegram.sendMessage(adminId,
+                    `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name)} (${uid}) <b>[BANEADO]</b>:\n\n${escapeHTML(text)}`,
+                    {
+                        parse_mode: 'HTML',
+                        reply_markup: Markup.inlineKeyboard([
+                            [Markup.button.callback('📩 Responder', `support_reply_${uid}`),
+                             Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
+                        ]).reply_markup
+                    }
+                );
+            } catch (e) {
+                console.warn(`Error enviando soporte a admin ${adminId}:`, e.message);
+            }
+        }
+        await ctx.reply('✅ Tu mensaje ha sido enviado al equipo de soporte. Te responderemos a la brevedad.');
+        return;
+    }
 
     const normalizedText = text.toLowerCase();
     if (normalizedText === 'cancelar' || normalizedText === '/cancel' || normalizedText === '❌ cancelar') {
@@ -2804,7 +2873,7 @@ bot.on(message('text'), async (ctx) => {
     }
 
     // 1. Verificar si es un admin respondiendo a un usuario
-    if (isAdmin(uid) && session.supportReplyTo) {
+    if ((isAdmin(uid) || hasAnyRole(uid)) && session.supportReplyTo) {
         const targetUserId = session.supportReplyTo;
         try {
             await bot.telegram.sendMessage(targetUserId,
@@ -3619,7 +3688,7 @@ bot.on(message('text'), async (ctx) => {
             const existingWallet = session.withdrawWallet;
             const existingNetwork = session.withdrawNetwork;
             if (existingWallet && existingNetwork) {
-                const accountInfo = `👝 Wallet: ${existingWallet} (Red: ${existingNetwork})`;
+                const accountInfo = `Wallet: ${existingWallet} (Red: ${existingNetwork})`;
                 try {
                     // Re-verificar que no haya una solicitud pendiente creada por otro canal
                     const { data: existingPending } = await supabase
@@ -3629,7 +3698,7 @@ bot.on(message('text'), async (ctx) => {
                         .eq('status', 'pending')
                         .limit(1);
                     if (existingPending && existingPending.length > 0) {
-                        await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.');
+                        await ctx.reply('⚠️ Tienes una solicitud en espera de aprobación. Por favor, vuelve cuando sea procesada.');
                         delete session.withdrawWallet; delete session.withdrawNetwork;
                         delete session.withdrawMethod; delete session.withdrawTemplateKey;
                         delete session.withdrawAmount; delete session.withdrawCurrency;
@@ -3665,7 +3734,7 @@ bot.on(message('text'), async (ctx) => {
                                 `💰 Monto: ${amount} ${currency}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                 `👝 Wallet: ${escapeHTML(existingWallet)} (Red: ${escapeHTML(existingNetwork)})\n` +
-                                `📞 Confirmación: ${request.id}`,
+                                `🆔 Solicitud: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
@@ -3726,7 +3795,7 @@ bot.on(message('text'), async (ctx) => {
                         .eq('status', 'pending')
                         .limit(1);
                     if (existingPending && existingPending.length > 0) {
-                        await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.');
+                        await ctx.reply('⚠️ Tienes una solicitud en espera de aprobación. Por favor, vuelve cuando sea procesada.');
                         delete session.withdrawAccountCard; delete session.withdrawAccountMobile;
                         delete session.withdrawMethod; delete session.withdrawTemplateKey;
                         delete session.withdrawAmount; delete session.withdrawCurrency;
@@ -3762,7 +3831,7 @@ bot.on(message('text'), async (ctx) => {
                                 `💰 Monto: ${amount} ${currency}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                 `${existingAccountCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingAccountCard)}` : ''}${existingAccountCard && existingAccountMobile ? '\n' : ''}${existingAccountMobile ? `📞 Móvil: ${escapeHTML(existingAccountMobile)}` : ''}\n` +
-                                `📞 Confirmación: ${request.id}`,
+                                `🆔 Solicitud: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
@@ -3815,7 +3884,7 @@ bot.on(message('text'), async (ctx) => {
                             .eq('status', 'pending')
                             .limit(1);
                         if (existingPending && existingPending.length > 0) {
-                            await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.');
+                            await ctx.reply('⚠️ Tienes una solicitud en espera de aprobación. Por favor, vuelve cuando sea procesada.');
                             delete session.withdrawAccountCard; delete session.withdrawAccountMobile;
                             delete session.withdrawMethod; delete session.withdrawTemplateKey;
                             delete session.withdrawAmount; delete session.withdrawCurrency;
@@ -3852,7 +3921,7 @@ bot.on(message('text'), async (ctx) => {
                                     `💰 Monto: ${amount} ${currency}\n` +
                                     `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                     `${existingCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingCard)}` : ''}${existingCard && existingMobile ? '\n' : ''}${existingMobile ? `📞 Móvil: ${escapeHTML(existingMobile)}` : ''}\n` +
-                                    `📞 Confirmación: ${request.id}`,
+                                    `🆔 Solicitud: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
@@ -4008,7 +4077,7 @@ bot.on(message('text'), async (ctx) => {
 
     // --- Flujo: retiro no cripto - cuenta ---
     if (session.awaitingWithdrawAccount) {
-        const accountInfo = /^\w+:\s/.test(text) ? text : `📞 Cuenta: ${text}`;
+        const accountInfo = /^\w+:\s/.test(text) ? text : `Cuenta: ${text}`;
         const amount = session.withdrawAmount;
         const currency = session.withdrawCurrency;
         const method = session.withdrawMethod;
@@ -4021,7 +4090,7 @@ bot.on(message('text'), async (ctx) => {
                 .eq('status', 'pending')
                 .limit(1);
             if (existingPending && existingPending.length > 0) {
-                await ctx.reply('⚠️ Ya tienes una solicitud de retiro pendiente. Por favor, vuelve cuando sea procesada.');
+                await ctx.reply('⚠️ Tienes una solicitud en espera de aprobación. Por favor, vuelve cuando sea procesada.');
                 delete session.awaitingWithdrawAccount; delete session.withdrawMethod;
                 delete session.withdrawTemplateKey; delete session.withdrawAmount;
                 delete session.withdrawCurrency; delete session.withdrawAmountUSD;
@@ -4055,8 +4124,8 @@ bot.on(message('text'), async (ctx) => {
                         `👤 Usuario: ${ctx.from.first_name} (${uid})\n` +
                         `💰 Monto: ${amount} ${currency}\n` +
                         `🏦 Método: ${escapeHTML(method.name)}\n` +
-                        `${escapeHTML(accountInfo)}\n` +
-                        `📞 Confirmación: ${request.id}`,
+                        `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} ${escapeHTML(accountInfo)}\n` +
+                        `🆔 Solicitud: ${request.id}`,
                         {
                             parse_mode: 'HTML',
                             reply_markup: Markup.inlineKeyboard([
@@ -4648,6 +4717,10 @@ bot.on(message('text'), async (ctx) => {
         }
     }
     if (!isAdmin(uid) && !hasAnyRole(uid)) {
+        if (!!user?.support_muted) {
+            await ctx.reply('⛔ Sin acceso al soporte.');
+            return;
+        }
         // Reenviar a todos los admins y subadmins
         const supportNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers]);
         for (const adminId of supportNotifyIds) {
@@ -4657,7 +4730,8 @@ bot.on(message('text'), async (ctx) => {
                     {
                         parse_mode: 'HTML',
                         reply_markup: Markup.inlineKeyboard([
-                            [Markup.button.callback('📩 Responder', `support_reply_${uid}`)]
+                            [Markup.button.callback('📩 Responder', `support_reply_${uid}`),
+                             Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
                         ]).reply_markup
                     }
                 );
@@ -4674,8 +4748,12 @@ bot.on(message('text'), async (ctx) => {
                 Markup.button.callback('🗑 Eliminar envío', `delete_broadcast_${ctx.message.message_id}`)
             ]));
         } else {
-            // Usuario normal sin flujo → mensaje de soporte (comportamiento original)
-            const supportNotifyIds2 = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers]);
+            // Usuario con rol sin flujo → mensaje de soporte (solo a super admins)
+            if (!!user?.support_muted) {
+                await ctx.reply('⛔ Sin acceso al soporte.');
+                return;
+            }
+            const supportNotifyIds2 = new Set(ADMIN_IDS);
             for (const adminId of supportNotifyIds2) {
                 try {
                     await bot.telegram.sendMessage(adminId,
@@ -4683,7 +4761,8 @@ bot.on(message('text'), async (ctx) => {
                         {
                             parse_mode: 'HTML',
                             reply_markup: Markup.inlineKeyboard([
-                                [Markup.button.callback('📩 Responder', `support_reply_${uid}`)]
+                                [Markup.button.callback('📩 Responder', `support_reply_${uid}`),
+                                 Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
                             ]).reply_markup
                         }
                     );
