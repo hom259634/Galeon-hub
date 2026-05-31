@@ -3429,7 +3429,7 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
         try {
             await bot.telegram.sendMessage(
                 request.user_id,
-                `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
+                `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`,
                 { parse_mode: 'HTML' }
             );
         } catch (e) {
@@ -3654,7 +3654,7 @@ app.post('/api/admin/pending-withdraws/:id/reject', requireAdmin, async (req, re
 
     try {
         await bot.telegram.sendMessage(request.user_id,
-            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`,
             { parse_mode: 'HTML' }
         );
     } catch (e) {}
@@ -3961,6 +3961,12 @@ app.post('/api/admin/users/:telegramId/ban', async (req, res) => {
         res.json({ success: true });
 
         const bannedUser = data[0];
+        if (bannedUser) {
+            bot.telegram.sendMessage(telegramId,
+                `🚫 Tu cuenta ha sido baneada.`,
+                { parse_mode: 'HTML' }
+            ).catch(e => console.error('Error notificando al usuario baneado:', e));
+        }
         if (bannedUser && bannedUser.ref_by) {
             (async () => {
                 try {
@@ -4480,7 +4486,7 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
             amount_cup: Math.round(((d.currency === 'CUP' ? (parseFloat(d.amount) || 0) : (parseFloat(d.amount) || 0) * (rateMap[d.currency?.toLowerCase()] || 0))) * 100) / 100,
             currency: d.currency,
             processed_at: d.processed_at,
-            type: 'deposito'
+            type: 'depósito'
         }));
 
         let rejectedWithdrawals = (wdRejRes.data || []).map(w => ({
@@ -4688,7 +4694,7 @@ app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
     res.json({ success: true });
     (async () => {
         try {
-            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`, { parse_mode: 'HTML' });
+            if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`, { parse_mode: 'HTML' });
         } catch (e) {}
         updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
     })();
@@ -4765,7 +4771,7 @@ app.post('/api/admin/pending-withdraws-role/:id/reject', async (req, res) => {
     if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     try {
         if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id,
-            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
     updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`);

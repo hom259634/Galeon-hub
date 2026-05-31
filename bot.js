@@ -2836,6 +2836,11 @@ bot.on(message('text'), async (ctx) => {
     const user = ctx.dbUser;
 
     if (user?.is_banned) {
+        const bannedButtonTexts = ['🎲 Jugar', '💰 Mi dinero', '📋 Mis jugadas', '👥 Referidos', '❓ Cómo jugar', '🌐 Abrir Web-App', '🔧 Admin', '❌ Cancelar'];
+        if (text.startsWith('/') || bannedButtonTexts.includes(text)) {
+            await ctx.reply('🚫 Tu cuenta ha sido baneada.');
+            return;
+        }
         if (!!user?.support_muted) {
             await ctx.reply('⛔ Sin acceso al soporte.');
             return;
@@ -3752,7 +3757,7 @@ bot.on(message('text'), async (ctx) => {
                         `💰 Monto: ${amount} ${currency}\n` +
                         `👝 Wallet: ${escapeHTML(existingWallet)}\n` +
                         `🔗 Red: ${escapeHTML(existingNetwork)}\n` +
-                        `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor espera a que sea aprobada.`,
+                        `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor, espera a que sea aprobada.`,
                         { parse_mode: 'HTML' }
                     );
 
@@ -3850,7 +3855,7 @@ bot.on(message('text'), async (ctx) => {
                         `💰 Monto: ${amount} ${currency}\n` +
                         `${existingAccountCard ? `${cardEmoji} Tarjeta: ${escapeHTML(existingAccountCard)}\n` : ''}` +
                         `${existingAccountMobile ? `📞 Móvil: ${escapeHTML(existingAccountMobile)}\n` : ''}` +
-                        `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor espera a que sea aprobada.`,
+                        `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor, espera a que sea aprobada.`,
                         { parse_mode: 'HTML' }
                     );
 
@@ -3941,7 +3946,7 @@ bot.on(message('text'), async (ctx) => {
                             `💰 Monto: ${amount} ${currency}\n` +
                             `${existingCard ? `${cardEmoji} Tarjeta: ${escapeHTML(existingCard)}\n` : ''}` +
                             `${existingMobile ? `📞 Móvil: ${escapeHTML(existingMobile)}\n` : ''}` +
-                            `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor espera a que sea aprobada.`,
+                            `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor, espera a que sea aprobada.`,
                             { parse_mode: 'HTML' }
                         );
 
@@ -4994,7 +4999,7 @@ bot.action(/reject_deposit_(\d+)/, async (ctx) => {
             try {
                 await ctx.telegram.sendMessage(
                     request.user_id,
-                    `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
+                    `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`,
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
@@ -5088,7 +5093,7 @@ bot.action(/reject_withdraw_(\d+)/, async (ctx) => {
 
         // Operaciones posteriores: si fallan no deben mostrar error al admin
         ctx.telegram.sendMessage(request.user_id,
-            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor contáctanos para más información.`,
+            `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`,
             { parse_mode: 'HTML' }
         ).catch(() => {});
         updatePendingNotifications(`withdraw_${requestId}`, `❌ <b>Retiro #${requestId} rechazado</b> por un administrador.`);
