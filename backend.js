@@ -4890,15 +4890,6 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
 
-    // Guardar estado del override manual ANTES del upsert para distinguir
-    // si la sesión estaba abierta por horario programado o por apertura manual
-    const { data: prevOverrideData } = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', 'withdraw_manual_override')
-        .single();
-    const prevManualOverride = prevOverrideData?.value;
-
     await supabase
         .from('app_config')
         .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
@@ -4908,9 +4899,14 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
     if (wasOpen === nowOpen) {
         let errorMsg;
         if (wasOpen) {
-            errorMsg = prevManualOverride === 'open'
-                ? 'La sesión ya está abierta fuera del horario programado.'
-                : 'La sesión ya está abierta por el horario programado.';
+            const now = moment.tz(TIMEZONE);
+            const currentHour = now.hour() + now.minute() / 60;
+            const insideWindow = currentHour >= start && currentHour < end;
+            if (insideWindow) {
+                errorMsg = 'La sesión ya está abierta por el horario programado.';
+            } else {
+                errorMsg = 'La sesión ya está abierta fuera del horario programado.';
+            }
         } else {
             errorMsg = 'La sesión ya está cerrada fuera del horario programado.';
         }
