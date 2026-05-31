@@ -2039,7 +2039,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     depositSendBtn.disabled = false;
                     depositSendBtn.innerHTML = depositBtnOriginalHTML;
-                    iziToast.success({ message: 'Solicitud enviada' });
+                    iziToast.success({ message: 'Solicitud enviada. En breve será procesada. Por favor, espera...' });
                     document.getElementById('rechargeSection').classList.add('hidden');
                 } else {
                     const err = await res.json();
@@ -2143,7 +2143,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                     withdrawSendBtn.disabled = false;
                     withdrawSendBtn.innerHTML = withdrawBtnOriginalHTML;
-                    iziToast.success({ message: 'Solicitud enviada' });
+                    iziToast.success({ message: 'Solicitud enviada. En breve será procesada. Por favor, espera...' });
                     document.getElementById('withdrawSection').classList.add('hidden');
                 } else {
                     const err = await res.json();
@@ -4185,7 +4185,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Depósitos</p>
-                                <p class="text-base font-bold text-green-300 whitespace-nowrap">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
+                                <p class="text-base font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
                             </div>
                         </div>
                         <div class="flex gap-2 col-span-2 md:col-span-2">
@@ -4195,7 +4195,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Retiros</p>
-                                <p class="text-base font-bold text-red-300 whitespace-nowrap">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
+                                <p class="text-base font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
                             </div>
                         </div>
                     </div>`;
@@ -4291,8 +4291,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <tbody>`;
                     for (const r of rej) {
                         const timeStr = formatTime12h(r.processed_at);
-                        const typeIcon = r.type === 'deposito' ? '📥' : '📤';
-                        const typeColor = r.type === 'deposito' ? 'text-cyan-300' : 'text-pink-300';
+                        const typeIcon = r.type === 'depósito' ? '📥' : '📤';
+                        const typeColor = r.type === 'depósito' ? 'text-cyan-300' : 'text-pink-300';
                         const amtColor = r.currency === 'USD' ? 'text-yellow-300' : 'text-gray-200';
                         html += `<tr class="border-b border-gray-700/50">
                             <td class="py-2 pr-2">${escapeHTML(r.user_name)} ${r.username ? '@'+escapeHTML(r.username) : ''}</td>
@@ -4898,6 +4898,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         if (d.status === 'approved') {
                             if (d.currency === 'CUP') totalDepCUP += parseFloat(d.amount) || 0;
                             else if (d.currency === 'USD') totalDepUSD += parseFloat(d.amount) || 0;
+                            else {
+                                const rate = d.currency === 'MLC' ? exchangeRates.rate_mlc
+                                           : d.currency === 'USDT' ? exchangeRates.rate_usdt
+                                           : d.currency === 'TRX' ? exchangeRates.rate_trx : 0;
+                                totalDepCUP += (parseFloat(d.amount) || 0) * rate;
+                            }
                         }
                     });
 
@@ -4905,6 +4911,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         if (w.status === 'approved') {
                             if (w.currency === 'CUP') totalWithCUP += parseFloat(w.amount) || 0;
                             else if (w.currency === 'USD') totalWithUSD += parseFloat(w.amount) || 0;
+                            else {
+                                const rate = w.currency === 'MLC' ? exchangeRates.rate_mlc
+                                           : w.currency === 'USDT' ? exchangeRates.rate_usdt
+                                           : w.currency === 'TRX' ? exchangeRates.rate_trx : 0;
+                                totalWithCUP += (parseFloat(w.amount) || 0) * rate;
+                            }
                         }
                     });
 
