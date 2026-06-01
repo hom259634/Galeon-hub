@@ -4939,7 +4939,7 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
         return res.status(400).json({
             error: wasOpen
                 ? 'La sesión ya está abierta fuera del horario programado.'
-                : 'La sesión ya está cerrada fuera del horario programado.'
+                : 'La sesión ya está cerrada por el horario programado.'
         });
     }
 
