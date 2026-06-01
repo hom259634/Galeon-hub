@@ -3829,11 +3829,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const funcionesSection = document.getElementById('section-funciones-admin');
             if (funcionesSection) funcionesSection.classList.add('hidden-section');
 
+            const adminSection = document.getElementById('section-admin');
+            if (adminSection) adminSection.classList.remove('hidden-section');
+
             adminViewContainer.classList.remove('hidden');
             adminViewContainer.innerHTML = '<div class="loader"></div> Cargando mi actividad...';
             await renderSubadminDetailView(currentUser.telegram_id, {}, {
                 hideDeposits: !userRoles.includes('deposit_approver'),
-                hideWithdrawals: !userRoles.includes('withdraw_approver')
+                hideWithdrawals: !userRoles.includes('withdraw_approver'),
+                onBack: "showSection('funciones-admin')"
             });
         };
 
@@ -4171,8 +4175,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const st = timeTo12h(filters.start_time);
                 const et = timeTo12h(filters.end_time);
 
+                const backAction = options.onBack || "renderSubadminStatsView()";
                 let html = `<div class="mb-4">
-                    <button onclick="renderSubadminStatsView()" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
+                    <button onclick="${backAction}" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
                         <i class="fas fa-arrow-left mr-1"></i> Volver
                     </button>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
