@@ -113,7 +113,7 @@ function isAdmin(userId) {
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
-let botRolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], lastFetch: 0 };
+let botRolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], activitySelf: [], lastFetch: 0 };
 const BOT_ROLES_CACHE_TTL = 60000;
 
 async function refreshBotRolesCache() {
@@ -124,6 +124,7 @@ async function refreshBotRolesCache() {
         botRolesCache.scheduleManagers = data?.filter(r => r.role === 'schedule_manager').map(r => Number(r.telegram_id)) || [];
         botRolesCache.userManagers = data?.filter(r => r.role === 'user_manager').map(r => Number(r.telegram_id)) || [];
         botRolesCache.userDeleters = data?.filter(r => r.role === 'user_deleter').map(r => Number(r.telegram_id)) || [];
+        botRolesCache.activitySelf = data?.filter(r => r.role === 'activity_self').map(r => Number(r.telegram_id)) || [];
         botRolesCache.lastFetch = Date.now();
     } catch (e) {
         console.error('Error refreshing bot roles cache:', e);
@@ -144,6 +145,7 @@ async function hasRole(userId, role) {
         case 'schedule_manager': return botRolesCache.scheduleManagers.includes(id);
         case 'user_manager': return botRolesCache.userManagers.includes(id);
         case 'user_deleter': return botRolesCache.userDeleters.includes(id);
+        case 'activity_self': return botRolesCache.activitySelf.includes(id);
         default: return false;
     }
 }
@@ -155,7 +157,8 @@ function hasAnyRole(userId) {
            botRolesCache.depositApprovers.includes(id) ||
            botRolesCache.scheduleManagers.includes(id) ||
            botRolesCache.userManagers.includes(id) ||
-           botRolesCache.userDeleters.includes(id);
+           botRolesCache.userDeleters.includes(id) ||
+           botRolesCache.activitySelf.includes(id);
 }
 
 refreshBotRolesCache();

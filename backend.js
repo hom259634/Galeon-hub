@@ -62,7 +62,7 @@ function isAdmin(userId) {
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
-let rolesCache = { depositApprovers: [], withdrawApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], lastFetch: 0 };
+let rolesCache = { depositApprovers: [], withdrawApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], activitySelf: [], lastFetch: 0 };
 const ROLES_CACHE_TTL = 60000;
 
 async function refreshRolesCache() {
@@ -73,6 +73,7 @@ async function refreshRolesCache() {
         rolesCache.scheduleManagers = data?.filter(r => r.role === 'schedule_manager').map(r => Number(r.telegram_id)) || [];
         rolesCache.userManagers = data?.filter(r => r.role === 'user_manager').map(r => Number(r.telegram_id)) || [];
         rolesCache.userDeleters = data?.filter(r => r.role === 'user_deleter').map(r => Number(r.telegram_id)) || [];
+        rolesCache.activitySelf = data?.filter(r => r.role === 'activity_self').map(r => Number(r.telegram_id)) || [];
         rolesCache.lastFetch = Date.now();
     } catch (e) {
         console.error('Error refreshing roles cache:', e);
@@ -92,6 +93,7 @@ async function getUserRoles(userId) {
     if (rolesCache.scheduleManagers.includes(id)) roles.push('schedule_manager');
     if (rolesCache.userManagers.includes(id)) roles.push('user_manager');
     if (rolesCache.userDeleters.includes(id)) roles.push('user_deleter');
+    if (rolesCache.activitySelf.includes(id)) roles.push('activity_self');
     return roles;
 }
 
@@ -105,6 +107,7 @@ async function hasRole(userId, role) {
         case 'schedule_manager': return rolesCache.scheduleManagers.includes(id);
         case 'user_manager': return rolesCache.userManagers.includes(id);
         case 'user_deleter': return rolesCache.userDeleters.includes(id);
+        case 'activity_self': return rolesCache.activitySelf.includes(id);
         default: return false;
     }
 }
@@ -2622,42 +2625,43 @@ app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => 
         return res.status(400).json({ error: 'Acción inválida. Use "open" o "close".' });
     }
 
-    // Estado antes del cambio
-    const before = await isWithdrawTime();
-
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
+    const before = await isWithdrawTime();
     const startStr = formatHour12(start);
     const endStr = formatHour12(end);
+
+    const now = moment.tz(TIMEZONE);
+    const currentHour = now.hour() + now.minute() / 60;
+    const insideWindow = currentHour >= start && currentHour < end;
+
+    // Dentro del horario programado → el toggle manual no tiene efecto
+    if (insideWindow) {
+        return res.status(400).json({
+            error: action === 'open'
+                ? 'La sesión ya está abierta por el horario programado.'
+                : 'La sesión ya está abierta por el horario programado. No se puede cerrar manualmente.'
+        });
+    }
+
+    // Fuera del horario: solo cambiar si realmente cambia el estado
+    if ((action === 'open' && before) || (action === 'close' && !before)) {
+        return res.status(400).json({
+            error: before
+                ? 'La sesión ya está abierta fuera del horario programado.'
+                : 'La sesión ya está cerrada fuera del horario programado.'
+        });
+    }
 
     // Actualizar el flag de anulación manual
     await supabase
         .from('app_config')
         .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
 
-    // Verificar si el cambio realmente afectó el estado
-    const after = await isWithdrawTime();
-
-    if (before === after) {
-        // Estado no cambió (ej: cerrar dentro del horario programado, o abrir cuando ya está abierto)
-        return res.status(400).json({
-            error: before
-                ? 'La sesión ya está abierta por el horario programado. No se puede cerrar manualmente.'
-                : 'La sesión ya está cerrada fuera del horario programado.'
-        });
-    }
-
-    const now = moment.tz(TIMEZONE);
     let expiryDate = null;
 
     if (action === 'open') {
-        const currentHour = now.hour() + now.minute() / 60;
-        const insideWindow = currentHour >= start && currentHour < end;
-        if (insideWindow) {
-            expiryDate = now.clone().startOf('day').add(end, 'hours').toDate();
-        } else {
-            await clearManualOverrideExpiry();
-        }
+        await clearManualOverrideExpiry();
     } else {
         const todayStart = now.clone().startOf('day').add(start, 'hours');
         if (now.isBefore(todayStart)) {
@@ -4252,7 +4256,7 @@ app.put('/api/admin/admin-roles/:telegramId', requireAdmin, async (req, res) => 
             return res.status(400).json({ error: 'roles debe ser un array' });
         }
 
-        const validRoles = ['deposit_approver', 'withdraw_approver', 'schedule_manager', 'user_manager', 'user_deleter'];
+        const validRoles = ['deposit_approver', 'withdraw_approver', 'schedule_manager', 'user_manager', 'user_deleter', 'activity_self'];
         for (const role of roles) {
             if (!validRoles.includes(role)) {
                 return res.status(400).json({ error: `Rol inválido: ${role}` });
@@ -4309,17 +4313,24 @@ app.get('/api/admin/subadmin-stats', requireAdmin, async (req, res) => {
         const userMap = {};
         for (const u of users || []) userMap[Number(u.telegram_id)] = u;
 
+        const startISO = moment.tz(TIMEZONE).startOf('day').toDate().toISOString();
+        const endISO = moment.tz(TIMEZONE).endOf('day').toDate().toISOString();
+
         const { data: allDeposits } = await supabase
             .from('deposit_requests')
             .select('processed_by, amount, currency')
             .eq('status', 'approved')
-            .in('processed_by', subadminIds);
+            .in('processed_by', subadminIds)
+            .gte('processed_at', startISO)
+            .lte('processed_at', endISO);
 
         const { data: allWithdrawals } = await supabase
             .from('withdraw_requests')
             .select('processed_by, amount, currency')
             .eq('status', 'approved')
-            .in('processed_by', subadminIds);
+            .in('processed_by', subadminIds)
+            .gte('processed_at', startISO)
+            .lte('processed_at', endISO);
 
         const rates = await getExchangeRates();
         const result = [];
@@ -4369,12 +4380,23 @@ app.get('/api/admin/subadmin-stats', requireAdmin, async (req, res) => {
 });
 
 // Detalle individual de un subadmin
-app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) => {
+app.get('/api/admin/subadmin-stats/:telegramId', async (req, res) => {
     try {
-        const telegramId = parseInt(req.params.telegramId);
-        if (isNaN(telegramId)) return res.status(400).json({ error: 'ID inválido' });
+        const userId = req.verifiedTelegramId;
+        if (!userId) return res.status(403).json({ error: 'No autorizado' });
+        const targetId = parseInt(req.params.telegramId);
+        if (isNaN(targetId)) return res.status(400).json({ error: 'ID inválido' });
+        if (!isAdmin(userId) && !(await hasRole(userId, 'activity_self') && userId === targetId)) {
+            return res.status(403).json({ error: 'No tienes permisos' });
+        }
+        const telegramId = targetId;
 
-        const { start_date, end_date, start_time, end_time } = req.query;
+        let { start_date, end_date, start_time, end_time } = req.query;
+
+        let defaultDateFilter = false;
+        if (!start_date && !end_date) {
+            defaultDateFilter = true;
+        }
 
         let depQuery = supabase.from('deposit_requests')
             .select(`id, user_id, amount, currency, created_at, processed_at,
@@ -4388,7 +4410,12 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
             .eq('processed_by', telegramId)
             .eq('status', 'approved');
 
-        if (start_date && end_date) {
+        if (defaultDateFilter) {
+            const startISO = moment.tz(TIMEZONE).startOf('day').toDate().toISOString();
+            const endISO = moment.tz(TIMEZONE).endOf('day').toDate().toISOString();
+            depQuery = depQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+            wdQuery = wdQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+        } else if (start_date && end_date) {
             const startISO = `${start_date}T00:00:00.000Z`;
             const endISO = `${end_date}T23:59:59.999Z`;
             depQuery = depQuery.gte('processed_at', startISO).lte('processed_at', endISO);
@@ -4421,7 +4448,12 @@ app.get('/api/admin/subadmin-stats/:telegramId', requireAdmin, async (req, res) 
             .eq('processed_by', telegramId)
             .eq('status', 'rejected');
 
-        if (start_date && end_date) {
+        if (defaultDateFilter) {
+            const startISO = moment.tz(TIMEZONE).startOf('day').toDate().toISOString();
+            const endISO = moment.tz(TIMEZONE).endOf('day').toDate().toISOString();
+            depRejQuery = depRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+            wdRejQuery = wdRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
+        } else if (start_date && end_date) {
             const startISO = `${start_date}T00:00:00.000Z`;
             const endISO = `${end_date}T23:59:59.999Z`;
             depRejQuery = depRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
@@ -4885,46 +4917,42 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
         return res.status(400).json({ error: 'Acción inválida. Use "open" o "close".' });
     }
 
-    // Reutilizar la lógica del endpoint existente
-    const wasOpen = await isWithdrawTime();
     const start = await getWithdrawTimeStart();
     const end = await getWithdrawTimeEnd();
+    const wasOpen = await isWithdrawTime();
 
+    const now = moment.tz(TIMEZONE);
+    const currentHour = now.hour() + now.minute() / 60;
+    const insideWindow = currentHour >= start && currentHour < end;
+
+    // Dentro del horario programado → el toggle manual no tiene efecto
+    if (insideWindow) {
+        return res.status(400).json({
+            error: action === 'open'
+                ? 'La sesión ya está abierta por el horario programado.'
+                : 'La sesión ya está abierta por el horario programado. No se puede cerrar manualmente.'
+        });
+    }
+
+    // Fuera del horario: solo cambiar si realmente cambia el estado
+    if ((action === 'open' && wasOpen) || (action === 'close' && !wasOpen)) {
+        return res.status(400).json({
+            error: wasOpen
+                ? 'La sesión ya está abierta fuera del horario programado.'
+                : 'La sesión ya está cerrada fuera del horario programado.'
+        });
+    }
+
+    // Set override (tendrá efecto real)
     await supabase
         .from('app_config')
         .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
 
-    const nowOpen = await isWithdrawTime();
-
-    if (wasOpen === nowOpen) {
-        let errorMsg;
-        if (wasOpen) {
-            const now = moment.tz(TIMEZONE);
-            const currentHour = now.hour() + now.minute() / 60;
-            const insideWindow = currentHour >= start && currentHour < end;
-            if (insideWindow) {
-                errorMsg = 'La sesión ya está abierta por el horario programado.';
-            } else {
-                errorMsg = 'La sesión ya está abierta fuera del horario programado.';
-            }
-        } else {
-            errorMsg = 'La sesión ya está cerrada fuera del horario programado.';
-        }
-        return res.status(400).json({ error: errorMsg });
-    }
-
-    // Apply expiry logic matching admin endpoint
-    const now = moment.tz(TIMEZONE);
+    // Apply expiry logic
     let expiryDate = null;
 
     if (action === 'open') {
-        const currentHour = now.hour() + now.minute() / 60;
-        const insideWindow = currentHour >= start && currentHour < end;
-        if (insideWindow) {
-            expiryDate = now.clone().startOf('day').add(end, 'hours').toDate();
-        } else {
-            await clearManualOverrideExpiry();
-        }
+        await clearManualOverrideExpiry();
     } else {
         const todayStart = now.clone().startOf('day').add(start, 'hours');
         if (now.isBefore(todayStart)) {
@@ -4940,7 +4968,7 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
         await clearManualOverrideExpiry();
     }
 
-    // Notificar a todos los usuarios (mismo mensaje que admin endpoint)
+    // Notificar a todos los usuarios
     const startStr = formatHour12(start);
     const endStrFormatted = formatHour12(end);
     let message = '';
@@ -4960,7 +4988,7 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
 
     await broadcastToAllUsers(message, 'HTML');
 
-    res.json({ success: true, available: nowOpen });
+    res.json({ success: true, available: !wasOpen });
 });
 
 // ========== SERVIDOR ESTÁTICO ==========
