@@ -3595,16 +3595,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 user_manager: { icon: '👥', label: 'Gestión de Usuarios' }
             };
 
+            const visibleRoles = userRoles.filter(r => r !== 'activity_self');
+
             let html = '<div class="space-y-3">';
 
-            if (userRoles.length > 0) {
-                html += `<div class="text-sm text-gray-400 mb-2">Tus permisos: ${userRoles.map(r => {
+            if (visibleRoles.length > 0) {
+                html += `<div class="text-sm text-gray-400 mb-2">Tus permisos: ${visibleRoles.map(r => {
                     const p = privilegeLabels[r];
                     return p ? `${p.icon} ${p.label}` : r;
                 }).join(' · ')}</div>`;
             }
 
-            const activePrivileges = Object.keys(privilegeLabels).filter(r => userRoles.includes(r));
+            const activePrivileges = Object.keys(privilegeLabels).filter(r => visibleRoles.includes(r));
             for (const role of activePrivileges) {
                 const info = privilegeLabels[role];
                 const sectionId = role === 'deposit_approver' ? 'Depositos'
@@ -3616,6 +3618,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <i class="${info.icon}"></i> ${info.label} <span class="text-xs text-gray-400 ml-auto">▼</span>
                     </button>
                     <div id="funciones${sectionId}Container" class="mt-2 hidden"></div>
+                </div>`;
+            }
+
+            if (userRoles.includes('activity_self')) {
+                html += `<div class="mb-4">
+                    <button onclick="loadFuncionesMiActividad()" class="w-full bg-gradient-to-r from-yellow-700/80 to-amber-700/80 p-3 rounded-xl hover:from-yellow-600 hover:to-amber-600 font-bold text-left flex items-center gap-2">
+                        📊 Mi Actividad <span class="text-xs text-gray-300 ml-auto">→</span>
+                    </button>
                 </div>`;
             }
 
@@ -3813,6 +3823,20 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             await renderManageUsersView(container);
         };
 
+        window.loadFuncionesMiActividad = async () => {
+            const container = document.getElementById('funcionesAdminContent');
+            if (!container) return;
+            const funcionesSection = document.getElementById('section-funciones-admin');
+            if (funcionesSection) funcionesSection.classList.add('hidden-section');
+
+            adminViewContainer.classList.remove('hidden');
+            adminViewContainer.innerHTML = '<div class="loader"></div> Cargando mi actividad...';
+            await renderSubadminDetailView(currentUser.telegram_id, {}, {
+                hideDeposits: !userRoles.includes('deposit_approver'),
+                hideWithdrawals: !userRoles.includes('withdraw_approver')
+            });
+        };
+
         // Funciones globales para los botones de Funciones de Admin
         window.procesarDepositoRol = async (id, action, btn) => {
             if (btn && btn.disabled) return;
@@ -3961,6 +3985,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <th class="pb-2 pr-2 text-center" title="Gestionar horario de retiros">🕐 Horario</th>
                                 <th class="pb-2 text-center" title="Gestión de Usuarios">👥 Usuarios</th>
                                 <th class="pb-2 pl-2 text-center text-xs text-gray-500" title="Eliminar usuarios">🗑️</th>
+                                <th class="pb-2 pl-2 text-center text-xs text-gray-500" title="Ver mi propia actividad">📊</th>
                             </tr>
                         </thead>
                         <tbody>`;
@@ -3970,6 +3995,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const hasWithdraw = userRolesList.includes('withdraw_approver');
                     const hasSchedule = userRolesList.includes('schedule_manager');
                     const hasUsers = userRolesList.includes('user_manager');
+                    const hasActivity = userRolesList.includes('activity_self');
+                    const hasDepositOrWithdraw = hasDeposit || hasWithdraw;
                     const displayName = u.first_name || u.username || `ID ${u.telegram_id}`;
                     const usernameStr = u.username ? `@${u.username}` : '';
                     html += `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
@@ -3991,6 +4018,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         </td>
                         <td class="py-2 pl-2 text-center">
                             <input type="checkbox" id="delChk_${u.telegram_id}" ${userRolesList.includes('user_deleter') ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'user_deleter', this.checked)" class="w-4 h-4 accent-red-500 cursor-pointer" ${!hasUsers ? 'disabled' : ''}>
+                        </td>
+                        <td class="py-2 pl-2 text-center">
+                            <input type="checkbox" id="actChk_${u.telegram_id}" ${hasActivity ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'activity_self', this.checked)" class="w-5 h-5 accent-yellow-500 cursor-pointer" ${!hasDepositOrWithdraw ? 'disabled' : ''}>
                         </td>
                     </tr>`;
                 }
@@ -4019,11 +4049,21 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const delChk = document.getElementById(`delChk_${telegramId}`);
                         if (delChk) { delChk.checked = false; delChk.disabled = true; }
                     }
+                    if ((role === 'deposit_approver' || role === 'withdraw_approver') && !roles.includes('deposit_approver') && !roles.includes('withdraw_approver')) {
+                        roles = roles.filter(r => r !== 'activity_self');
+                        const actChk = document.getElementById(`actChk_${telegramId}`);
+                        if (actChk) { actChk.checked = false; actChk.disabled = true; }
+                    }
                 }
 
                 if (role === 'user_manager' && enabled) {
                     const delChk = document.getElementById(`delChk_${telegramId}`);
                     if (delChk) delChk.disabled = false;
+                }
+
+                if ((role === 'deposit_approver' || role === 'withdraw_approver') && enabled) {
+                    const actChk = document.getElementById(`actChk_${telegramId}`);
+                    if (actChk) actChk.disabled = false;
                 }
 
                 const saveRes = await fetch(`/api/admin/admin-roles/${telegramId}`, {
@@ -4097,7 +4137,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        window.renderSubadminDetailView = async (telegramId, filters = {}) => {
+        window.renderSubadminDetailView = async (telegramId, filters = {}, options = {}) => {
             adminViewContainer.innerHTML = '<div class="loader"></div> Cargando detalles...';
             try {
                 const params = new URLSearchParams();
@@ -4177,33 +4217,38 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 // Totals
                 if (data.totals) {
                     const t = data.totals;
-                    html += `<div class="grid grid-cols-2 gap-2 mb-4">
-                        <div class="flex gap-2 col-span-2 md:col-span-2">
+                    html += `<div class="grid grid-cols-2 gap-2 mb-4">`;
+                    if (!options.hideDeposits) {
+                        html += `<div class="flex gap-2 col-span-2 md:col-span-2">
                             <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-none w-24">
                                 <p class="text-xs text-gray-400">📥 Depósitos</p>
                                 <p class="text-lg font-bold text-cyan-300">${t.deposit_count}</p>
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Depósitos</p>
-                                <p class="text-base font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
+                                <p class="text-sm font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
                             </div>
-                        </div>
-                        <div class="flex gap-2 col-span-2 md:col-span-2">
+                        </div>`;
+                    }
+                    if (!options.hideWithdrawals) {
+                        html += `<div class="flex gap-2 col-span-2 md:col-span-2">
                             <div class="bg-gray-800/60 p-2 rounded-lg text-center flex-none w-24">
                                 <p class="text-xs text-gray-400">📤 Retiros</p>
                                 <p class="text-lg font-bold text-pink-300">${t.withdraw_count}</p>
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Retiros</p>
-                                <p class="text-base font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
+                                <p class="text-sm font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
                             </div>
-                        </div>
-                    </div>`;
+                        </div>`;
+                    }
+                    html += `</div>`;
                 }
 
                 // Depósitos
                 const allCurrencies = ['CUP', 'USD', 'USDT', 'TRX', 'MLC'];
                 const curColor = c => c === 'CUP' ? 'bg-green-600' : c === 'USD' ? 'bg-yellow-600' : c === 'USDT' ? 'bg-orange-600' : c === 'TRX' ? 'bg-red-600' : 'bg-purple-600';
+                if (!options.hideDeposits) {
                 html += `<div class="mb-6">
                     <h5 class="text-cyan-300 font-semibold mb-2 flex items-center"><i class="fas fa-arrow-down mr-1"></i> Depósitos aprobados (${data.deposits.length})</h5>`;
                 if (data.deposits.length === 0) {
@@ -4234,8 +4279,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     html += `</div>`;
                 }
                 html += `</div>`;
+                }
 
                 // Retiros
+                if (!options.hideWithdrawals) {
                 html += `<div class="mb-4">
                     <h5 class="text-pink-300 font-semibold mb-2 flex items-center"><i class="fas fa-arrow-up mr-1"></i> Retiros aprobados (${data.withdrawals.length})</h5>`;
                 if (data.withdrawals.length === 0) {
@@ -4266,6 +4313,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     html += `</div>`;
                 }
                 html += `</div>`;
+                }
 
                 // Denegaciones
                 const rej = data.rejected || [];
