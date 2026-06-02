@@ -3922,6 +3922,11 @@ app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
         }
 
         res.json({ success: true });
+
+        bot.telegram.sendMessage(telegramId,
+            `✅ Tu cuenta ha sido desbaneada.`,
+            { parse_mode: 'HTML' }
+        ).catch(e => console.error('Error notificando al usuario desbaneado:', e));
     } catch (e) {
         console.error('Error desbaneando usuario:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
@@ -3960,7 +3965,7 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         ]);
 
         try {
-            const { error: upsertError } = await supabase.from('deleted_users').upsert({
+            const { error: insErr } = await supabase.from('deleted_users').upsert({
                 telegram_id: user.telegram_id,
                 first_name: user.first_name,
                 username: user.username,
@@ -3973,7 +3978,7 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
                 deposits_history: JSON.stringify(depositsRes.data || []),
                 withdrawals_history: JSON.stringify(withdrawalsRes.data || [])
             });
-            if (upsertError) console.error('Error guardando en deleted_users:', upsertError);
+            if (insErr) console.error('Error guardando en deleted_users:', insErr);
         } catch (e) {
             console.error('Error guardando en deleted_users:', e);
         }
@@ -4088,9 +4093,17 @@ app.get('/api/admin/deleted-users/:telegramId/history', async (req, res) => {
     if (!data) {
         return res.status(404).json({ error: 'Usuario eliminado no encontrado' });
     }
+
+    const rates = await getExchangeRates();
+    const rateMap = { cup: 1, usd: rates.rate, usdt: rates.rate_usdt, trx: rates.rate_trx, mlc: rates.rate_mlc };
+    const addAmountCup = item => ({
+        ...item,
+        amount_cup: Math.round(((item.currency === 'CUP' ? (parseFloat(item.amount) || 0) : (parseFloat(item.amount) || 0) * (rateMap[item.currency?.toLowerCase()] || 0))) * 100) / 100
+    });
+
     res.json({
-        deposits: typeof data.deposits_history === 'string' ? JSON.parse(data.deposits_history) : (data.deposits_history || []),
-        withdrawals: typeof data.withdrawals_history === 'string' ? JSON.parse(data.withdrawals_history) : (data.withdrawals_history || [])
+        deposits: (typeof data.deposits_history === 'string' ? JSON.parse(data.deposits_history) : (data.deposits_history || [])).map(addAmountCup),
+        withdrawals: (typeof data.withdrawals_history === 'string' ? JSON.parse(data.withdrawals_history) : (data.withdrawals_history || [])).map(addAmountCup)
     });
 });
 
@@ -4846,7 +4859,7 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
         return res.status(400).json({
             error: wasOpen
                 ? 'La sesión ya está abierta fuera del horario programado.'
-                : 'La sesión ya está cerrada por el horario programado.'
+                : 'La sesión ya está cerrada fuera del horario programado.'
         });
     }
 
