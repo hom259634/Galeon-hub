@@ -32,6 +32,7 @@ const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) || 0;
 const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
 const broadcastMap = new Map();
+const supportReplyMessageIds = new Map();
 
 // ========== HORARIO DE RETIROS (hora Cuba) ==========
 // Disponibles diariamente de 10:00 PM a 11:30 PM (hora Cuba)
@@ -2866,6 +2867,7 @@ bot.on(message('text'), async (ctx) => {
             }
         }
         await ctx.reply('✅ Tu mensaje ha sido enviado al equipo de soporte. Te responderemos a la brevedad.');
+        supportReplyMessageIds.set(uid, ctx.message.message_id);
         return;
     }
 
@@ -2884,14 +2886,18 @@ bot.on(message('text'), async (ctx) => {
     if ((isAdmin(uid) || hasAnyRole(uid)) && session.supportReplyTo) {
         const targetUserId = session.supportReplyTo;
         try {
+            const replyOpts = { parse_mode: 'HTML' };
+            const lastMsgId = supportReplyMessageIds.get(targetUserId);
+            if (lastMsgId) replyOpts.reply_to_message_id = lastMsgId;
             await bot.telegram.sendMessage(targetUserId,
                 `📨 <b>Respuesta de soporte:</b>\n\n${escapeHTML(text)}`,
-                { parse_mode: 'HTML' }
+                replyOpts
             );
             await ctx.reply('✅ Respuesta enviada al usuario.');
         } catch (e) {
             await ctx.reply('❌ No se pudo enviar la respuesta. El usuario podría haber bloqueado el bot.');
         }
+        supportReplyMessageIds.delete(targetUserId);
         delete session.supportReplyTo;
         return;
     }
@@ -4748,6 +4754,7 @@ bot.on(message('text'), async (ctx) => {
             }
         }
         await ctx.reply('✅ Tu mensaje ha sido enviado al equipo de soporte. Te responderemos a la brevedad.');
+        supportReplyMessageIds.set(uid, ctx.message.message_id);
         } else {
         // Si es admin/subadmin y no está en ningún flujo, el mensaje se transmite a todos los usuarios (solo super admins pueden broadcast)
         if (isAdmin(uid) && !hasActiveAdminFlow(session) && text.trim() !== '📢 Difusión') {
@@ -4779,6 +4786,7 @@ bot.on(message('text'), async (ctx) => {
                 }
             }
             await ctx.reply('✅ Tu mensaje ha sido enviado al equipo de soporte. Te responderemos a la brevedad.');
+            supportReplyMessageIds.set(uid, ctx.message.message_id);
         }
     }
 });

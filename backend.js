@@ -2544,156 +2544,17 @@ app.delete('/api/admin/withdraw-methods/:id', requireAdmin, async (req, res) => 
 app.get('/api/admin/config', requireAdmin, async (req, res) => {
     const bonus = await getBonusCupDefault();
     const rate = await getReferralCommissionRate();
-    const withdrawStart = await getWithdrawTimeStart();
-    const withdrawEnd = await getWithdrawTimeEnd();
-    res.json({ bonusCupDefault: bonus, referralRate: rate, withdrawTimeStart: withdrawStart, withdrawTimeEnd: withdrawEnd });
+    res.json({ bonusCupDefault: bonus, referralRate: rate });
 });
 
 app.put('/api/admin/config', requireAdmin, async (req, res) => {
-    const { bonusCupDefault, referralRate, withdrawTimeStart, withdrawTimeEnd } = req.body;
+    const { bonusCupDefault, referralRate } = req.body;
     if (bonusCupDefault !== undefined) {
         await supabase.from('app_config').upsert({ key: 'bonus_cup_default', value: bonusCupDefault.toString() }, { onConflict: 'key' });
     }
     if (referralRate !== undefined) {
         await supabase.from('app_config').upsert({ key: 'referral_commission_rate', value: referralRate.toString() }, { onConflict: 'key' });
     }
-    const wasOpen = await isWithdrawTime();
-
-    if (withdrawTimeStart !== undefined) {
-        await supabase.from('app_config').upsert({ key: 'withdraw_time_start', value: withdrawTimeStart.toString() }, { onConflict: 'key' });
-    }
-    if (withdrawTimeEnd !== undefined) {
-        await supabase.from('app_config').upsert({ key: 'withdraw_time_end', value: withdrawTimeEnd.toString() }, { onConflict: 'key' });
-    }
-    if (withdrawTimeStart !== undefined || withdrawTimeEnd !== undefined) {
-        const { data: overrideData } = await supabase
-            .from('app_config')
-            .select('value')
-            .eq('key', 'withdraw_manual_override')
-            .single();
-        const currentOverride = overrideData?.value || 'none';
-
-        if (currentOverride === 'open') {
-            await supabase
-                .from('app_config')
-                .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
-        } else if (wasOpen) {
-            await supabase
-                .from('app_config')
-                .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
-            await supabase
-                .from('app_config')
-                .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
-
-            const now = moment.tz(TIMEZONE);
-            const currentHour = now.hour() + now.minute() / 60;
-            const newStart = withdrawTimeStart !== undefined ? withdrawTimeStart : await getWithdrawTimeStart();
-            const newEnd = withdrawTimeEnd !== undefined ? withdrawTimeEnd : await getWithdrawTimeEnd();
-
-            if (currentHour < newStart || currentHour >= newEnd) {
-                const startStr = formatHour12(newStart);
-                const endStr = formatHour12(newEnd);
-                const todayStart = now.clone().startOf('day').add(newStart, 'hours');
-                const nextOpeningIsToday = now.isBefore(todayStart);
-                const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
-                await broadcastToAllUsers(
-                    `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-                    `La ventana de retiros ha finalizado. Vuelve ${openingDayStr} en su nuevo horario de ${startStr} a ${endStr} (hora Cuba).`
-                );
-                // Ya se envió el mensaje "nuevo horario", limpiar bandera
-                await supabase
-                    .from('app_config')
-                    .upsert({ key: 'withdraw_schedule_changed', value: 'false' }, { onConflict: 'key' });
-            } else {
-                await supabase
-                    .from('app_config')
-                    .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
-            }
-        } else {
-            await supabase
-                .from('app_config')
-                .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
-        }
-    }
-    res.json({ success: true });
-});
-
-// ========== MANUAL TOGGLE DE SESIÓN DE RETIROS ==========
-app.post('/api/admin/withdraw-manual-toggle', requireAdmin, async (req, res) => {
-    const { action } = req.body;   // 'open' o 'close'
-    if (!action || !['open', 'close'].includes(action)) {
-        return res.status(400).json({ error: 'Acción inválida. Use "open" o "close".' });
-    }
-
-    const start = await getWithdrawTimeStart();
-    const end = await getWithdrawTimeEnd();
-    const before = await isWithdrawTime();
-    const startStr = formatHour12(start);
-    const endStr = formatHour12(end);
-
-    const now = moment.tz(TIMEZONE);
-    const currentHour = now.hour() + now.minute() / 60;
-    const insideWindow = currentHour >= start && currentHour < end;
-
-    // Dentro del horario programado → el toggle manual no tiene efecto
-    if (insideWindow) {
-        return res.status(400).json({
-            error: action === 'open'
-                ? 'La sesión ya está abierta por el horario programado.'
-                : 'La sesión ya está abierta por el horario programado. No se puede cerrar manualmente.'
-        });
-    }
-
-    // Fuera del horario: solo cambiar si realmente cambia el estado
-    if ((action === 'open' && before) || (action === 'close' && !before)) {
-        return res.status(400).json({
-            error: before
-                ? 'La sesión ya está abierta fuera del horario programado.'
-                : 'La sesión ya está cerrada fuera del horario programado.'
-        });
-    }
-
-    // Actualizar el flag de anulación manual
-    await supabase
-        .from('app_config')
-        .upsert({ key: 'withdraw_manual_override', value: action }, { onConflict: 'key' });
-
-    let expiryDate = null;
-
-    if (action === 'open') {
-        await clearManualOverrideExpiry();
-    } else {
-        const todayStart = now.clone().startOf('day').add(start, 'hours');
-        if (now.isBefore(todayStart)) {
-            expiryDate = todayStart.toDate();
-        } else {
-            expiryDate = todayStart.add(1, 'day').toDate();
-        }
-    }
-
-    if (expiryDate) {
-        await setManualOverrideExpiry(expiryDate);
-    } else {
-        await clearManualOverrideExpiry();
-    }
-
-    let message = '';
-    if (action === 'open') {
-        message =
-            `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
-            `Ya puedes solicitar tus retiros desde este momento.\n` +
-            `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`;
-    } else {
-        const todayStart = now.clone().startOf('day').add(start, 'hours');
-        const nextOpeningIsToday = now.isBefore(todayStart);
-        const openingDayStr = nextOpeningIsToday ? 'hoy' : 'mañana';
-        const endStrFormatted = formatHour12(end);
-        message =
-            `⏰ <b>Horario de Retiros CERRADO</b>\n\n` +
-            `La ventana de retiros ha finalizado. Se reabrirá ${openingDayStr} de ${startStr} a ${endStrFormatted} (hora Cuba).`;
-    }
-
-    await broadcastToAllUsers(message, 'HTML');
     res.json({ success: true });
 });
 
@@ -4093,6 +3954,11 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         const userFirstName = user.first_name;
         const userUsername = user.username;
 
+        const [depositsRes, withdrawalsRes] = await Promise.all([
+            supabase.from('deposit_requests').select('id, amount, currency, status, created_at, processed_at, processed_by').eq('user_id', telegramId).order('created_at', { ascending: false }),
+            supabase.from('withdraw_requests').select('id, amount, currency, account_info, status, created_at, processed_at, processed_by').eq('user_id', telegramId).order('created_at', { ascending: false })
+        ]);
+
         try {
             const { error: upsertError } = await supabase.from('deleted_users').upsert({
                 telegram_id: user.telegram_id,
@@ -4103,7 +3969,9 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
                 bonus_cup: user.bonus_cup,
                 ref_by: user.ref_by,
                 deleted_at: new Date(),
-                deleted_by: userId
+                deleted_by: userId,
+                deposits_history: JSON.stringify(depositsRes.data || []),
+                withdrawals_history: JSON.stringify(withdrawalsRes.data || [])
             });
             if (upsertError) console.error('Error guardando en deleted_users:', upsertError);
         } catch (e) {
@@ -4199,6 +4067,31 @@ app.get('/api/admin/deleted-users', async (req, res) => {
         .select('*')
         .order('deleted_at', { ascending: false });
     res.json(data || []);
+});
+
+// Obtener historial de un usuario eliminado
+app.get('/api/admin/deleted-users/:telegramId/history', async (req, res) => {
+    const userId = req.verifiedTelegramId || req.query.userId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'user_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const telegramId = parseInt(req.params.telegramId);
+    if (isNaN(telegramId)) {
+        return res.status(400).json({ error: 'ID inválido' });
+    }
+    const { data } = await supabase
+        .from('deleted_users')
+        .select('deposits_history, withdrawals_history')
+        .eq('telegram_id', telegramId)
+        .single();
+    if (!data) {
+        return res.status(404).json({ error: 'Usuario eliminado no encontrado' });
+    }
+    res.json({
+        deposits: typeof data.deposits_history === 'string' ? JSON.parse(data.deposits_history) : (data.deposits_history || []),
+        withdrawals: typeof data.withdrawals_history === 'string' ? JSON.parse(data.withdrawals_history) : (data.withdrawals_history || [])
+    });
 });
 
 // ========== ENDPOINTS DE GESTIÓN DE ROLES (solo super admin) ==========
@@ -4857,6 +4750,20 @@ app.put('/api/admin/schedule-config', async (req, res) => {
             const currentOverride = overrideData?.value || 'none';
 
             if (currentOverride === 'open') {
+                const now = moment.tz(TIMEZONE);
+                const currentHour = now.hour() + now.minute() / 60;
+                const newStart = start !== undefined ? start : await getWithdrawTimeStart();
+                const newEnd = end !== undefined ? end : await getWithdrawTimeEnd();
+
+                if (currentHour >= newStart && currentHour < newEnd) {
+                    await supabase
+                        .from('app_config')
+                        .upsert({ key: 'withdraw_manual_override', value: 'none' }, { onConflict: 'key' });
+                    await supabase
+                        .from('app_config')
+                        .upsert({ key: 'withdraw_manual_override_expiry', value: null }, { onConflict: 'key' });
+                }
+
                 await supabase
                     .from('app_config')
                     .upsert({ key: 'withdraw_schedule_changed', value: 'true' }, { onConflict: 'key' });
