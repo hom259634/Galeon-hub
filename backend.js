@@ -4875,6 +4875,24 @@ app.put('/api/admin/schedule-config', async (req, res) => {
             }
         }
 
+        // Broadcast apertura programada si el cambio de horario nos dejó dentro de la ventana
+        if (start !== undefined || end !== undefined) {
+            const nowAfterChange = moment.tz(TIMEZONE);
+            const currentHourAfter = nowAfterChange.hour() + nowAfterChange.minute() / 60;
+            const finalStart = start !== undefined ? start : await getWithdrawTimeStart();
+            const finalEnd = end !== undefined ? end : await getWithdrawTimeEnd();
+
+            if (!wasOpen && currentHourAfter >= finalStart && currentHourAfter < finalEnd) {
+                const startStr = formatHour12(finalStart);
+                const endStr = formatHour12(finalEnd);
+                await broadcastToAllUsers(
+                    `⏰ <b>Horario de Retiros ABIERTO</b>\n\n` +
+                    `Ya puedes solicitar tus retiros de ${startStr} a ${endStr} (hora Cuba).\n` +
+                    `Puedes retirar en CUP, USD, USDT, TRX o MLC según los métodos disponibles.`
+                );
+            }
+        }
+
         res.json({ success: true, message: 'Horario actualizado' });
     } catch (e) {
         res.status(500).json({ error: 'Error al actualizar horario' });
