@@ -5121,7 +5121,7 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
         await ctx.telegram.sendMessage(request.user_id,
             `✅ <b>Retiro aprobado</b>\n\n` +
             `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
-            `💵 Se debitaron ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
+            `💵 Se debitó ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
             `📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
