@@ -3643,57 +3643,174 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
+        let withdrawPollInterval = null;
+
         window.renderSetWithdrawHoursView = async () => {
             adminViewContainer.innerHTML = '<div class="loader"></div> Cargando...';
             try {
-                const res = await fetch('/api/admin/schedule-config');
-                if (!res.ok) { adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar configuración</p>'; return; }
-                const config = await res.json();
+                const configRes = await fetch('/api/admin/schedule-config');
+                if (!configRes.ok) throw new Error('Error al obtener configuración');
+                const config = await configRes.json();
+                const start = config.start || 22;
+                const end = config.end || 23.5;
 
-                const isOpen = config.available;
-                const start = to12h(config.start);
-                const end = to12h(config.end);
+                const startParts = to12h(start);
+                const endParts = to12h(end);
 
-                adminViewContainer.innerHTML = `<div class="bg-gray-800/40 p-4 rounded-xl">
-                    <h4 class="font-semibold mb-3 text-purple-300">🕐 Gestionar Horario de Retiros</h4>
-                    <div class="mb-3">
-                        <p class="text-sm">Estado actual: <span class="${isOpen ? 'text-green-400' : 'text-red-400'} font-bold">${isOpen ? '🟢 Abierto' : '🔴 Cerrado'}</span></p>
-                        <p class="text-xs text-gray-400">${config.manualOverride === 'open' ? '(Inicio manual activo)' : config.manualOverride === 'close' ? '(Cierre manual activo)' : '(Horario programado)'}</p>
+                adminViewContainer.innerHTML = `
+                    <h4 class="text-xl font-semibold mb-4">⏰ Horario de Retiros</h4>
+                    <p class="mb-2">Horario actual: <span class="text-cyan-300 font-bold">${formatHour12(start)} - ${formatHour12(end)}</span></p>
+
+                    <label class="block text-sm mb-1">Hora de inicio</label>
+                    <div class="flex gap-2 mb-3">
+                        <select id="selStartH" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
+                            ${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===startParts.hour12?'selected':''}>${i+1}</option>`).join('')}
+                        </select>
+                        <span class="text-white mt-2">:</span>
+                        <select id="selStartM" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
+                            ${Array.from({length:60},(_,i)=>`<option value="${i}" ${i===startParts.min?'selected':''}>${i.toString().padStart(2,'0')}</option>`).join('')}
+                        </select>
+                        <select id="selStartA" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
+                            <option value="AM" ${startParts.period==='AM'?'selected':''}>AM</option>
+                            <option value="PM" ${startParts.period==='PM'?'selected':''}>PM</option>
+                        </select>
                     </div>
-                    <div class="grid grid-cols-2 gap-3 mb-3">
-                        <div>
-                            <label class="block text-xs mb-1">Hora inicio</label>
-                            <div class="flex gap-1">
-                                <select id="schedStartHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${hourOptions(start.hour12)}</select>
-                                <span class="text-white self-center">:</span>
-                                <select id="schedStartMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${minOptions(start.min)}</select>
-                                <select id="schedStartAmPm" class="w-20 p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none text-center">
-                                    <option value="AM"${start.period === 'AM' ? ' selected' : ''}>AM</option>
-                                    <option value="PM"${start.period === 'PM' ? ' selected' : ''}>PM</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-xs mb-1">Hora cierre</label>
-                            <div class="flex gap-1">
-                                <select id="schedEndHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${hourOptions(end.hour12)}</select>
-                                <span class="text-white self-center">:</span>
-                                <select id="schedEndMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${minOptions(end.min)}</select>
-                                <select id="schedEndAmPm" class="w-20 p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none text-center">
-                                    <option value="AM"${end.period === 'AM' ? ' selected' : ''}>AM</option>
-                                    <option value="PM"${end.period === 'PM' ? ' selected' : ''}>PM</option>
-                                </select>
-                            </div>
-                        </div>
+
+                    <label class="block text-sm mb-1">Hora de cierre</label>
+                    <div class="flex gap-2 mb-3">
+                        <select id="selEndH" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
+                            ${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===endParts.hour12?'selected':''}>${i+1}</option>`).join('')}
+                        </select>
+                        <span class="text-white mt-2">:</span>
+                        <select id="selEndM" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
+                            ${Array.from({length:60},(_,i)=>`<option value="${i}" ${i===endParts.min?'selected':''}>${i.toString().padStart(2,'0')}</option>`).join('')}
+                        </select>
+                        <select id="selEndA" class="p-2 rounded bg-gray-800 text-white border border-purple-500 appearance-none">
+                            <option value="AM" ${endParts.period==='AM'?'selected':''}>AM</option>
+                            <option value="PM" ${endParts.period==='PM'?'selected':''}>PM</option>
+                        </select>
                     </div>
-                    <button id="guardarHorarioBtn" onclick="guardarHorarioRetiro()" class="w-full bg-blue-600 py-2 rounded-lg font-bold hover:bg-blue-700 mb-3">💾 Guardar Horario</button>
-                    <div class="flex gap-3">
-                        <button id="toggleOpenBtn" onclick="toggleRetiroManual('open',this)" class="flex-1 bg-green-600 py-2 rounded-lg font-bold hover:bg-green-700">🔓 Abrir ahora</button>
-                        <button id="toggleCloseBtn" onclick="toggleRetiroManual('close',this)" class="flex-1 bg-red-600 py-2 rounded-lg font-bold hover:bg-red-700">🔒 Cerrar ahora</button>
-                    </div>
-                </div>`;
+
+                    <button id="saveWithdrawHoursBtn" class="w-full bg-green-600 py-2 rounded-xl hover:bg-green-700">Guardar horario fijo</button>
+                    <button id="manualToggleWithdrawBtn" class="w-full bg-teal-600 py-2 rounded-xl hover:bg-teal-700 mt-3">Cargando...</button>
+                `;
+
+                // Guardar horario fijo
+                document.getElementById('saveWithdrawHoursBtn').addEventListener('click', async () => {
+                    const btn = document.getElementById('saveWithdrawHoursBtn');
+                    if (!btn || btn.disabled) return;
+                    btn.disabled = true;
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Guardando...';
+
+                    function timePartsToDecimal(hour12, minute, ampm) {
+                        let h = parseInt(hour12);
+                        if (ampm === 'PM' && h !== 12) h += 12;
+                        if (ampm === 'AM' && h === 12) h = 0;
+                        return h + parseInt(minute) / 60;
+                    }
+
+                    const startVal = timePartsToDecimal(
+                        document.getElementById('selStartH').value,
+                        document.getElementById('selStartM').value,
+                        document.getElementById('selStartA').value
+                    );
+                    const endVal = timePartsToDecimal(
+                        document.getElementById('selEndH').value,
+                        document.getElementById('selEndM').value,
+                        document.getElementById('selEndA').value
+                    );
+
+                    if (isNaN(startVal) || isNaN(endVal) || startVal >= endVal) {
+                        iziToast.warning({ message: 'Horario inválido. El inicio debe ser menor que el cierre.' });
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                        return;
+                    }
+
+                    try {
+                        const curRes = await fetch('/api/admin/schedule-config');
+                        if (curRes.ok) {
+                            const cur = await curRes.json();
+                            if (Math.abs(cur.start - startVal) < 0.01 && Math.abs(cur.end - endVal) < 0.01) {
+                                iziToast.info({ message: 'Este horario ya está programado.' });
+                                btn.disabled = false;
+                                btn.textContent = originalText;
+                                return;
+                            }
+                        }
+                        const res = await fetch('/api/admin/schedule-config', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ start: startVal, end: endVal })
+                        });
+                        if (res.ok) {
+                            iziToast.success({ message: 'Horario de retiros actualizado' });
+                            window.renderSetWithdrawHoursView();
+                        } else {
+                            const err = await res.json();
+                            iziToast.error({ message: err.error || 'Error al guardar' });
+                            btn.disabled = false;
+                            btn.textContent = originalText;
+                        }
+                    } catch (e) {
+                        iziToast.error({ message: 'Error de conexión' });
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                    }
+                });
+
+                // Botón de apertura/cierre manual con polling
+                const toggleBtn = document.getElementById('manualToggleWithdrawBtn');
+                if (toggleBtn) {
+                    const updateToggleBtn = async () => {
+                        try {
+                            const statusRes = await fetch('/api/withdraw-status');
+                            if (statusRes.ok) {
+                                const { available } = await statusRes.json();
+                                toggleBtn.textContent = available ? '🔴 Cerrar sesión ahora' : '🟢 Abrir sesión ahora';
+                                toggleBtn.dataset.available = available;
+                            } else {
+                                toggleBtn.textContent = 'Error al cargar estado';
+                            }
+                        } catch (e) {
+                            toggleBtn.textContent = 'Error de conexión';
+                        }
+                    };
+
+                    await updateToggleBtn();
+
+                    if (withdrawPollInterval) clearInterval(withdrawPollInterval);
+                    withdrawPollInterval = setInterval(updateToggleBtn, 5000);
+
+                    toggleBtn.addEventListener('click', async () => {
+                        toggleBtn.disabled = true;
+                        const action = toggleBtn.dataset.available === 'true' ? 'close' : 'open';
+                        toggleBtn.textContent = '⏳ Procesando...';
+                        try {
+                            const res = await fetch('/api/admin/schedule-toggle', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action })
+                            });
+                            if (res.ok) {
+                                iziToast.success({ message: `Sesión ${action === 'open' ? 'abierta' : 'cerrada'} manualmente` });
+                                await updateToggleBtn();
+                            } else {
+                                const err = await res.json();
+                                iziToast.error({ message: err.error || 'Error al ejecutar la acción' });
+                                await updateToggleBtn();
+                            }
+                        } catch (e) {
+                            iziToast.error({ message: 'Error de conexión' });
+                            await updateToggleBtn();
+                        }
+                        toggleBtn.disabled = false;
+                    });
+                }
             } catch (e) {
-                adminViewContainer.innerHTML = '<p class="text-red-400">Error de conexión</p>';
+                console.error(e);
+                adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar horario.</p>';
             }
         };
 
@@ -3780,11 +3897,20 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const start = sH + sM / 60;
             const end = eH + eM / 60;
             if (start >= end) {
-                iziToast.error({ message: 'La hora de inicio debe ser menor que la de fin' });
+                iziToast.error({ message: 'La hora de inicio debe ser menor que la de cierre.' });
                 if (btn) { btn.disabled = false; btn.innerHTML = '💾 Guardar Horario'; }
                 return;
             }
             try {
+                const curRes = await fetch('/api/admin/schedule-config');
+                if (curRes.ok) {
+                    const cur = await curRes.json();
+                    if (Math.abs(cur.start - start) < 0.01 && Math.abs(cur.end - end) < 0.01) {
+                        iziToast.info({ message: 'Este horario ya está programado.' });
+                        if (btn) { btn.disabled = false; btn.innerHTML = '💾 Guardar Horario'; }
+                        return;
+                    }
+                }
                 const res = await fetch('/api/admin/schedule-config', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -3792,9 +3918,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Horario actualizado' });
-                    const schedEl = document.getElementById('schedStartHour');
-                    if (schedEl && adminViewContainer.contains(schedEl)) window.renderSetWithdrawHoursView();
-                    else loadFuncionesHorario();
+                    loadFuncionesHorario();
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
@@ -3817,9 +3941,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: action === 'open' ? 'Retiros abiertos' : 'Retiros cerrados' });
-                    const schedEl = document.getElementById('schedStartHour');
-                    if (schedEl && adminViewContainer.contains(schedEl)) window.renderSetWithdrawHoursView();
-                    else loadFuncionesHorario();
+                    loadFuncionesHorario();
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
@@ -4095,7 +4217,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 </div>
                 <h4 class="text-xl font-bold mb-1 flex items-center"><i class="fas fa-user-shield text-orange-400 mr-2"></i>${escapeHTML(data.first_name)} ${data.username ? '@'+escapeHTML(data.username) : ''}</h4>
                 <p class="text-sm text-gray-400 mb-1">ID: ${data.telegram_id}</p>
-                <p class="text-xs text-gray-500 mb-4">${filterRangeStr()}</p>`;
+                <p class="text-xs text-gray-200 mb-4">${filterRangeStr()}</p>`;
 
                 // Totals
                 if (data.totals) {
@@ -4133,7 +4255,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const curColor = c => c === 'CUP' ? 'bg-green-600' : c === 'USD' ? 'bg-yellow-600' : c === 'USDT' ? 'bg-orange-600' : c === 'TRX' ? 'bg-red-600' : 'bg-purple-600';
                 if (!hideDeposits) {
                 html += `<div class="mb-6">
-                    <h5 class="text-cyan-300 font-semibold mb-2 flex items-center"><i class="fas fa-arrow-down mr-1"></i> Depósitos aprobados (${data.deposits.length})</h5>`;
+                    <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
+                        <span class="text-cyan-300 font-semibold flex items-center"><i class="fas fa-arrow-down mr-2"></i> Depósitos aprobados (${data.deposits.length})</span>
+                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                    </button>
+                    <div class="hidden mt-2">`;
                 if (data.deposits.length === 0) {
                     html += '<p class="text-gray-500 text-sm">No hay depósitos aprobados aún.</p>';
                 } else {
@@ -4161,13 +4287,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     html += `<div id="depositsEmpty" class="hidden text-gray-400 text-sm text-center py-4"></div>`;
                     html += `</div>`;
                 }
-                html += `</div>`;
+                html += `</div></div>`;
                 }
 
                 // Retiros
                 if (!hideWithdrawals) {
                 html += `<div class="mb-4">
-                    <h5 class="text-pink-300 font-semibold mb-2 flex items-center"><i class="fas fa-arrow-up mr-1"></i> Retiros aprobados (${data.withdrawals.length})</h5>`;
+                    <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
+                        <span class="text-pink-300 font-semibold flex items-center"><i class="fas fa-arrow-up mr-2"></i> Retiros aprobados (${data.withdrawals.length})</span>
+                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                    </button>
+                    <div class="hidden mt-2">`;
                 if (data.withdrawals.length === 0) {
                     html += '<p class="text-gray-500 text-sm">No hay retiros aprobados aún.</p>';
                 } else {
@@ -4195,13 +4325,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     html += `<div id="withdrawalsEmpty" class="hidden text-gray-400 text-sm text-center py-4"></div>`;
                     html += `</div>`;
                 }
-                html += `</div>`;
+                html += `</div></div>`;
                 }
 
                 // Denegaciones
                 const rej = data.rejected || [];
                 html += `<div class="mb-4">
-                    <button onclick="toggleDenegaciones(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
+                    <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
                         <span class="text-red-400 font-semibold flex items-center"><i class="fas fa-ban mr-2"></i> Denegaciones (${rej.length})</span>
                         <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                     </button>
@@ -4299,16 +4429,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             renderSubadminDetailView(telegramId, { start_date, end_date, start_time, end_time }, opts);
         };
 
-        window.toggleDenegaciones = (btn) => {
+        window.toggleSection = (btn) => {
             const body = btn.nextElementSibling;
             const icon = btn.querySelector('.fa-chevron-down');
-            if (body.classList.contains('hidden')) {
-                body.classList.remove('hidden');
-                icon.style.transform = 'rotate(180deg)';
-            } else {
-                body.classList.add('hidden');
-                icon.style.transform = 'rotate(0deg)';
-            }
+            body.classList.toggle('hidden');
+            icon.style.transform = body.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
         };
 
         window.filterCurrency = (section, currency) => {
@@ -5116,36 +5241,49 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             ${refHtml}
                         </div>
                         <div class="mt-4">
-                            <h5 class="text-lg font-bold mb-2">📥 Depósitos</h5>
-                            ${depositsHtml}
+                            <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
+                                <span class="text-cyan-300 font-semibold flex items-center"><i class="fas fa-arrow-down mr-2"></i> Depósitos (${deposits.length})</span>
+                                <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                            </button>
+                            <div class="hidden mt-2">${depositsHtml}</div>
                         </div>
                         <div class="mt-4">
-                            <h5 class="text-lg font-bold mb-2">📤 Retiros</h5>
-                            ${withdrawsHtml}
+                            <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
+                                <span class="text-pink-300 font-semibold flex items-center"><i class="fas fa-arrow-up mr-2"></i> Retiros (${withdraws.length})</span>
+                                <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                            </button>
+                            <div class="hidden mt-2">${withdrawsHtml}</div>
                         </div>
-                        <div class="mt-4">
-                            ${(() => {
-                                const rejDep = deposits.filter(d => d.status === 'rejected').map(d => ({ ...d, _type: 'Depósito' }));
-                                const rejWd = withdraws.filter(w => w.status === 'rejected').map(w => ({ ...w, _type: 'Retiro' }));
-                                const allRej = [...rejDep, ...rejWd].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                                let html = `<h5 class="text-lg font-bold mb-2">❌ Denegaciones (${allRej.length})</h5>`;
-                                if (allRej.length === 0) return html + '<p class="text-gray-400">No tiene denegaciones.</p>';
-                                html += '<div class="space-y-1">';
+                        ${(() => {
+                            const rejDep = deposits.filter(d => d.status === 'rejected');
+                            const rejWd = withdraws.filter(w => w.status === 'rejected');
+                            const rejCount = rejDep.length + rejWd.length;
+                            const allRej = [...rejDep.map(d => ({ ...d, _type: 'Depósito' })), ...rejWd.map(w => ({ ...w, _type: 'Retiro' }))].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            let bodyHtml = '';
+                            if (allRej.length === 0) bodyHtml = '<p class="text-gray-400">No tiene denegaciones.</p>';
+                            else {
+                                bodyHtml = '<div class="space-y-1">';
                                 allRej.forEach(r => {
                                     const date = new Date(r.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                                     let cupLabel = '';
                                     if (r.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
                                     else if (r.currency === 'USDT') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_usdt).toFixed(2)} CUP)</span>`;
                                     else if (r.currency === 'TRX') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_trx).toFixed(2)} CUP)</span>`;
-                                    html += `<div class="bg-gray-800/40 p-2 rounded text-sm flex justify-between items-center">
+                                    bodyHtml += `<div class="bg-gray-800/40 p-2 rounded text-sm flex justify-between items-center">
                                         <span><span class="text-gray-300">[${r._type}]</span> ${r.amount} ${r.currency}${cupLabel}</span>
                                         <span class="text-gray-400 text-xs">${date}</span>
                                     </div>`;
                                 });
-                                html += '</div>';
-                                return html;
-                            })()}
-                        </div>
+                                bodyHtml += '</div>';
+                            }
+                            return `<div class="mt-4">
+                                <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
+                                    <span class="text-red-400 font-semibold flex items-center"><i class="fas fa-ban mr-2"></i> Denegaciones (${rejCount})</span>
+                                    <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                </button>
+                                <div class="hidden mt-2">${bodyHtml}</div>
+                            </div>`;
+                        })()}
                     `;
                     btn.disabled = false;
                     btn.innerHTML = originalHtml;
