@@ -561,6 +561,7 @@
                         <button data-admin-view="setPrices" class="admin-nav-btn bg-purple-600/80 p-3 rounded-xl hover:bg-purple-700"><i class="fas fa-dice mr-1"></i> Pagos, Mín y Máx</button>
                         <button data-admin-view="setBonus" class="admin-nav-btn bg-indigo-400/80 p-3 rounded-xl hover:bg-indigo-500"><i class="fas fa-gift mr-1"></i> Bono Inicial</button>
                         <button data-admin-view="setReferralRate" class="admin-nav-btn bg-orange-400/80 p-3 rounded-xl hover:bg-orange-500"><i class="fas fa-percent mr-1"></i>% Referidos</button>
+                        <button data-admin-view="setWithdrawHours" class="admin-nav-btn bg-purple-400/80 p-3 rounded-xl hover:bg-purple-500"><i class="fas fa-clock mr-1"></i> Horario Retiros</button>
                         <button data-admin-view="transferMins" class="admin-nav-btn bg-teal-400/80 p-3 rounded-xl hover:bg-teal-500"><i class="fas fa-sliders-h mr-1"></i> Mín. Transferencia</button>
                         <button data-admin-view="userManager" class="admin-nav-btn bg-gray-600/80 p-3 rounded-xl hover:bg-gray-700"><i class="fas fa-user-cog mr-1"></i>Estadísticas de Usuarios</button>
                         <button data-admin-view="manageUsers" class="admin-nav-btn bg-emerald-600/80 p-3 rounded-xl hover:bg-emerald-700"><i class="fas fa-user-edit mr-1"></i> Gestión de Usuarios</button>
@@ -3481,6 +3482,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
             });
         }
+        window.renderFuncionesAdmin = renderFuncionesAdmin;
 
         async function loadFuncionesDepositos() {
             const container = document.getElementById('funcionesDepositosContainer');
@@ -3641,6 +3643,60 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
+        window.renderSetWithdrawHoursView = async () => {
+            adminViewContainer.innerHTML = '<div class="loader"></div> Cargando...';
+            try {
+                const res = await fetch('/api/admin/schedule-config');
+                if (!res.ok) { adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar configuración</p>'; return; }
+                const config = await res.json();
+
+                const isOpen = config.available;
+                const start = to12h(config.start);
+                const end = to12h(config.end);
+
+                adminViewContainer.innerHTML = `<div class="bg-gray-800/40 p-4 rounded-xl">
+                    <h4 class="font-semibold mb-3 text-purple-300">🕐 Gestionar Horario de Retiros</h4>
+                    <div class="mb-3">
+                        <p class="text-sm">Estado actual: <span class="${isOpen ? 'text-green-400' : 'text-red-400'} font-bold">${isOpen ? '🟢 Abierto' : '🔴 Cerrado'}</span></p>
+                        <p class="text-xs text-gray-400">${config.manualOverride === 'open' ? '(Inicio manual activo)' : config.manualOverride === 'close' ? '(Cierre manual activo)' : '(Horario programado)'}</p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                            <label class="block text-xs mb-1">Hora inicio</label>
+                            <div class="flex gap-1">
+                                <select id="schedStartHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${hourOptions(start.hour12)}</select>
+                                <span class="text-white self-center">:</span>
+                                <select id="schedStartMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${minOptions(start.min)}</select>
+                                <select id="schedStartAmPm" class="w-20 p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none text-center">
+                                    <option value="AM"${start.period === 'AM' ? ' selected' : ''}>AM</option>
+                                    <option value="PM"${start.period === 'PM' ? ' selected' : ''}>PM</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs mb-1">Hora cierre</label>
+                            <div class="flex gap-1">
+                                <select id="schedEndHour" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${hourOptions(end.hour12)}</select>
+                                <span class="text-white self-center">:</span>
+                                <select id="schedEndMin" class="w-full p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none">${minOptions(end.min)}</select>
+                                <select id="schedEndAmPm" class="w-20 p-2 rounded-lg bg-gray-700 text-white text-sm appearance-none text-center">
+                                    <option value="AM"${end.period === 'AM' ? ' selected' : ''}>AM</option>
+                                    <option value="PM"${end.period === 'PM' ? ' selected' : ''}>PM</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <button id="guardarHorarioBtn" onclick="guardarHorarioRetiro()" class="w-full bg-blue-600 py-2 rounded-lg font-bold hover:bg-blue-700 mb-3">💾 Guardar Horario</button>
+                    <div class="flex gap-3">
+                        <button id="toggleOpenBtn" onclick="toggleRetiroManual('open',this)" class="flex-1 bg-green-600 py-2 rounded-lg font-bold hover:bg-green-700">🔓 Abrir ahora</button>
+                        <button id="toggleCloseBtn" onclick="toggleRetiroManual('close',this)" class="flex-1 bg-red-600 py-2 rounded-lg font-bold hover:bg-red-700">🔒 Cerrar ahora</button>
+                    </div>
+                </div>`;
+            } catch (e) {
+                adminViewContainer.innerHTML = '<p class="text-red-400">Error de conexión</p>';
+            }
+        };
+
         window.loadFuncionesUsers = async () => {
             const container = document.getElementById('funcionesUsersContainer');
             if (!container) return;
@@ -3736,7 +3792,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Horario actualizado' });
-                    loadFuncionesHorario();
+                    const schedEl = document.getElementById('schedStartHour');
+                    if (schedEl && adminViewContainer.contains(schedEl)) window.renderSetWithdrawHoursView();
+                    else loadFuncionesHorario();
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
@@ -3759,7 +3817,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: action === 'open' ? 'Retiros abiertos' : 'Retiros cerrados' });
-                    loadFuncionesHorario();
+                    const schedEl = document.getElementById('schedStartHour');
+                    if (schedEl && adminViewContainer.contains(schedEl)) window.renderSetWithdrawHoursView();
+                    else loadFuncionesHorario();
                 } else {
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
@@ -3994,6 +4054,39 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const st = timeTo12h(filters.start_time);
                 const et = timeTo12h(filters.end_time);
 
+                function fmtDate(dStr) {
+                    if (!dStr) return '';
+                    const [y, m, d] = dStr.split('-');
+                    return `${parseInt(d)}/${parseInt(m)}/${y}`;
+                }
+                function fmtTimeObj(t) {
+                    if (t.h === '' || t.h === undefined) return '';
+                    const p = t.p.toLowerCase();
+                    return `${t.h}:${String(t.m).padStart(2, '0')} ${p}`;
+                }
+                function filterRangeStr() {
+                    const sd = filters.start_date, ed = filters.end_date;
+                    const st2 = filters.start_time, et2 = filters.end_time;
+                    const hasDate = sd || ed, hasTime = st2 || et2;
+                    if (!hasDate && !hasTime) {
+                        const d = new Date();
+                        return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+                    }
+                    let dp = '';
+                    if (sd && ed && sd !== ed) dp = `${fmtDate(sd)} - ${fmtDate(ed)}`;
+                    else if (sd) dp = fmtDate(sd);
+                    else if (ed) dp = fmtDate(ed);
+                    else {
+                        const d = new Date();
+                        dp = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+                    }
+                    let tp = '';
+                    if (st2 && et2) tp = `${fmtTimeObj(st)} - ${fmtTimeObj(et)}`;
+                    else if (st2) tp = fmtTimeObj(st);
+                    else if (et2) tp = fmtTimeObj(et);
+                    return dp + (tp ? ` (${tp})` : '');
+                }
+
                 const backAction = isAdmin ? "renderSubadminStatsView()" : "renderFuncionesAdmin()";
                 let html = `<div class="mb-4">
                     <button onclick="${backAction}" class="bg-gray-600 px-4 py-2 rounded-lg hover:bg-gray-700 text-sm mb-3">
@@ -4001,7 +4094,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     </button>
                 </div>
                 <h4 class="text-xl font-bold mb-1 flex items-center"><i class="fas fa-user-shield text-orange-400 mr-2"></i>${escapeHTML(data.first_name)} ${data.username ? '@'+escapeHTML(data.username) : ''}</h4>
-                <p class="text-sm text-gray-400 mb-4">ID: ${data.telegram_id}</p>`;
+                <p class="text-sm text-gray-400 mb-1">ID: ${data.telegram_id}</p>
+                <p class="text-xs text-gray-500 mb-4">${filterRangeStr()}</p>`;
 
                 // Totals
                 if (data.totals) {
@@ -4273,6 +4367,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (view === 'sessions') renderSessionsView();
                 else if (view === 'publishWinning') renderPublishWinningView();
                 else if (view === 'setReferralRate') renderSetReferralRateView();
+                else if (view === 'setWithdrawHours') renderSetWithdrawHoursView();
                 else if (view === 'addDeposit') renderAddDepositView();
                 else if (view === 'addWithdraw') renderAddWithdrawView();
                 else if (view === 'editDeposit') renderEditDepositView();
@@ -5038,8 +5133,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 html += '<div class="space-y-1">';
                                 allRej.forEach(r => {
                                     const date = new Date(r.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+                                    let cupLabel = '';
+                                    if (r.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
+                                    else if (r.currency === 'USDT') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_usdt).toFixed(2)} CUP)</span>`;
+                                    else if (r.currency === 'TRX') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_trx).toFixed(2)} CUP)</span>`;
                                     html += `<div class="bg-gray-800/40 p-2 rounded text-sm flex justify-between items-center">
-                                        <span><span class="text-gray-300">[${r._type}]</span> ${r.amount} ${r.currency}</span>
+                                        <span><span class="text-gray-300">[${r._type}]</span> ${r.amount} ${r.currency}${cupLabel}</span>
                                         <span class="text-gray-400 text-xs">${date}</span>
                                     </div>`;
                                 });
