@@ -4259,24 +4259,40 @@ app.get('/api/admin/subadmin-stats', requireAdmin, async (req, res) => {
         const userMap = {};
         for (const u of users || []) userMap[Number(u.telegram_id)] = u;
 
-        const startISO = moment.tz(TIMEZONE).startOf('day').toDate().toISOString();
-        const endISO = moment.tz(TIMEZONE).endOf('day').toDate().toISOString();
+        let { start_date, end_date } = req.query;
+        let startISO, endISO;
 
-        const { data: allDeposits } = await supabase
-            .from('deposit_requests')
+        if (start_date && end_date) {
+            startISO = moment.tz(start_date, 'YYYY-MM-DD', TIMEZONE).startOf('day').toDate().toISOString();
+            endISO = moment.tz(end_date, 'YYYY-MM-DD', TIMEZONE).endOf('day').toDate().toISOString();
+        } else if (start_date) {
+            startISO = moment.tz(start_date, 'YYYY-MM-DD', TIMEZONE).startOf('day').toDate().toISOString();
+            endISO = moment.tz(start_date, 'YYYY-MM-DD', TIMEZONE).endOf('day').toDate().toISOString();
+        } else if (end_date) {
+            startISO = moment.tz(end_date, 'YYYY-MM-DD', TIMEZONE).startOf('day').toDate().toISOString();
+            endISO = moment.tz(end_date, 'YYYY-MM-DD', TIMEZONE).endOf('day').toDate().toISOString();
+        } else {
+            startISO = moment.tz(TIMEZONE).startOf('day').toDate().toISOString();
+            endISO = moment.tz(TIMEZONE).endOf('day').toDate().toISOString();
+        }
+
+        const depFilter = supabase.from('deposit_requests')
             .select('processed_by, amount, currency')
             .eq('status', 'approved')
             .in('processed_by', subadminIds)
             .gte('processed_at', startISO)
             .lte('processed_at', endISO);
 
-        const { data: allWithdrawals } = await supabase
-            .from('withdraw_requests')
+        const wdFilter = supabase.from('withdraw_requests')
             .select('processed_by, amount, currency')
             .eq('status', 'approved')
             .in('processed_by', subadminIds)
             .gte('processed_at', startISO)
             .lte('processed_at', endISO);
+
+        const [allDepositsRes, allWithdrawalsRes] = await Promise.all([depFilter, wdFilter]);
+        const allDeposits = allDepositsRes.data || [];
+        const allWithdrawals = allWithdrawalsRes.data || [];
 
         const rates = await getExchangeRates();
         const result = [];
