@@ -4355,44 +4355,45 @@ app.get('/api/admin/subadmin-stats/:telegramId', async (req, res) => {
 
         let { start_date, end_date, start_time, end_time } = req.query;
 
-        let defaultDateFilter = false;
-        if (!start_date && !end_date) {
-            defaultDateFilter = true;
+        let startBound, endBound;
+        if (!start_date && !end_date && !start_time && !end_time) {
+            startBound = moment.tz(TIMEZONE).startOf('day');
+            endBound = moment.tz(TIMEZONE).endOf('day');
+        } else {
+            const effStart = start_date || end_date || moment.tz(TIMEZONE).format('YYYY-MM-DD');
+            const effEnd = end_date || start_date || moment.tz(TIMEZONE).format('YYYY-MM-DD');
+            if (start_time && /^\d{2}:\d{2}$/.test(start_time)) {
+                const [sh, sm] = start_time.split(':').map(Number);
+                startBound = moment.tz(effStart, 'YYYY-MM-DD', TIMEZONE).startOf('day').add(sh, 'hours').add(sm, 'minutes');
+            } else {
+                startBound = moment.tz(effStart, 'YYYY-MM-DD', TIMEZONE).startOf('day');
+            }
+            if (end_time && /^\d{2}:\d{2}$/.test(end_time)) {
+                const [eh, em] = end_time.split(':').map(Number);
+                endBound = moment.tz(effEnd, 'YYYY-MM-DD', TIMEZONE).startOf('day').add(eh, 'hours').add(em, 'minutes');
+            } else {
+                endBound = moment.tz(effEnd, 'YYYY-MM-DD', TIMEZONE).endOf('day');
+            }
         }
+
+        const startISO = startBound.toDate().toISOString();
+        const endISO = endBound.toDate().toISOString();
 
         let depQuery = supabase.from('deposit_requests')
             .select(`id, user_id, amount, currency, created_at, processed_at,
                 users (first_name, username)`)
             .eq('processed_by', telegramId)
-            .eq('status', 'approved');
+            .eq('status', 'approved')
+            .gte('processed_at', startISO)
+            .lte('processed_at', endISO);
 
         let wdQuery = supabase.from('withdraw_requests')
             .select(`id, user_id, amount, currency, created_at, processed_at,
                 users (first_name, username)`)
             .eq('processed_by', telegramId)
-            .eq('status', 'approved');
-
-        if (defaultDateFilter) {
-            const startISO = moment.tz(TIMEZONE).startOf('day').toDate().toISOString();
-            const endISO = moment.tz(TIMEZONE).endOf('day').toDate().toISOString();
-            depQuery = depQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-            wdQuery = wdQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-        } else if (start_date && end_date) {
-            const startISO = moment.tz(start_date, 'YYYY-MM-DD', TIMEZONE).startOf('day').toDate().toISOString();
-            const endISO = moment.tz(end_date, 'YYYY-MM-DD', TIMEZONE).endOf('day').toDate().toISOString();
-            depQuery = depQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-            wdQuery = wdQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-        } else if (start_date) {
-            const startISO = moment.tz(start_date, 'YYYY-MM-DD', TIMEZONE).startOf('day').toDate().toISOString();
-            const endISO = moment.tz(start_date, 'YYYY-MM-DD', TIMEZONE).endOf('day').toDate().toISOString();
-            depQuery = depQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-            wdQuery = wdQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-        } else if (end_date) {
-            const startISO = moment.tz(end_date, 'YYYY-MM-DD', TIMEZONE).startOf('day').toDate().toISOString();
-            const endISO = moment.tz(end_date, 'YYYY-MM-DD', TIMEZONE).endOf('day').toDate().toISOString();
-            depQuery = depQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-            wdQuery = wdQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-        }
+            .eq('status', 'approved')
+            .gte('processed_at', startISO)
+            .lte('processed_at', endISO);
 
         depQuery = depQuery.order('processed_at', { ascending: false }).limit(100);
         wdQuery = wdQuery.order('processed_at', { ascending: false }).limit(100);
@@ -4402,35 +4403,17 @@ app.get('/api/admin/subadmin-stats/:telegramId', async (req, res) => {
             .select(`id, user_id, amount, currency, created_at, processed_at,
                 users (first_name, username)`)
             .eq('processed_by', telegramId)
-            .eq('status', 'rejected');
+            .eq('status', 'rejected')
+            .gte('processed_at', startISO)
+            .lte('processed_at', endISO);
 
         let wdRejQuery = supabase.from('withdraw_requests')
             .select(`id, user_id, amount, currency, created_at, processed_at,
                 users (first_name, username)`)
             .eq('processed_by', telegramId)
-            .eq('status', 'rejected');
-
-        if (defaultDateFilter) {
-            const startISO = moment.tz(TIMEZONE).startOf('day').toDate().toISOString();
-            const endISO = moment.tz(TIMEZONE).endOf('day').toDate().toISOString();
-            depRejQuery = depRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-            wdRejQuery = wdRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-        } else if (start_date && end_date) {
-            const startISO = moment.tz(start_date, 'YYYY-MM-DD', TIMEZONE).startOf('day').toDate().toISOString();
-            const endISO = moment.tz(end_date, 'YYYY-MM-DD', TIMEZONE).endOf('day').toDate().toISOString();
-            depRejQuery = depRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-            wdRejQuery = wdRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-        } else if (start_date) {
-            const startISO = moment.tz(start_date, 'YYYY-MM-DD', TIMEZONE).startOf('day').toDate().toISOString();
-            const endISO = moment.tz(start_date, 'YYYY-MM-DD', TIMEZONE).endOf('day').toDate().toISOString();
-            depRejQuery = depRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-            wdRejQuery = wdRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-        } else if (end_date) {
-            const startISO = moment.tz(end_date, 'YYYY-MM-DD', TIMEZONE).startOf('day').toDate().toISOString();
-            const endISO = moment.tz(end_date, 'YYYY-MM-DD', TIMEZONE).endOf('day').toDate().toISOString();
-            depRejQuery = depRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-            wdRejQuery = wdRejQuery.gte('processed_at', startISO).lte('processed_at', endISO);
-        }
+            .eq('status', 'rejected')
+            .gte('processed_at', startISO)
+            .lte('processed_at', endISO);
 
         depRejQuery = depRejQuery.order('processed_at', { ascending: false }).limit(100);
         wdRejQuery = wdRejQuery.order('processed_at', { ascending: false }).limit(100);
@@ -4496,33 +4479,6 @@ app.get('/api/admin/subadmin-stats/:telegramId', async (req, res) => {
             processed_at: w.processed_at,
             type: 'retiro'
         }));
-
-        // Apply time filter in memory (converts Cuba time to UTC for DB comparison)
-        function filterByTime(items, startTime, endTime) {
-            if (!startTime && !endTime) return items;
-            let startUTC = null, endUTC = null;
-            if (startTime) {
-                const m = moment.tz(startTime, 'HH:mm', TIMEZONE).utc();
-                startUTC = m.hours() * 60 + m.minutes();
-            }
-            if (endTime) {
-                const m = moment.tz(endTime, 'HH:mm', TIMEZONE).utc();
-                endUTC = m.hours() * 60 + m.minutes();
-            }
-            return items.filter(item => {
-                if (!item.processed_at) return false;
-                const d = new Date(item.processed_at);
-                const totalMinutes = d.getUTCHours() * 60 + d.getUTCMinutes();
-                if (startUTC !== null && totalMinutes < startUTC) return false;
-                if (endUTC !== null && totalMinutes > endUTC) return false;
-                return true;
-            });
-        }
-
-        formattedDeposits = filterByTime(formattedDeposits, start_time, end_time);
-        formattedWithdrawals = filterByTime(formattedWithdrawals, start_time, end_time);
-        rejectedDeposits = filterByTime(rejectedDeposits, start_time, end_time);
-        rejectedWithdrawals = filterByTime(rejectedWithdrawals, start_time, end_time);
 
         // Combine rejected items sorted by processed_at
         const allRejected = [...rejectedDeposits, ...rejectedWithdrawals].sort((a, b) => {
