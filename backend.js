@@ -3420,6 +3420,8 @@ app.get('/api/admin/user/:targetUserId', async (req, res) => {
                 ref_by: user.ref_by,
                 ref_by_name: refByName,
                 created_at: user.created_at,
+                is_banned: user.is_banned,
+                banned_at: user.banned_at,
             },
             bets: bets || [],
             referrals: {
