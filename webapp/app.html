@@ -412,7 +412,7 @@
                             <button data-type="fijo" class="type-btn bg-blue-600/80 p-3 rounded-xl hover:bg-blue-700">🎯 Fijo</button>
                             <button data-type="corridos" class="type-btn bg-green-600/80 p-3 rounded-xl hover:bg-green-700">🏃 Corridos</button>
                             <button data-type="centena" class="type-btn bg-purple-600/80 p-3 rounded-xl hover:bg-purple-700">💯 Centena</button>
-                            <button data-type="parle" class="type-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700">🔒 Parle</button>
+                            <button data-type="parle" class="type-btn bg-yellow-600/80 p-3 rounded-xl hover:bg-yellow-700">🔗 Parlet</button>
                         </div>
                     </div>
 
@@ -1073,7 +1073,7 @@ Ej: 517 con 30 cup<br>
 Varios por línea: 517 239 123 con 20 cup<br>`;
                     break;
                 case 'parle':
-                    instructions = `🔒 <b>PARLE</b> – Dos números de 2 dígitos separados por "x".<br>
+                    instructions = `🔗 <b>PARLET</b> – Dos números de 2 dígitos separados por "x".<br>
 Ej: 17x32*10 cup<br>
 17x62 con 0.5 usd<br>
 Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
@@ -4596,7 +4596,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 fijo: 'Fijo',
                 corridos: 'Corridos',
                 centena: 'Centena',
-                parle: 'Parle'
+                parle: 'Parlet'
             };
             const key = String(betType || '').toLowerCase();
             if (!key) return 'N/D';
@@ -5217,10 +5217,11 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
 
                     // Depósitos
                     let depositsHtml = '';
+                    let depositsTotalsHtml = '';
                     if (deposits.length === 0) {
-                        depositsHtml += '<p class="text-gray-400">No hay depósitos registrados.</p>';
+                        depositsHtml = '<p class="text-gray-400">No hay depósitos registrados.</p>';
                     } else {
-                        depositsHtml += '<div class="space-y-1">';
+                        depositsHtml = '<div class="space-y-1">';
                         deposits.forEach((d, i) => {
                             const date = new Date(d.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                             let cupLabel = '';
@@ -5235,15 +5236,16 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                                 </div>`;
                         });
                         depositsHtml += '</div>';
+                        depositsTotalsHtml = `<p class="text-xs text-gray-400 mt-1 whitespace-nowrap">Total aprobado: ${totalDepCUP.toFixed(2)} CUP / ${totalDepUSD.toFixed(2)} USD</p>`;
                     }
-                    depositsHtml += `<p class="text-xs text-gray-400 mt-1 whitespace-nowrap">Total aprobado: ${totalDepCUP.toFixed(2)} CUP / ${totalDepUSD.toFixed(2)} USD</p>`;
 
                     // Retiros
                     let withdrawsHtml = '';
+                    let withdrawsTotalsHtml = '';
                     if (withdraws.length === 0) {
-                        withdrawsHtml += '<p class="text-gray-400">No hay retiros registrados.</p>';
+                        withdrawsHtml = '<p class="text-gray-400">No hay retiros registrados.</p>';
                     } else {
-                        withdrawsHtml += '<div class="space-y-1">';
+                        withdrawsHtml = '<div class="space-y-1">';
                         withdraws.forEach((w, i) => {
                             const date = new Date(w.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                             let cupLabel = '';
@@ -5258,8 +5260,8 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                                 </div>`;
                         });
                         withdrawsHtml += '</div>';
+                        withdrawsTotalsHtml = `<p class="text-xs text-gray-400 mt-1 whitespace-nowrap">Total aprobado: ${totalWithCUP.toFixed(2)} CUP / ${totalWithUSD.toFixed(2)} USD</p>`;
                     }
-                    withdrawsHtml += `<p class="text-xs text-gray-400 mt-1 whitespace-nowrap">Total aprobado: ${totalWithCUP.toFixed(2)} CUP / ${totalWithUSD.toFixed(2)} USD</p>`;
 
                     resultDiv.innerHTML = `
                         <div class="glass-card p-4 mb-4">
@@ -5298,14 +5300,20 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                                 <span class="text-cyan-300 font-semibold flex items-center"><i class="fas fa-arrow-down mr-2"></i> 📥 Últimos 20 depósitos (${deposits.length})</span>
                                 <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                             </button>
-                            <div class="mt-2 max-h-60 overflow-y-auto${deposits.length === 0 ? ' hidden' : ''}">${depositsHtml}</div>
+                            <div class="mt-2${deposits.length === 0 ? ' hidden' : ''}">
+                                <div class="max-h-60 overflow-y-auto">${depositsHtml}</div>
+                                ${depositsTotalsHtml}
+                            </div>
                         </div>
                         <div class="mt-4">
                             <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
                                 <span class="text-pink-300 font-semibold flex items-center"><i class="fas fa-arrow-up mr-2"></i> 📤 Últimos 20 retiros (${withdraws.length})</span>
                                 <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                             </button>
-                            <div class="mt-2 max-h-60 overflow-y-auto${withdraws.length === 0 ? ' hidden' : ''}">${withdrawsHtml}</div>
+                            <div class="mt-2${withdraws.length === 0 ? ' hidden' : ''}">
+                                <div class="max-h-60 overflow-y-auto">${withdrawsHtml}</div>
+                                ${withdrawsTotalsHtml}
+                            </div>
                         </div>
                         ${(() => {
                             const rejDep = deposits.filter(d => d.status === 'rejected');
