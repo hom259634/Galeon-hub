@@ -226,7 +226,7 @@ function formatBetTypeLabel(betType) {
         fijo: 'Fijo',
         corridos: 'Corridos',
         centena: 'Centena',
-        parle: 'Parle'
+        parle: 'Parlet'
     };
     return labels[String(betType || '').toLowerCase()] || (betType || 'N/D');
 }
@@ -1087,7 +1087,7 @@ function playLotteryKbd() {
 function playTypeKbd() {
     const buttons = [
         [Markup.button.callback('🎯 Fijo', 'type_fijo'), Markup.button.callback('🏃 Corridos', 'type_corridos')],
-        [Markup.button.callback('💯 Centena', 'type_centena'), Markup.button.callback('🔒 Parle', 'type_parle')],
+        [Markup.button.callback('💯 Centena', 'type_centena'), Markup.button.callback('🔗 Parlet', 'type_parle')],
         [Markup.button.callback('◀ Volver', 'play')]
     ];
     return Markup.inlineKeyboard(buttons);
@@ -1532,7 +1532,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'parle':
-            instructions = `🔒 <b>PARLE</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
+            instructions = `🔗 <b>PARLET</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada combinación de dos números de 2 DÍGITOS, separados por "x"; o varias combinaciones separadas.\n` +
                 `<b>Formato:</b> <code>17x32 con 5 cup</code> o <code>21x93 54x95*2 cup</code>\n\n` +
@@ -2482,7 +2482,7 @@ bot.action(/publish_win_(\d+)/, async (ctx) => {
         '• Centena: primeros 3 dígitos\n' +
         '• Fijo: últimos 2 de la centena\n' +
         '• Corridos: fijo, primeros 2 de cuarteta, últimos 2 de cuarteta\n' +
-        '• Parles: combinaciones de los corridos',
+        '• Parlet: combinaciones de los corridos',
         { parse_mode: 'HTML' }
     );
     await ctx.answerCbQuery();

@@ -737,7 +737,7 @@ function formatBetTypeLabel(betType) {
         fijo: 'Fijo',
         corridos: 'Corridos',
         centena: 'Centena',
-        parle: 'Parle'
+        parle: 'Parlet'
     };
     return labels[String(betType || '').toLowerCase()] || (betType || 'N/D');
 }
