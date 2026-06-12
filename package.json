@@ -28,7 +28,8 @@
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "telegraf": "^4.15.3",
-    "telegraf-session-local": "^2.1.1"
+    "telegraf-session-local": "^2.1.1",
+    "cheerio": "^1.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
