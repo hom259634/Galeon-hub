@@ -327,11 +327,12 @@
     <!-- Header con saldo resumido -->
     <div class="flex items-center justify-between mb-6">
         <div class="flex items-center space-x-3">
-            <div class="w-12 h-12 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg flex-shrink-0">
+            <div class="w-12 h-12 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg">
                 <i class="fas fa-dice text-white text-2xl"></i>
             </div>
-            <div class="min-w-0">
-                <h1 class="text-lg md:text-xl font-bold text-white drop-shadow-lg truncate max-w-[180px] md:max-w-xs" id="botDisplayName">PROCESANDO DATOS...</h1>
+            <div>
+                <h1 class="text-2xl font-bold text-white drop-shadow-lg" id="botDisplayName">PROCESANDO DATOS...</h1>
+                <p class="text-xs text-gray-300" id="userName">Cargando...</p>
             </div>
         </div>
         <div class="glass-card px-3 py-2 balance-container">
