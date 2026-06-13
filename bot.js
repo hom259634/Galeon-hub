@@ -5429,7 +5429,7 @@ cron.schedule('* * * * *', async () => {
 }, { timezone: TIMEZONE });
 
 // Cron diario 8:30 AM - Actualizar tasas desde El Toque y broadcast
-cron.schedule('0 0 * * *', async () => {
+cron.schedule('30 8 * * *', async () => {
     try {
         console.log('[Tasas ElToque] Ejecutando actualización diaria de tasas...');
 
@@ -5455,7 +5455,6 @@ cron.schedule('0 0 * * *', async () => {
         const lines = [
             '📊 <b>Tasas de Cambio del Día</b>',
             `🕐 <i>Actualizado: ${dateStr} ${timeStr}</i>`,
-            'Fuente: elTOQUE',
             '',
             '<b>Mercado Informal</b>',
         ];
@@ -5465,7 +5464,7 @@ cron.schedule('0 0 * * *', async () => {
         if (rates.usdt) lines.push(`🪙 <b>USDT:</b> ${rates.usdt.toFixed(2)} CUP`);
         if (rates.trx) lines.push(`🪙 <b>TRX:</b> ${rates.trx.toFixed(2)} CUP`);
 
-        lines.push('');
+        lines.push('', '✅ Tasas actualizadas automáticamente.');
 
         const message = lines.join('\n');
         await broadcastToAllUsers(message);
