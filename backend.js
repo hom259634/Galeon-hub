@@ -40,7 +40,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname, 'webapp')));
 
 // ========== CONFIGURACIÓN DE MULTER ==========
 const upload = multer({
@@ -4972,10 +4972,10 @@ app.post('/api/admin/schedule-toggle', async (req, res) => {
 
 // ========== SERVIDOR ESTÁTICO ==========
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'app.html'));
+    res.sendFile(path.join(__dirname, 'webapp', 'index.html'));
 });
 app.get('/app.html', (req, res) => {
-    res.sendFile(path.join(__dirname, 'app.html'));
+    res.sendFile(path.join(__dirname, 'webapp', 'app.html'));
 });
 
 // ========== KEEP-ALIVE ==========

@@ -5447,7 +5447,7 @@ cron.schedule('* * * * *', async () => {
 }, { timezone: TIMEZONE });
 
 // Cron diario 8:30 AM - Actualizar tasas desde El Toque y broadcast
-cron.schedule('30 11 * * *', async () => {
+cron.schedule('30 12 * * *', async () => {
     try {
         console.log('[Tasas ElToque] Ejecutando actualización diaria de tasas...');
 
