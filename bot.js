@@ -519,174 +519,46 @@ async function convertFromCUP(amountCUP, targetCurrency) {
 // ========== FETCH EXCHANGE RATES FROM EL TOQUE ==========
 const ELTOQUE_BASE = 'https://eltoque.com';
 
-async function fetchPageHTML(url) {
-    const { data } = await axios.get(url, {
-        timeout: 15000,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-    return data;
-}
-
-function extractRateFromText(text, label) {
-    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`${escaped}\\s+tiene un valor referencial de\\s+([\\d,]+(?:\\.[\\d]+)?)\\s*pesos`, 'i');
-    const m = text.match(re);
-    if (m) return parseFloat(m[1].replace(/,/g, ''));
-    return null;
-}
-
-function extractRatesFromWidget(html) {
-    const $ = require('cheerio').load(html);
-    const rateValues = [];
-
-    // Try to extract rates from the rate widget container
-    // The widget contains numbers followed by "CUP" and optionally "+" or "-" change
-    // Currencies are listed in order: USD, EUR, MLC, CAD, MXN, ZELLE, CLA
-    
-    // Find all text nodes/elements matching the rate pattern
-    const bodyText = $('body').text();
-    const rateRegex = /(\d+\.?\d*)\s*CUP\s*[+-]?\s*[\d.]*/g;
-    let match;
-    const values = [];
-    while ((match = rateRegex.exec(bodyText)) !== null) {
-        const val = parseFloat(match[1]);
-        if (val > 1 && val < 10000 && !values.includes(val)) {
-            values.push(val);
-        }
-    }
-
-    // Find the section with "Mercado Informal de Divisas" and try to extract from there first
-    const sections = ['Mercado Informal de Divisas', 'Mercado informal de divisas'];
-    for (const section of sections) {
-        const idx = bodyText.indexOf(section);
-        if (idx !== -1) {
-            const nearby = bodyText.substring(idx, idx + 2000);
-            const nearbyValues = [];
-            const nearbyRegex = /(\d+\.?\d*)\s*CUP\s*[+-]?\s*[\d.]*/g;
-            while ((match = nearbyRegex.exec(nearby)) !== null) {
-                const val = parseFloat(match[1]);
-                if (val > 1 && val < 10000) {
-                    nearbyValues.push(val);
-                }
-            }
-            if (nearbyValues.length >= 7) {
-                // Order: USD(0), EUR(1), MLC(2), CAD(3), MXN(4), ZELLE(5), CLA(6)
-                return {
-                    usd: nearbyValues[0],
-                    mlc: nearbyValues[2]
-                };
-            }
-        }
-    }
-
-    // Fallback: use the first 7+ rate values found on the page in order
-    if (values.length >= 7) {
-        return {
-            usd: values[0],
-            mlc: values[2]
-        };
-    }
-
-    return null;
-}
-
 async function fetchElToqueRates() {
     try {
         console.log('[ElToque] Fetching rates from elTOQUE...');
 
-        // Strategy 1: Try individual currency pages for cleaner extraction
-        const [dolarHTML, mlcHTML] = await Promise.allSettled([
-            fetchPageHTML(`${ELTOQUE_BASE}/tasas-de-cambio-cuba/dolar`),
-            fetchPageHTML(`${ELTOQUE_BASE}/tasas-de-cambio-cuba/mlc`)
-        ]);
+        const { data: html } = await axios.get(`${ELTOQUE_BASE}/tasas-de-cambio-cuba`, {
+            timeout: 15000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
 
-        let usd = null, mlc = null;
-
-        if (dolarHTML.status === 'fulfilled') {
-            usd = extractRateFromText(dolarHTML.value, 'dólar') || extractRateFromText(dolarHTML.value, 'dolar');
-            if (!usd) {
-                const parsed = extractRatesFromWidget(dolarHTML.value);
-                if (parsed) usd = parsed.usd;
-            }
-            console.log(`[ElToque] USD rate (from page): ${usd}`);
+        // Extract the JSON data embedded in the Next.js page
+        // Look for the trmiExchange JSON object inside the script tag
+        const jsonMatch = html.match(/"trmiExchange":(\{.*?"minMessages":\d+\})/);
+        if (!jsonMatch) {
+            console.error('[ElToque] Could not find exchange rate data in HTML');
+            return null;
         }
 
-        if (mlcHTML.status === 'fulfilled') {
-            mlc = extractRateFromText(mlcHTML.value, 'MLC');
-            if (!mlc) {
-                const parsed = extractRatesFromWidget(mlcHTML.value);
-                if (parsed) mlc = parsed.mlc;
-            }
-            console.log(`[ElToque] MLC rate (from page): ${mlc}`);
+        const trmiData = JSON.parse(jsonMatch[1]);
+        const stats = trmiData?.data?.api?.statistics;
+        if (!stats) {
+            console.error('[ElToque] Invalid data structure in JSON');
+            return null;
         }
 
-        // Fallback: try the main rates page
-        if (!usd || !mlc) {
-            try {
-                const mainHTML = await fetchPageHTML(`${ELTOQUE_BASE}/tasas-de-cambio-cuba`);
-                const mainParsed = extractRatesFromWidget(mainHTML);
-                if (mainParsed) {
-                    if (!usd) usd = mainParsed.usd;
-                    if (!mlc) mlc = mainParsed.mlc;
-                }
-            } catch (e) {
-                console.warn('[ElToque] Error fetching main rates page:', e.message);
-            }
+        // Helper: if enough messages use median, otherwise use EMA (matches El Toque's own logic)
+        const minMessages = trmiData?.data?.api?.info?.minMessages || 30;
+        function getRate(currencyKey) {
+            const c = stats[currencyKey];
+            if (!c) return null;
+            return (c.count_messages >= minMessages) ? c.median : c.ema_value;
         }
 
-        // Strategy 2: Try crypto page for USDT and TRX
-        let usdt = null, trx = null;
-        try {
-            const cryptoHTML = await fetchPageHTML(`${ELTOQUE_BASE}/tasas-de-cambio-cuba/mercado-informal/criptomonedas`);
-            const $ = require('cheerio').load(cryptoHTML);
-            const cryptoText = $('body').text();
+        const usd = getRate('USD');
+        const mlc = getRate('MLC');
+        const usdt = getRate('USDT_TRC20');
+        const trx = getRate('TRX');
 
-            // USDT: Look for patterns like "1 USDT = X CUP" or "USDT equivale a X CUP"
-            const usdtMatch = cryptoText.match(/USDT[^.]*?([\d,]+(?:\.\d+)?)\s*CUP/i) ||
-                              cryptoText.match(/1\s*USDT[^0-9]*?([\d,]+(?:\.\d+)?)/i) ||
-                              cryptoText.match(/([\d,]+(?:\.\d+)?)\s*CUP\s*(?:por\s*USDT|por\s*1\s*USDT)/i);
-            if (usdtMatch) {
-                usdt = parseFloat(usdtMatch[1].replace(/,/g, ''));
-            }
+        console.log(`[ElToque] USD=${usd}, MLC=${mlc}, USDT=${usdt}, TRX=${trx}`);
 
-            // TRX: Look for patterns like "TRX = X CUP" or "TRON equivale a X CUP"
-            const trxMatch = cryptoText.match(/TRX[^.]*?([\d,]+(?:\.\d+)?)\s*CUP/i) ||
-                            cryptoText.match(/TRON[^.]*?([\d,]+(?:\.\d+)?)\s*CUP/i);
-            if (trxMatch) {
-                trx = parseFloat(trxMatch[1].replace(/,/g, ''));
-            }
-
-            // Fallback: try to find in the widget (crypto page might have a different widget)
-            if (!usdt || !trx) {
-                const cryptoRateRegex = /(\d+\.?\d*)\s*CUP\s*[+-]?\s*[\d.]*/g;
-                const cryptoValues = [];
-                let cm;
-                while ((cm = cryptoRateRegex.exec(cryptoText)) !== null) {
-                    const val = parseFloat(cm[1]);
-                    if (val > 1 && val < 10000) {
-                        cryptoValues.push(val);
-                    }
-                }
-                // On the crypto page, USDT is usually first or second, TRX is one of the lower values
-                if (!usdt && cryptoValues.length >= 2) usdt = cryptoValues[0] || cryptoValues[1];
-                if (!trx && cryptoValues.length >= 3) trx = cryptoValues[cryptoValues.length - 1];
-            }
-
-            console.log(`[ElToque] USDT rate (from crypto page): ${usdt}`);
-            console.log(`[ElToque] TRX rate (from crypto page): ${trx}`);
-        } catch (e) {
-            console.warn('[ElToque] Error fetching crypto page:', e.message);
-        }
-
-        const result = {
-            usd: usd || null,
-            mlc: mlc || null,
-            usdt: usdt || null,
-            trx: trx || null
-        };
-
-        console.log('[ElToque] Rates extracted:', result);
-        return result;
+        return { usd, mlc, usdt, trx };
     } catch (e) {
         console.error('[ElToque] Error fetching rates:', e.message);
         return null;
@@ -5557,7 +5429,7 @@ cron.schedule('* * * * *', async () => {
 }, { timezone: TIMEZONE });
 
 // Cron diario 8:30 AM - Actualizar tasas desde El Toque y broadcast
-cron.schedule('30 21 * * *', async () => {
+cron.schedule('30 23 * * *', async () => {
     try {
         console.log('[Tasas ElToque] Ejecutando actualización diaria de tasas...');
 
@@ -5583,7 +5455,7 @@ cron.schedule('30 21 * * *', async () => {
         const lines = [
             '📊 <b>Tasas de Cambio del Día</b>',
             `🕐 <i>Actualizado: ${dateStr} ${timeStr}</i>`,
-            `Fuente: @elTOQUE`,
+            'Fuente: elTOQUE',
             '',
             '<b>Mercado Informal</b>',
         ];
@@ -5593,7 +5465,7 @@ cron.schedule('30 21 * * *', async () => {
         if (rates.usdt) lines.push(`🪙 <b>USDT:</b> ${rates.usdt.toFixed(2)} CUP`);
         if (rates.trx) lines.push(`🪙 <b>TRX:</b> ${rates.trx.toFixed(2)} CUP`);
 
-        lines.push('', '✅ Tasas actualizadas automáticamente.');
+        lines.push('');
 
         const message = lines.join('\n');
         await broadcastToAllUsers(message);
