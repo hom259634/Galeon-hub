@@ -528,15 +528,36 @@ async function fetchElToqueRates() {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
 
-        // Extract the JSON data embedded in the Next.js page
-        // Look for the trmiExchange JSON object inside the script tag
-        const jsonMatch = html.match(/"trmiExchange":(\{.*?"minMessages":\d+\})/);
-        if (!jsonMatch) {
-            console.error('[ElToque] Could not find exchange rate data in HTML');
+        // Extract the full trmiExchange JSON object by counting brace depth
+        const marker = '"trmiExchange":';
+        const startIdx = html.indexOf(marker);
+        if (startIdx === -1) {
+            console.error('[ElToque] Could not find trmiExchange marker in HTML');
             return null;
         }
 
-        const trmiData = JSON.parse(jsonMatch[1]);
+        const jsonStart = html.indexOf('{', startIdx + marker.length);
+        if (jsonStart === -1) {
+            console.error('[ElToque] Could not find start of trmiExchange JSON');
+            return null;
+        }
+
+        let depth = 0;
+        let jsonEnd = jsonStart;
+        for (let i = jsonStart; i < html.length; i++) {
+            const ch = html[i];
+            if (ch === '{') depth++;
+            else if (ch === '}') {
+                depth--;
+                if (depth === 0) {
+                    jsonEnd = i + 1;
+                    break;
+                }
+            }
+        }
+
+        const jsonStr = html.substring(jsonStart, jsonEnd);
+        const trmiData = JSON.parse(jsonStr);
         const stats = trmiData?.data?.api?.statistics;
         if (!stats) {
             console.error('[ElToque] Invalid data structure in JSON');
@@ -1587,7 +1608,7 @@ bot.action(/type_(.+)/, async (ctx) => {
                 `Escribe una línea por cada combinación de dos números de 2 DÍGITOS, separados por "x"; o varias combinaciones separadas.\n` +
                 `<b>Formato:</b> <code>17x32 con 5 cup</code> o <code>21x93 54x95*2 cup</code>\n\n` +
                 `Ejemplos:\n17x32 con 5 cup\n21x93 54x95 con 2 cup\n32x62*0.5 usd\n\n` +
-                `💭 <b>Escribe tus parles:</b>`;
+                `💭 <b>Escribe tus parlets:</b>`;
             break;
     }
     await safeEdit(ctx, instructions, null);
@@ -5415,9 +5436,6 @@ async function withdrawNotifications() {
     }
 }
 
-// Después de todo el código, antes del module.exports
-let cronRunning = false;
-
 cron.schedule('* * * * *', async () => {
     try {
         await closeExpiredSessions();
@@ -5429,7 +5447,7 @@ cron.schedule('* * * * *', async () => {
 }, { timezone: TIMEZONE });
 
 // Cron diario 8:30 AM - Actualizar tasas desde El Toque y broadcast
-cron.schedule('30 8 * * *', async () => {
+cron.schedule('30 11 * * *', async () => {
     try {
         console.log('[Tasas ElToque] Ejecutando actualización diaria de tasas...');
 
@@ -5453,18 +5471,22 @@ cron.schedule('30 8 * * *', async () => {
 
         // Construir mensaje de broadcast
         const lines = [
-            '📊 <b>Tasas de Cambio del Día</b>',
-            `🕐 <i>Actualizado: ${dateStr} ${timeStr}</i>`,
+            '💹 Tasas de Cambio del Día',
+            `🕐 Actualizado en tiempo real: ${dateStr} ${timeStr}`,
+            'Fuente: eltoque.com',
             '',
-            '<b>Mercado Informal</b>',
+            'Mercado Informal',
         ];
 
-        if (rates.usd) lines.push(`💵 <b>USD:</b> ${rates.usd.toFixed(2)} CUP`);
-        if (rates.mlc) lines.push(`🏦 <b>MLC:</b> ${rates.mlc.toFixed(2)} CUP`);
-        if (rates.usdt) lines.push(`🪙 <b>USDT:</b> ${rates.usdt.toFixed(2)} CUP`);
-        if (rates.trx) lines.push(`🪙 <b>TRX:</b> ${rates.trx.toFixed(2)} CUP`);
+        if (rates.usd) lines.push(`💵 USD: ${rates.usd.toFixed(2)} CUP`);
+        if (rates.usdt) lines.push(`🪙 USDT: ${rates.usdt.toFixed(2)} CUP`);
+        if (rates.trx) lines.push(`🪙 TRX: ${rates.trx.toFixed(2)} CUP`);
+        if (rates.mlc) lines.push(`🏦 MLC: ${rates.mlc.toFixed(2)} CUP`);
 
-        lines.push('', '✅ Tasas actualizadas automáticamente.');
+        lines.push('');
+        lines.push('📊 Tasas actualizadas');
+        lines.push('');
+        lines.push('🔄 ¡Listo para tus transacciones!');
 
         const message = lines.join('\n');
         await broadcastToAllUsers(message);
