@@ -564,11 +564,15 @@ async function fetchElToqueRates() {
             return null;
         }
 
-        // Helper: if enough messages use median, otherwise use EMA (matches El Toque's own logic)
+        // Helper: choose rate based on whether currency is in main display list
         const minMessages = trmiData?.data?.api?.info?.minMessages || 30;
+        const monedasSet = new Set((trmiData?.data?.monedas || []).map(m => m.short_db));
         function getRate(currencyKey) {
             const c = stats[currencyKey];
             if (!c) return null;
+            // Currencies NOT in the main display list (e.g. USDT, TRX) use EMA
+            if (!monedasSet.has(currencyKey)) return c.ema_value;
+            // Currencies in the main display: median if enough messages, else EMA
             return (c.count_messages >= minMessages) ? c.median : c.ema_value;
         }
 
@@ -5447,7 +5451,7 @@ cron.schedule('* * * * *', async () => {
 }, { timezone: TIMEZONE });
 
 // Cron diario 8:30 AM - Actualizar tasas desde El Toque y broadcast
-cron.schedule('30 12 * * *', async () => {
+cron.schedule('0 15 * * *', async () => {
     try {
         console.log('[Tasas ElToque] Ejecutando actualización diaria de tasas...');
 
@@ -5484,7 +5488,7 @@ cron.schedule('30 12 * * *', async () => {
         if (rates.mlc) lines.push(`🏦 MLC: ${rates.mlc.toFixed(2)} CUP`);
 
         lines.push('');
-        lines.push('📊 Tasas actualizadas');
+        lines.push('📊 Tasas actualizadas.');
         lines.push('');
         lines.push('🔄 ¡Listo para tus transacciones!');
 
