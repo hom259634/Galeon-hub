@@ -2916,6 +2916,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 <p class="mb-2">Tasa TRX/CUP actual: <span class="text-cyan-300 font-bold">1 TRX = ${exchangeRates.rate_trx} CUP</span></p>
                 <input type="number" id="newRateTRX" value="${exchangeRates.rate_trx}" step="0.01" min="0.01" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-green-500 mb-3">
                 <button id="updateRateTRXBtn" class="w-full bg-green-600 py-2 rounded-xl">Actualizar TRX/CUP</button>
+                <button id="sendRateUpdateBtn" class="w-full bg-blue-600 py-2 rounded-xl mt-4 font-bold">📤 Enviar Actualización</button>
             `;
 
             document.getElementById('updateRateMLCBtn')?.addEventListener('click', async () => {
@@ -2992,6 +2993,32 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     if (res.ok) { exchangeRates.rate_trx = rate; iziToast.success({ message: 'Tasa TRX/CUP actualizada' }); renderViewDataView(); }
                     else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
                 } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
+            });
+
+            document.getElementById('sendRateUpdateBtn')?.addEventListener('click', async () => {
+                const btn = document.getElementById('sendRateUpdateBtn');
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = 'Enviando...';
+                try {
+                    const res = await fetch('/api/admin/send-rate-update', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: currentUser.telegram_id })
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                        iziToast.success({ message: `✅ Mensaje enviado a ${data.sent} usuarios.` });
+                    } else {
+                        iziToast.error({ message: data.error || 'Error al enviar' });
+                    }
+                } catch (e) {
+                    iziToast.error({ message: 'Error de conexión' });
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                }
             });
         }
 
@@ -4649,6 +4676,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-yellow-600 px-3 py-1 rounded-full text-sm" data-filter="withReferrals">Con referidos</button>
                         <button class="filter-btn bg-blue-600 px-3 py-1 rounded-full text-sm" data-filter="referred">Refiriendo</button>
                         <button class="filter-btn bg-cyan-600 px-3 py-1 rounded-full text-sm" data-filter="withBets">Con jugadas</button>
+                        <button class="filter-btn bg-orange-600 px-3 py-1 rounded-full text-sm" data-filter="onlyId">Solo con ID</button>
                         <button class="filter-btn bg-red-700 px-3 py-1 rounded-full text-sm" data-filter="banned">🚫 Baneados</button>
                         <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="deleted">🗑 Eliminados</button>
                     </div>
@@ -4726,6 +4754,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     withReferrals: 'con referidos',
                     referred: 'refiriendo',
                     withBets: 'con jugadas',
+                    onlyId: 'solo con ID',
                     banned: 'baneados',
                     deleted: 'eliminados'
                 };
@@ -4819,6 +4848,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             case 'withBets':
                                 categoryMatch = (user.has_bets === true);
                                 break;
+                            case 'onlyId':
+                                categoryMatch = (!user.username || String(user.username).trim() === '');
+                                break;
                             case 'banned':
                                 categoryMatch = (user.is_banned === true);
                                 break;
@@ -4911,14 +4943,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const d = new Date(u.banned_at);
                     bannedAt = d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
                 }
-                openBalanceModal(telegramId, displayName, cupVal, usdVal, bonusVal, banned, bannedAt);
+                openBalanceModal(telegramId, displayName, cupVal, usdVal, bonusVal, banned, bannedAt, u.username);
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión al cargar datos del usuario' });
                 adminModal.classList.add('hidden');
             }
         };
 
-        window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false, bannedAt = '') => {
+        window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false, bannedAt = '', username = '') => {
             const banButtonHtml = isBanned
                 ? `<button id="banUserBtn" onclick="desbanearUsuario(${telegramId})" class="w-full bg-green-700 py-3 rounded-xl mt-2 font-bold">✅ Desbanear usuario</button>`
                 : `<button id="banUserBtn" onclick="banearUsuario(${telegramId})" class="w-full bg-red-700 py-3 rounded-xl mt-2 font-bold">🚫 Banear usuario</button>`;
@@ -4961,6 +4993,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     ` : ''}
                 </div>
                 <button id="saveBalanceBtn" onclick="saveBalanceEdit(${telegramId})" class="w-full bg-green-600 py-3 rounded-xl mt-4 font-bold">💾 Guardar cambios</button>
+                ${!username ? `<button onclick="sendDirectMessage(${telegramId}, '${escapeHTML(name)}')" class="w-full bg-blue-600 py-3 rounded-xl mt-2 font-bold">📨 Enviar mensaje por ID</button>` : ''}
                 ${isAdmin || userRoles.includes('user_deleter') ? `<button id="resetUserBtn" onclick="reiniciarUsuario(${telegramId})" class="w-full bg-yellow-700 py-3 rounded-xl mt-2 font-bold">🗑 Eliminar usuario</button>` : ''}
                 ${banButtonHtml}
                 <button onclick="document.getElementById('adminModal').classList.add('hidden')" class="w-full bg-gray-600 py-2 rounded-lg mt-2">Cancelar</button>
@@ -4975,6 +5008,26 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const newVal = Math.max(0, current + amount);
                 console.log(`adjustBalance: field=${field}, amount=${amount}, current=${current}, newVal=${newVal}, input.value antes="${input.value}"`);
                 input.value = newVal.toFixed(2);
+            }
+        };
+
+        window.sendDirectMessage = async (telegramId, name) => {
+            const message = prompt(`Escribe el mensaje que deseas enviar a ${name} (ID: ${telegramId}):`);
+            if (!message || !message.trim()) return;
+            try {
+                const res = await fetch(`/api/admin/users/${telegramId}/send-message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: message.trim(), userId: currentUser.telegram_id })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    iziToast.success({ message: '✅ Mensaje enviado correctamente' });
+                } else {
+                    iziToast.error({ message: data.error || 'Error al enviar el mensaje' });
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión al enviar el mensaje' });
             }
         };
 
