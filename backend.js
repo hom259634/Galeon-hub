@@ -2600,6 +2600,53 @@ app.put('/api/admin/exchange-rate/trx', requireAdmin, async (req, res) => {
     res.json({ success: true });
 });
 
+// Enviar broadcast de tasas actuales a todos los usuarios (super admin)
+app.post('/api/admin/send-rate-update', requireAdmin, async (req, res) => {
+    try {
+        const { data } = await supabase.from('exchange_rate').select('*').eq('id', 1).single();
+        const rate = data?.rate ?? 110;
+        const rate_usdt = data?.rate_usdt ?? 110;
+        const rate_trx = data?.rate_trx ?? 1;
+        const rate_mlc = data?.rate_mlc ?? 110;
+
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: true });
+        const lines = [
+            '💹 Tasas de Cambio del Día',
+            `🕐 Actualizado por ADMIN: ${dateStr} ${timeStr}`,
+            '',
+            'Mercado Informal',
+            `💵 USD: ${rate.toFixed(2)} CUP`,
+            `🪙 USDT: ${rate_usdt.toFixed(2)} CUP`,
+            `🪙 TRX: ${rate_trx.toFixed(2)} CUP`,
+            `🏦 MLC: ${rate_mlc.toFixed(2)} CUP`,
+            '',
+            '📊 Tasas actualizadas.',
+            '',
+            '🔄 ¡Listo para tus transacciones!',
+        ];
+        const message = lines.join('\n');
+
+        const { data: users } = await supabase.from('users').select('telegram_id');
+        const errorsToIgnore = ['chat not found', 'bot was blocked by the user', 'user is deactivated'];
+        let sent = 0, failed = 0;
+        for (const u of users || []) {
+            try {
+                await bot.telegram.sendMessage(u.telegram_id, message, { parse_mode: 'HTML' });
+                sent++;
+            } catch (e) {
+                const msg = (e?.message || '').toLowerCase();
+                if (!errorsToIgnore.some(f => msg.includes(f))) failed++;
+            }
+        }
+        res.json({ success: true, sent, failed });
+    } catch (e) {
+        console.error('[AdminSendRates] Error:', e.message);
+        res.status(500).json({ error: 'Error al enviar la actualización de tasas.' });
+    }
+});
+
 // Obtener la tasa de comisión actual
 app.get('/api/admin/referral-rate', requireAdmin, async (req, res) => {
     const rate = await getReferralCommissionRate();
@@ -4077,6 +4124,33 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
     } catch (e) {
         console.error('Error eliminando usuario:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Enviar mensaje directo a un usuario (admin o user_manager)
+app.post('/api/admin/users/:telegramId/send-message', async (req, res) => {
+    const requesterId = req.verifiedTelegramId || req.body.userId;
+    if (!requesterId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(requesterId) && !(await hasRole(requesterId, 'user_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const targetUserId = parseInt(req.params.telegramId);
+    if (isNaN(targetUserId)) {
+        return res.status(400).json({ error: 'ID de usuario inválido' });
+    }
+    const { message } = req.body;
+    if (!message || !message.trim()) {
+        return res.status(400).json({ error: 'El mensaje no puede estar vacío' });
+    }
+    try {
+        const escapedMessage = escapeHTML(message.trim());
+        const botName = botInfo?.first_name || botInfo?.username || '4pu3$t4$ Qva®';
+        const header = `<b>${escapeHTML(botName)}</b> — ADMIN:\n\n`;
+        await bot.telegram.sendMessage(targetUserId, header + escapedMessage, { parse_mode: 'HTML' });
+        res.json({ success: true });
+    } catch (e) {
+        console.error('[AdminDirectMsg] Error enviando mensaje a', targetUserId, ':', e.message);
+        res.status(500).json({ error: 'No se pudo enviar el mensaje. El usuario podría haber bloqueado el bot.' });
     }
 });
 

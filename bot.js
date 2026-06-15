@@ -570,10 +570,12 @@ async function fetchElToqueRates() {
         function getRate(currencyKey) {
             const c = stats[currencyKey];
             if (!c) return null;
-            // Currencies NOT in the main display list (e.g. USDT, TRX) use EMA
-            if (!monedasSet.has(currencyKey)) return c.ema_value;
-            // Currencies in the main display: median if enough messages, else EMA
-            return (c.count_messages >= minMessages) ? c.median : c.ema_value;
+            // Currencies in the main display list: median if enough messages, else EMA
+            if (monedasSet.has(currencyKey)) {
+                return (c.count_messages >= minMessages) ? c.median : c.ema_value;
+            }
+            // Crypto (USDT_TRC20, TRX, etc.): median if available, else EMA
+            return c.median ?? c.ema_value;
         }
 
         const usd = getRate('USD');
@@ -1153,8 +1155,7 @@ function playLotteryKbd() {
     const buttons = [
         [Markup.button.callback('🦩 Florida', 'lot_florida')],
         [Markup.button.callback('🍑 Georgia', 'lot_georgia')],
-        [Markup.button.callback('🗽 Nueva York', 'lot_newyork')],
-        [Markup.button.callback('◀ Volver', 'main')]
+        [Markup.button.callback('🗽 Nueva York', 'lot_newyork')]
     ];
     return Markup.inlineKeyboard(buttons);
 }
@@ -1199,6 +1200,7 @@ function adminPanelKbd() {
             Markup.button.callback('💰 Configurar tasa USDT/CUP', 'adm_set_rate_usdt'),
             Markup.button.callback('💰 Configurar tasa TRX/CUP', 'adm_set_rate_trx')
         ],
+        [Markup.button.callback('📤 Enviar Actualización', 'adm_send_rate_update')],
         [
             Markup.button.callback('🎲 Configurar precios y pagos', 'adm_set_prices'),
             Markup.button.callback('💰 Mínimos por jugada', 'adm_min_per_bet')
@@ -2403,6 +2405,41 @@ bot.action('adm_set_rate_trx', async (ctx) => {
     ctx.session.adminAction = 'set_rate_trx';
     await ctx.reply(`💰 <b>Tasa TRX/CUP actual:</b> 1 TRX = ${rate} CUP\n\nEnvía la nueva tasa (solo número, ej: 1.5):`, { parse_mode: 'HTML' });
     await ctx.answerCbQuery();
+});
+
+bot.action('adm_send_rate_update', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    try {
+        await ctx.answerCbQuery();
+        const rates = await getExchangeRates();
+        const now = moment().tz(TIMEZONE);
+        const dateStr = now.format('DD/MM/YYYY');
+        const timeStr = now.format('h:mm A');
+
+        const lines = [
+            '💹 Tasas de Cambio del Día',
+            `🕐 Actualizado por ADMIN: ${dateStr} ${timeStr}`,
+            '',
+            'Mercado Informal',
+        ];
+
+        lines.push(`💵 USD: ${rates.rate.toFixed(2)} CUP`);
+        lines.push(`🪙 USDT: ${rates.rate_usdt.toFixed(2)} CUP`);
+        lines.push(`🪙 TRX: ${rates.rate_trx.toFixed(2)} CUP`);
+        lines.push(`🏦 MLC: ${rates.rate_mlc.toFixed(2)} CUP`);
+
+        lines.push('');
+        lines.push('📊 Tasas actualizadas.');
+        lines.push('');
+        lines.push('🔄 ¡Listo para tus transacciones!');
+
+        const message = lines.join('\n');
+        await broadcastToAllUsers(message);
+        await ctx.reply('✅ Mensaje de tasas enviado a todos los usuarios.');
+    } catch (e) {
+        console.error('[AdminSendRates] Error:', e.message);
+        await ctx.reply('❌ Error al enviar la actualización de tasas.');
+    }
 });
 
 bot.action('adm_set_referral_rate', async (ctx) => {
@@ -5451,7 +5488,7 @@ cron.schedule('* * * * *', async () => {
 }, { timezone: TIMEZONE });
 
 // Cron diario 8:30 AM - Actualizar tasas desde El Toque y broadcast
-cron.schedule('0 15 * * *', async () => {
+cron.schedule('30 8 * * *', async () => {
     try {
         console.log('[Tasas ElToque] Ejecutando actualización diaria de tasas...');
 
