@@ -2407,11 +2407,30 @@ bot.action('adm_set_rate_trx', async (ctx) => {
     await ctx.answerCbQuery();
 });
 
+function formatRateDelta(diff) {
+    if (diff == null || diff === 0) return '';
+    const arrow = diff > 0 ? '🔺' : '🔻';
+    const val = parseFloat(diff.toFixed(2));
+    return ` ${arrow}${val > 0 ? '+' : ''}${val}`;
+}
+
+let lastBroadcastRates = null;
 bot.action('adm_send_rate_update', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     try {
-        await ctx.answerCbQuery();
         const rates = await getExchangeRates();
+        const currentRates = { rate: rates.rate, rate_usdt: rates.rate_usdt, rate_trx: rates.rate_trx, rate_mlc: rates.rate_mlc };
+        if (lastBroadcastRates &&
+            lastBroadcastRates.rate === rates.rate &&
+            lastBroadcastRates.rate_usdt === rates.rate_usdt &&
+            lastBroadcastRates.rate_trx === rates.rate_trx &&
+            lastBroadcastRates.rate_mlc === rates.rate_mlc) {
+            await ctx.answerCbQuery('❌ Estas tasas ya están registradas.', { show_alert: true });
+            return;
+        }
+        const prev = lastBroadcastRates;
+        lastBroadcastRates = currentRates;
+        await ctx.answerCbQuery();
         const now = moment().tz(TIMEZONE);
         const dateStr = now.format('DD/MM/YYYY');
         const timeStr = now.format('h:mm A');
@@ -2423,10 +2442,10 @@ bot.action('adm_send_rate_update', async (ctx) => {
             'Mercado Informal',
         ];
 
-        lines.push(`💵 USD: ${rates.rate.toFixed(2)} CUP`);
-        lines.push(`🪙 USDT: ${rates.rate_usdt.toFixed(2)} CUP`);
-        lines.push(`🪙 TRX: ${rates.rate_trx.toFixed(2)} CUP`);
-        lines.push(`🏦 MLC: ${rates.rate_mlc.toFixed(2)} CUP`);
+        lines.push(`💵 USD: ${rates.rate.toFixed(2)} CUP${formatRateDelta(prev ? rates.rate - prev.rate : null)}`);
+        lines.push(`🪙 USDT: ${rates.rate_usdt.toFixed(2)} CUP${formatRateDelta(prev ? rates.rate_usdt - prev.rate_usdt : null)}`);
+        lines.push(`🪙 TRX: ${rates.rate_trx.toFixed(2)} CUP${formatRateDelta(prev ? rates.rate_trx - prev.rate_trx : null)}`);
+        lines.push(`🏦 MLC: ${rates.rate_mlc.toFixed(2)} CUP${formatRateDelta(prev ? rates.rate_mlc - prev.rate_mlc : null)}`);
 
         lines.push('');
         lines.push('📊 Tasas actualizadas.');
@@ -5511,6 +5530,7 @@ cron.schedule('30 8 * * *', async () => {
         console.log(`[Tasas ElToque] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
 
         // Construir mensaje de broadcast
+        const prev = lastBroadcastRates;
         const lines = [
             '💹 Tasas de Cambio del Día',
             `🕐 Actualizado en tiempo real: ${dateStr} ${timeStr}`,
@@ -5519,10 +5539,10 @@ cron.schedule('30 8 * * *', async () => {
             'Mercado Informal',
         ];
 
-        if (rates.usd) lines.push(`💵 USD: ${rates.usd.toFixed(2)} CUP`);
-        if (rates.usdt) lines.push(`🪙 USDT: ${rates.usdt.toFixed(2)} CUP`);
-        if (rates.trx) lines.push(`🪙 TRX: ${rates.trx.toFixed(2)} CUP`);
-        if (rates.mlc) lines.push(`🏦 MLC: ${rates.mlc.toFixed(2)} CUP`);
+        if (rates.usd) lines.push(`💵 USD: ${rates.usd.toFixed(2)} CUP${formatRateDelta(prev ? rates.usd - prev.rate : null)}`);
+        if (rates.usdt) lines.push(`🪙 USDT: ${rates.usdt.toFixed(2)} CUP${formatRateDelta(prev ? rates.usdt - prev.rate_usdt : null)}`);
+        if (rates.trx) lines.push(`🪙 TRX: ${rates.trx.toFixed(2)} CUP${formatRateDelta(prev ? rates.trx - prev.rate_trx : null)}`);
+        if (rates.mlc) lines.push(`🏦 MLC: ${rates.mlc.toFixed(2)} CUP${formatRateDelta(prev ? rates.mlc - prev.rate_mlc : null)}`);
 
         lines.push('');
         lines.push('📊 Tasas actualizadas.');
@@ -5532,6 +5552,14 @@ cron.schedule('30 8 * * *', async () => {
         const message = lines.join('\n');
         await broadcastToAllUsers(message);
         console.log('[Tasas ElToque] Broadcast enviado correctamente.');
+
+        const updatedRates = await getExchangeRates();
+        lastBroadcastRates = {
+            rate: updatedRates.rate,
+            rate_usdt: updatedRates.rate_usdt,
+            rate_trx: updatedRates.rate_trx,
+            rate_mlc: updatedRates.rate_mlc
+        };
     } catch (e) {
         console.error('[Tasas ElToque] Error en cron 8:30 AM:', e.message);
     }

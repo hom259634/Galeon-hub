@@ -2600,7 +2600,15 @@ app.put('/api/admin/exchange-rate/trx', requireAdmin, async (req, res) => {
     res.json({ success: true });
 });
 
+function formatRateDelta(diff) {
+    if (diff == null || diff === 0) return '';
+    const arrow = diff > 0 ? '🔺' : '🔻';
+    const val = parseFloat(diff.toFixed(2));
+    return ` ${arrow}${val > 0 ? '+' : ''}${val}`;
+}
+
 // Enviar broadcast de tasas actuales a todos los usuarios (super admin)
+let lastBroadcastRates = null;
 app.post('/api/admin/send-rate-update', requireAdmin, async (req, res) => {
     try {
         const { data } = await supabase.from('exchange_rate').select('*').eq('id', 1).single();
@@ -2609,18 +2617,29 @@ app.post('/api/admin/send-rate-update', requireAdmin, async (req, res) => {
         const rate_trx = data?.rate_trx ?? 1;
         const rate_mlc = data?.rate_mlc ?? 110;
 
-        const now = new Date();
-        const dateStr = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-        const timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: true });
+        const currentRates = { rate, rate_usdt, rate_trx, rate_mlc };
+        if (lastBroadcastRates &&
+            lastBroadcastRates.rate === rate &&
+            lastBroadcastRates.rate_usdt === rate_usdt &&
+            lastBroadcastRates.rate_trx === rate_trx &&
+            lastBroadcastRates.rate_mlc === rate_mlc) {
+            return res.status(400).json({ error: 'Estas tasas ya están registradas.' });
+        }
+        const prev = lastBroadcastRates;
+        lastBroadcastRates = currentRates;
+
+        const now = moment().tz(TIMEZONE);
+        const dateStr = now.format('DD/MM/YYYY');
+        const timeStr = now.format('h:mm A');
         const lines = [
             '💹 Tasas de Cambio del Día',
             `🕐 Actualizado por ADMIN: ${dateStr} ${timeStr}`,
             '',
             'Mercado Informal',
-            `💵 USD: ${rate.toFixed(2)} CUP`,
-            `🪙 USDT: ${rate_usdt.toFixed(2)} CUP`,
-            `🪙 TRX: ${rate_trx.toFixed(2)} CUP`,
-            `🏦 MLC: ${rate_mlc.toFixed(2)} CUP`,
+            `💵 USD: ${rate.toFixed(2)} CUP${formatRateDelta(prev ? rate - prev.rate : null)}`,
+            `🪙 USDT: ${rate_usdt.toFixed(2)} CUP${formatRateDelta(prev ? rate_usdt - prev.rate_usdt : null)}`,
+            `🪙 TRX: ${rate_trx.toFixed(2)} CUP${formatRateDelta(prev ? rate_trx - prev.rate_trx : null)}`,
+            `🏦 MLC: ${rate_mlc.toFixed(2)} CUP${formatRateDelta(prev ? rate_mlc - prev.rate_mlc : null)}`,
             '',
             '📊 Tasas actualizadas.',
             '',
@@ -4147,6 +4166,25 @@ app.post('/api/admin/users/:telegramId/send-message', async (req, res) => {
         const botName = botInfo?.first_name || botInfo?.username || '4pu3$t4$ Qva®';
         const header = `<b>${escapeHTML(botName)}</b> — ADMIN:\n\n`;
         await bot.telegram.sendMessage(targetUserId, header + escapedMessage, { parse_mode: 'HTML' });
+
+        if (!isAdmin(requesterId)) {
+            const { data: senderData } = await supabase.from('users').select('first_name, username').eq('telegram_id', requesterId).single();
+            const { data: targetData } = await supabase.from('users').select('first_name, username').eq('telegram_id', targetUserId).maybeSingle();
+            const responderName = senderData?.username ? `@${escapeHTML(senderData.username)}` : escapeHTML(senderData?.first_name || 'Sub-Admin');
+            const targetName = targetData?.first_name || `ID ${targetUserId}`;
+            const targetUsername = targetData?.username ? ` @${escapeHTML(targetData.username)}` : '';
+            for (const adminId of ADMIN_IDS) {
+                try {
+                    await bot.telegram.sendMessage(adminId,
+                        `✉️ <b>Mensaje de Sub-Admin ${responderName}</b>\n\n👤 <b>Para:</b> ${escapeHTML(targetName)}${targetUsername} (${targetUserId})\n\n━━━━━━━━━━━━━━━\n📨 ${escapedMessage}`,
+                        { parse_mode: 'HTML' }
+                    );
+                } catch (e) {
+                    console.warn(`[AdminDirectMsg] Error notificando a superadmin ${adminId}:`, e.message);
+                }
+            }
+        }
+
         res.json({ success: true });
     } catch (e) {
         console.error('[AdminDirectMsg] Error enviando mensaje a', targetUserId, ':', e.message);
