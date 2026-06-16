@@ -2414,22 +2414,21 @@ function formatRateDelta(diff) {
     return ` ${arrow}${val > 0 ? '+' : ''}${val}`;
 }
 
-let lastBroadcastRates = null;
 bot.action('adm_send_rate_update', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     try {
         const rates = await getExchangeRates();
         const currentRates = { rate: rates.rate, rate_usdt: rates.rate_usdt, rate_trx: rates.rate_trx, rate_mlc: rates.rate_mlc };
-        if (lastBroadcastRates &&
-            lastBroadcastRates.rate === rates.rate &&
-            lastBroadcastRates.rate_usdt === rates.rate_usdt &&
-            lastBroadcastRates.rate_trx === rates.rate_trx &&
-            lastBroadcastRates.rate_mlc === rates.rate_mlc) {
+        const prev = bot.lastBroadcastRates;
+        if (prev &&
+            prev.rate === rates.rate &&
+            prev.rate_usdt === rates.rate_usdt &&
+            prev.rate_trx === rates.rate_trx &&
+            prev.rate_mlc === rates.rate_mlc) {
             await ctx.answerCbQuery('❌ Estas tasas ya están registradas.', { show_alert: true });
             return;
         }
-        const prev = lastBroadcastRates;
-        lastBroadcastRates = currentRates;
+        bot.lastBroadcastRates = currentRates;
         await ctx.answerCbQuery();
         const now = moment().tz(TIMEZONE);
         const dateStr = now.format('DD/MM/YYYY');
@@ -3387,6 +3386,11 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('❌ Número inválido. Por favor, envía un número positivo (ej: 120).');
             return;
         }
+        const current = await getExchangeRateUSD();
+        if (current === rate) {
+            await ctx.reply('❌ Esta tasa ya está registrada.');
+            return;
+        }
         await setExchangeRateUSD(rate);
         await ctx.reply(`✅ Tasa USD/CUP actualizada: 1 USD = ${rate} CUP`, { parse_mode: 'HTML' });
         delete session.adminAction;
@@ -3419,6 +3423,11 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('❌ Número inválido. Por favor, envía un número positivo (ej: 120).');
             return;
         }
+        const current = await getExchangeRateMLC();
+        if (current === rate) {
+            await ctx.reply('❌ Esta tasa ya está registrada.');
+            return;
+        }
         const result = await setExchangeRateMLC(rate);
         if (!result.ok) {
             await ctx.reply('❌ No se pudo actualizar la tasa MLC. Verifica que exista la columna rate_mlc en la tabla exchange_rate.');
@@ -3437,6 +3446,11 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('❌ Número inválido. Por favor, envía un número positivo (ej: 110).');
             return;
         }
+        const current = await getExchangeRateUSDT();
+        if (current === rate) {
+            await ctx.reply('❌ Esta tasa ya está registrada.');
+            return;
+        }
         await setExchangeRateUSDT(rate);
         await ctx.reply(`✅ Tasa USDT/CUP actualizada: 1 USDT = ${rate} CUP`, { parse_mode: 'HTML' });
         delete session.adminAction;
@@ -3449,6 +3463,11 @@ bot.on(message('text'), async (ctx) => {
         const rate = parseFloat(text.replace(',', '.'));
         if (isNaN(rate) || rate <= 0) {
             await ctx.reply('❌ Número inválido. Por favor, envía un número positivo (ej: 1.5).');
+            return;
+        }
+        const current = await getExchangeRateTRX();
+        if (current === rate) {
+            await ctx.reply('❌ Esta tasa ya está registrada.');
             return;
         }
         await setExchangeRateTRX(rate);
@@ -5530,7 +5549,7 @@ cron.schedule('30 8 * * *', async () => {
         console.log(`[Tasas ElToque] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
 
         // Construir mensaje de broadcast
-        const prev = lastBroadcastRates;
+        const prev = bot.lastBroadcastRates;
         const lines = [
             '💹 Tasas de Cambio del Día',
             `🕐 Actualizado en tiempo real: ${dateStr} ${timeStr}`,
@@ -5554,7 +5573,7 @@ cron.schedule('30 8 * * *', async () => {
         console.log('[Tasas ElToque] Broadcast enviado correctamente.');
 
         const updatedRates = await getExchangeRates();
-        lastBroadcastRates = {
+        bot.lastBroadcastRates = {
             rate: updatedRates.rate,
             rate_usdt: updatedRates.rate_usdt,
             rate_trx: updatedRates.rate_trx,

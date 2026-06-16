@@ -2570,6 +2570,8 @@ app.get('/api/withdraw-status', async (req, res) => {
 app.put('/api/admin/exchange-rate/usd', requireAdmin, async (req, res) => {
     const { rate } = req.body;
     if (!rate || rate <= 0) return res.status(400).json({ error: 'Tasa inválida' });
+    const current = await getExchangeRateUSD();
+    if (current === rate) return res.status(409).json({ error: 'Esta tasa ya está registrada.' });
     await setExchangeRateUSD(rate);
     res.json({ success: true });
 });
@@ -2577,6 +2579,8 @@ app.put('/api/admin/exchange-rate/usd', requireAdmin, async (req, res) => {
 app.put('/api/admin/exchange-rate/mlc', requireAdmin, async (req, res) => {
     const { rate } = req.body;
     if (!rate || rate <= 0) return res.status(400).json({ error: 'Tasa inválida' });
+    const current = await getExchangeRateMLC();
+    if (current === rate) return res.status(409).json({ error: 'Esta tasa ya está registrada.' });
     const result = await setExchangeRateMLC(rate);
     if (!result.ok) {
         return res.status(500).json({
@@ -2589,6 +2593,8 @@ app.put('/api/admin/exchange-rate/mlc', requireAdmin, async (req, res) => {
 app.put('/api/admin/exchange-rate/usdt', requireAdmin, async (req, res) => {
     const { rate } = req.body;
     if (!rate || rate <= 0) return res.status(400).json({ error: 'Tasa inválida' });
+    const current = await getExchangeRateUSDT();
+    if (current === rate) return res.status(409).json({ error: 'Esta tasa ya está registrada.' });
     await setExchangeRateUSDT(rate);
     res.json({ success: true });
 });
@@ -2596,6 +2602,8 @@ app.put('/api/admin/exchange-rate/usdt', requireAdmin, async (req, res) => {
 app.put('/api/admin/exchange-rate/trx', requireAdmin, async (req, res) => {
     const { rate } = req.body;
     if (!rate || rate <= 0) return res.status(400).json({ error: 'Tasa inválida' });
+    const current = await getExchangeRateTRX();
+    if (current === rate) return res.status(409).json({ error: 'Esta tasa ya está registrada.' });
     await setExchangeRateTRX(rate);
     res.json({ success: true });
 });
@@ -2608,7 +2616,6 @@ function formatRateDelta(diff) {
 }
 
 // Enviar broadcast de tasas actuales a todos los usuarios (super admin)
-let lastBroadcastRates = null;
 app.post('/api/admin/send-rate-update', requireAdmin, async (req, res) => {
     try {
         const { data } = await supabase.from('exchange_rate').select('*').eq('id', 1).single();
@@ -2618,15 +2625,15 @@ app.post('/api/admin/send-rate-update', requireAdmin, async (req, res) => {
         const rate_mlc = data?.rate_mlc ?? 110;
 
         const currentRates = { rate, rate_usdt, rate_trx, rate_mlc };
-        if (lastBroadcastRates &&
-            lastBroadcastRates.rate === rate &&
-            lastBroadcastRates.rate_usdt === rate_usdt &&
-            lastBroadcastRates.rate_trx === rate_trx &&
-            lastBroadcastRates.rate_mlc === rate_mlc) {
+        const prev = bot.lastBroadcastRates;
+        if (prev &&
+            prev.rate === rate &&
+            prev.rate_usdt === rate_usdt &&
+            prev.rate_trx === rate_trx &&
+            prev.rate_mlc === rate_mlc) {
             return res.status(400).json({ error: 'Estas tasas ya están registradas.' });
         }
-        const prev = lastBroadcastRates;
-        lastBroadcastRates = currentRates;
+        bot.lastBroadcastRates = currentRates;
 
         const now = moment().tz(TIMEZONE);
         const dateStr = now.format('DD/MM/YYYY');
