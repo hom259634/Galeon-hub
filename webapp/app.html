@@ -3010,6 +3010,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const data = await res.json();
                     if (res.ok) {
                         iziToast.success({ message: `✅ Mensaje enviado a ${data.sent} usuarios.` });
+                        renderViewDataView();
                     } else {
                         iziToast.error({ message: data.error || 'Error al enviar' });
                     }
