@@ -2916,7 +2916,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 <p class="mb-2">Tasa TRX/CUP actual: <span class="text-cyan-300 font-bold">1 TRX = ${exchangeRates.rate_trx} CUP</span></p>
                 <input type="number" id="newRateTRX" value="${exchangeRates.rate_trx}" step="0.01" min="0.01" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-green-500 mb-3">
                 <button id="updateRateTRXBtn" class="w-full bg-green-600 py-2 rounded-xl">Actualizar TRX/CUP</button>
-                <button id="sendRateUpdateBtn" class="w-full bg-blue-600 py-2 rounded-xl mt-4 font-bold">📤 Enviar Actualización</button>
+                <button id="sendRateUpdateBtn" class="w-full bg-green-700 py-2 rounded-xl mt-4 font-bold">📤 Enviar Actualización</button>
             `;
 
             document.getElementById('updateRateMLCBtn')?.addEventListener('click', async () => {
@@ -2933,7 +2933,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ rate, userId: currentUser.telegram_id })
                     });
-                    if (res.ok) { exchangeRates.rate_mlc = rate; iziToast.success({ message: 'Tasa MLC/CUP actualizada' }); renderViewDataView(); }
+                    if (res.ok) { exchangeRates.rate_mlc = rate; iziToast.success({ message: 'Tasa MLC/CUP actualizada' }); renderSetRateView(); }
                     else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
                 } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
@@ -2952,7 +2952,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ rate, userId: currentUser.telegram_id })
                     });
-                    if (res.ok) { exchangeRates.rate = rate; iziToast.success({ message: 'Tasa USD/CUP actualizada' }); renderViewDataView(); }
+                    if (res.ok) { exchangeRates.rate = rate; iziToast.success({ message: 'Tasa USD/CUP actualizada' }); renderSetRateView(); }
                     else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
                 } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
@@ -2971,7 +2971,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ rate, userId: currentUser.telegram_id })
                     });
-                    if (res.ok) { exchangeRates.rate_usdt = rate; iziToast.success({ message: 'Tasa USDT/CUP actualizada' }); renderViewDataView(); }
+                    if (res.ok) { exchangeRates.rate_usdt = rate; iziToast.success({ message: 'Tasa USDT/CUP actualizada' }); renderSetRateView(); }
                     else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
                 } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
@@ -2990,7 +2990,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ rate, userId: currentUser.telegram_id })
                     });
-                    if (res.ok) { exchangeRates.rate_trx = rate; iziToast.success({ message: 'Tasa TRX/CUP actualizada' }); renderViewDataView(); }
+                    if (res.ok) { exchangeRates.rate_trx = rate; iziToast.success({ message: 'Tasa TRX/CUP actualizada' }); renderSetRateView(); }
                     else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
                 } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
