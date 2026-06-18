@@ -4706,7 +4706,7 @@ bot.on(message('text'), async (ctx) => {
                         `⏰ <b>Horario no disponible para ${schedule.emoji} ${schedule.name}</b>\n\n` +
                         `📅 Los horarios permitidos (hora de Cuba) son:\n${hoursText}\n` +
                         `🔄 Por favor, intenta dentro del horario o elige otra lotería. ¡Te esperamos!`;
-                    await ctx.reply(errorMsg, getMainKeyboard(ctx));
+                    await ctx.reply(errorMsg, { parse_mode: 'HTML', reply_markup: getMainKeyboard(ctx).reply_markup });
                     delete session.awaitingBet;
                     delete session.betType;
                     delete session.sessionId;
@@ -4931,7 +4931,7 @@ bot.on(message('text'), async (ctx) => {
             let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
                 `🎰 Lotería: ${escapeHTML(session.lottery || 'N/D')}\n` +
                 `🔢 Tipo: ${escapeHTML(formatBetTypeLabel(betType))}\n` +
-                `📋 Jugadas: ${escapeHTML(rawText.split('\n').map((l, i) => i === 0 ? l : '            ' + l).join('\n'))}\n` +
+                `📋 Jugadas: <code>${escapeHTML(rawText.split('\n').map((l, i) => i === 0 ? l : '            ' + l).join('\n'))}</code>\n` +
                 `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
                 `¡Buena suerte! 🍀`;
             if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
