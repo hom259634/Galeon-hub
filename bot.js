@@ -248,7 +248,7 @@ function buildLastBetsText(bets) {
             .map(line => line.trim())
             .filter(Boolean)
             .map(line => escapeHTML(line.replace(/\s+/g, ' ')));
-        const rawText = rawTextLines.length ? rawTextLines.join('\n') : '-';
+        const rawText = rawTextLines.length ? rawTextLines.map((l, i) => i === 0 ? l : '          ' + l).join('\n') : '-';
         const cup = (parseFloat(b.cost_cup) || 0).toFixed(2);
         const usd = (parseFloat(b.cost_usd) || 0).toFixed(2);
 
@@ -4682,6 +4682,39 @@ bot.on(message('text'), async (ctx) => {
     // Solo si el usuario no es admin (para evitar que los admins se envíen soporte a sí mismos)
     // --- Flujo: apuesta (awaitingBet) ---
     if (session.awaitingBet) {
+        // Verificar que la sesión siga en horario permitido
+        const betLottery = session.lottery;
+        if (betLottery) {
+            const region = regionMap[betLottery];
+            if (region) {
+                const schedule = getAllowedHours(region.key);
+                const now = moment.tz(TIMEZONE);
+                const currentMinutes = now.hours() * 60 + now.minutes();
+                const isAllowed = schedule.slots.some(slot => {
+                    const startMinutes = slot.start * 60;
+                    const endMinutes = slot.end * 60;
+                    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+                });
+                if (!isAllowed) {
+                    let hoursText = '';
+                    for (const slot of schedule.slots) {
+                        const startStr = moment().tz(TIMEZONE).hours(Math.floor(slot.start)).minutes((slot.start % 1) * 60).format('h:mm A');
+                        const endStr = moment().tz(TIMEZONE).hours(Math.floor(slot.end)).minutes((slot.end % 1) * 60).format('h:mm A');
+                        hoursText += `${slot.name}: ${startStr} - ${endStr}\n`;
+                    }
+                    const errorMsg = 
+                        `⏰ <b>Horario no disponible para ${schedule.emoji} ${schedule.name}</b>\n\n` +
+                        `📅 Los horarios permitidos (hora de Cuba) son:\n${hoursText}\n` +
+                        `🔄 Por favor, intenta dentro del horario o elige otra lotería. ¡Te esperamos!`;
+                    await ctx.reply(errorMsg, getMainKeyboard(ctx));
+                    delete session.awaitingBet;
+                    delete session.betType;
+                    delete session.sessionId;
+                    return;
+                }
+            }
+        }
+
         const betType = session.betType;
         const rawText = text;
         const parsed = parseBetMessage(rawText, betType);
@@ -4898,7 +4931,7 @@ bot.on(message('text'), async (ctx) => {
             let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
                 `🎰 Lotería: ${escapeHTML(session.lottery || 'N/D')}\n` +
                 `🔢 Tipo: ${escapeHTML(formatBetTypeLabel(betType))}\n` +
-                `📋 Jugadas: ${escapeHTML(rawText)}\n` +
+                `📋 Jugadas: ${escapeHTML(rawText.split('\n').map((l, i) => i === 0 ? l : '            ' + l).join('\n'))}\n` +
                 `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
                 `¡Buena suerte! 🍀`;
             if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
