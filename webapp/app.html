@@ -864,6 +864,7 @@
                 // quitar selección visual de tipo
                 document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
                 selectedBetType = null;
+                if (betFormContainer) betFormContainer.classList.add('hidden');
             }
         }
 
@@ -1914,6 +1915,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         function resetWithdrawForm() {
             withdrawMethodSelect.value = '';
             withdrawAmount.value = '';
+            withdrawAmount.placeholder = 'Monto a retirar';
             withdrawAvailableBalance.innerText = '-.--';
             withdrawCurrency.classList.add('hidden');
             withdrawMethodLimits.innerHTML = '';
