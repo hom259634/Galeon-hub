@@ -1197,7 +1197,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const usdEquivalentCup = (totalUSD * exchangeRates.rate).toFixed(2);
                 betPreview.innerHTML = `💰 Total: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD<br>${totalCUP > 0 ? `(equivale a ${cupEquivalentUsd} USD)` : ''} ${totalUSD > 0 ? `(equivale a ${usdEquivalentCup} CUP)` : ''}`;
             } else {
-                betPreview.innerHTML = '❌ Formato inválido. Por favor, formula correctamente tu apuesta';
+                betPreview.innerHTML = '❌ Formato inválido. Por favor, formula correctamente tu apuesta.';
             }
         });
 
@@ -1210,7 +1210,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             
             const parsed = parseBetMessage(rawText, selectedBetType);
             if (!parsed.ok) {
-                iziToast.warning({ message: '❌ Formato inválido. Por favor, formula correctamente tu apuesta' });
+                iziToast.warning({ message: '❌ Formato inválido. Por favor, formula correctamente tu apuesta.' });
                 return;
             }
 
@@ -1251,11 +1251,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 let availableCup = (parseFloat(currentUser?.cup) || 0) + (parseFloat(currentUser?.bonus_cup) || 0);
                 let availableUsd = parseFloat(currentUser?.usd) || 0;
                 if (newTotalCUP > 0 && availableCup < newTotalCUP) {
-                    iziToast.error({ message: `❌ Saldo CUP insuficiente. Por favor, recarga` });
+                    iziToast.error({ message: `❌ Saldo CUP insuficiente. Por favor, recarga.` });
                     return;
                 }
                 if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
-                    iziToast.error({ message: `❌ Saldo USD insuficiente. Por favor, recarga` });
+                    iziToast.error({ message: `❌ Saldo USD insuficiente. Por favor, recarga.` });
                     return;
                 }
             }
@@ -1911,6 +1911,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             document.getElementById('withdrawSection').classList.add('hidden');
             document.getElementById('transferSection').classList.add('hidden');
         });
+        function resetWithdrawForm() {
+            withdrawMethodSelect.value = '';
+            withdrawAmount.value = '';
+            withdrawAvailableBalance.innerText = '-.--';
+            withdrawCurrency.classList.add('hidden');
+            withdrawMethodLimits.innerHTML = '';
+            withdrawAccountFields.innerHTML = '';
+        }
+
         document.getElementById('withdrawBtn').addEventListener('click', async () => {
             await updateWithdrawTimeStatus();
 
@@ -1935,6 +1944,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 return;
             }
 
+            resetWithdrawForm();
             document.getElementById('withdrawSection').classList.toggle('hidden');
             document.getElementById('rechargeSection').classList.add('hidden');
             document.getElementById('transferSection').classList.add('hidden');
@@ -2114,11 +2124,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
 
             // Limpiar campos y bloquear botón
-            withdrawAmount.value = '';
-            document.getElementById('withdrawWallet')?.setAttribute('value', ''); // limpia visualmente
-            document.getElementById('withdrawNetwork')?.setAttribute('value', '');
-            document.getElementById('withdrawCard')?.setAttribute('value', '');
-            document.getElementById('withdrawConfirm')?.setAttribute('value', '');
+            resetWithdrawForm();
             const withdrawSendBtn = submitWithdrawBtn; // ya tienes la variable
             withdrawSendBtn.disabled = true;
             withdrawSendBtn.innerHTML = 'Enviando...';
