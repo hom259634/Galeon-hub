@@ -1643,10 +1643,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             renderWithdrawFields(method);
                         }
                     } else {
-                        withdrawAvailableBalance.innerText = '-.--';
-                        withdrawCurrency.classList.add('hidden');
-                        withdrawMethodLimits.innerHTML = '';
-                        withdrawAccountFields.innerHTML = '';
+                        resetWithdrawForm();
                     }
                 });
             } catch (e) { 
