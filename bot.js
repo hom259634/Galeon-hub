@@ -248,12 +248,12 @@ function buildLastBetsText(bets) {
             .map(line => line.trim())
             .filter(Boolean)
             .map(line => escapeHTML(line.replace(/\s+/g, ' ')));
-        const rawText = rawTextLines.length ? rawTextLines.map((l, i) => i === 0 ? l : '          ' + l).join('\n') : '-';
+        const rawText = rawTextLines.length ? rawTextLines.join('\n') : '-';
         const cup = (parseFloat(b.cost_cup) || 0).toFixed(2);
         const usd = (parseFloat(b.cost_usd) || 0).toFixed(2);
 
         text += `<b>${i + 1}.</b>\n` +
-            `<pre>Lotería : ${lottery}\nTipo    : ${betType}\nJugada  : ${rawText}\nMonto   : ${cup} CUP / ${usd} USD\nFecha y Hora : ${date}</pre>\n`;
+            `<pre>Lotería : ${lottery}\nTipo    : ${betType}\nJugada:\n${rawText}\nMonto   : ${cup} CUP / ${usd} USD\nFecha y Hora : ${date}</pre>\n`;
     });
 
     text += '¿Quieres ver más? Puedes consultar el historial completo en la Web-App.';
@@ -836,6 +836,44 @@ async function getMinDepositUSD() {
         }
     } catch (e) {}
     return 0;
+}
+
+async function updateDepositMinimums() {
+    try {
+        const cupMin = await getMinDepositCUP();
+        if (!cupMin || cupMin <= 0) return;
+
+        const rates = await getExchangeRates();
+        const { data: methods } = await supabase
+            .from('deposit_methods')
+            .select('*');
+        if (!methods || methods.length === 0) return;
+
+        for (const method of methods) {
+            if (method.currency === 'CUP') continue;
+
+            let rateValue;
+            switch (method.currency) {
+                case 'USD': rateValue = rates.rate; break;
+                case 'USDT': rateValue = rates.rate_usdt; break;
+                case 'TRX': rateValue = rates.rate_trx; break;
+                case 'MLC': rateValue = rates.rate_mlc; break;
+                default: continue;
+            }
+
+            if (!rateValue || rateValue <= 0) continue;
+
+            const newMin = Math.round((cupMin / rateValue) * 100) / 100;
+            await supabase
+                .from('deposit_methods')
+                .update({ min_amount: newMin, updated_at: new Date() })
+                .eq('id', method.id);
+        }
+
+        console.log(`[Tasas ElToque] Mínimos de depósito actualizados (base: ${cupMin} CUP)`);
+    } catch (e) {
+        console.error('[Tasas ElToque] Error al actualizar mínimos de depósito:', e.message);
+    }
 }
 
 async function getMinWithdrawUSD() {
@@ -4931,7 +4969,7 @@ bot.on(message('text'), async (ctx) => {
             let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
                 `🎰 Lotería: ${escapeHTML(session.lottery || 'N/D')}\n` +
                 `🔢 Tipo: ${escapeHTML(formatBetTypeLabel(betType))}\n` +
-                `📋 Jugadas: <code>${escapeHTML(rawText.split('\n').map((l, i) => i === 0 ? l : '            ' + l).join('\n'))}</code>\n` +
+                `📋 Jugadas:\n<code>${escapeHTML(rawText)}</code>\n` +
                 `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
                 `¡Buena suerte! 🍀`;
             if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
@@ -5580,6 +5618,8 @@ cron.schedule('30 8 * * *', async () => {
         if (rates.trx) await setExchangeRateTRX(rates.trx);
 
         console.log(`[Tasas ElToque] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
+
+        await updateDepositMinimums();
 
         // Construir mensaje de broadcast
         const prev = bot.lastBroadcastRates;

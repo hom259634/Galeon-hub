@@ -680,6 +680,42 @@ async function getMinDepositUSD() {
     return 0;
 }
 
+async function updateDepositMinimums() {
+    try {
+        const cupMin = await getMinDepositCUP();
+        if (!cupMin || cupMin <= 0) return;
+
+        const rates = await getExchangeRates();
+        const { data: methods } = await supabase
+            .from('deposit_methods')
+            .select('*');
+        if (!methods || methods.length === 0) return;
+
+        for (const method of methods) {
+            if (method.currency === 'CUP') continue;
+
+            let rateValue;
+            switch (method.currency) {
+                case 'USD': rateValue = rates.rate; break;
+                case 'USDT': rateValue = rates.rate_usdt; break;
+                case 'TRX': rateValue = rates.rate_trx; break;
+                case 'MLC': rateValue = rates.rate_mlc; break;
+                default: continue;
+            }
+
+            if (!rateValue || rateValue <= 0) continue;
+
+            const newMin = Math.round((cupMin / rateValue) * 100) / 100;
+            await supabase
+                .from('deposit_methods')
+                .update({ min_amount: newMin, updated_at: new Date() })
+                .eq('id', method.id);
+        }
+    } catch (e) {
+        console.error('[Admin] Error al actualizar mínimos de depósito:', e.message);
+    }
+}
+
 async function getMinWithdrawUSD() {
     const { data } = await supabase
         .from('app_config')
@@ -2573,6 +2609,7 @@ app.put('/api/admin/exchange-rate/usd', requireAdmin, async (req, res) => {
     const current = await getExchangeRateUSD();
     if (current === rate) return res.status(409).json({ error: 'Esta tasa ya está registrada.' });
     await setExchangeRateUSD(rate);
+    await updateDepositMinimums();
     res.json({ success: true });
 });
 
@@ -2587,6 +2624,7 @@ app.put('/api/admin/exchange-rate/mlc', requireAdmin, async (req, res) => {
             error: 'No se pudo actualizar la tasa MLC. Verifica que exista la columna rate_mlc en exchange_rate.'
         });
     }
+    await updateDepositMinimums();
     res.json({ success: true });
 });
 
@@ -2596,6 +2634,7 @@ app.put('/api/admin/exchange-rate/usdt', requireAdmin, async (req, res) => {
     const current = await getExchangeRateUSDT();
     if (current === rate) return res.status(409).json({ error: 'Esta tasa ya está registrada.' });
     await setExchangeRateUSDT(rate);
+    await updateDepositMinimums();
     res.json({ success: true });
 });
 
@@ -2605,6 +2644,7 @@ app.put('/api/admin/exchange-rate/trx', requireAdmin, async (req, res) => {
     const current = await getExchangeRateTRX();
     if (current === rate) return res.status(409).json({ error: 'Esta tasa ya está registrada.' });
     await setExchangeRateTRX(rate);
+    await updateDepositMinimums();
     res.json({ success: true });
 });
 
