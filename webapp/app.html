@@ -518,7 +518,7 @@
             <!-- SECCIÓN MIS JUGADAS -->
             <div id="section-bets" class="section hidden-section">
                 <div class="glass-card p-5">
-                    <h3 class="text-2xl font-bold mb-4">📋 Historial de apuestas</h3>
+                    <h3 id="betsCountLabel" class="text-2xl font-bold mb-4">📋 Historial de apuestas</h3>
                     <div id="betsList" class="space-y-3"></div>
                 </div>
             </div>
@@ -1699,7 +1699,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         async function loadBets() {
             if (!currentUser) return;
             try {
-                const res = await fetch(`/api/user/${currentUser.telegram_id}/bets?limit=20`);
+                const res = await fetch(`/api/user/${currentUser.telegram_id}/bets`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const bets = await res.json();
                 userBets = bets;
@@ -1710,15 +1710,21 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        function renderBetsList(bets) {
+        function renderBetsList(bets, showAll = false) {
             const container = document.getElementById('betsList');
+            const label = document.getElementById('betsCountLabel');
             if (!bets || bets.length === 0) {
                 container.innerHTML = '<p class="text-gray-400 text-center py-4">No tienes jugadas aún.</p>';
+                if (label) label.textContent = '📋 Historial de apuestas (0)';
                 return;
             }
+            if (label) label.textContent = `📋 Historial de apuestas (${bets.length})`;
+            
+            const maxInitial = 20;
+            const visibleBets = showAll ? bets : bets.slice(0, maxInitial);
             
             let html = '';
-            bets.forEach(b => {
+            visibleBets.forEach(b => {
                 const date = new Date(b.placed_at).toLocaleString();
                 html += `<div class="bg-gray-800/50 p-4 rounded-xl bet-item mb-3" onclick="showBetDetail(${b.id})">
                     <div class="flex justify-between items-center">
@@ -1737,7 +1743,19 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     </div>
                 </div>`;
             });
+            
+            if (bets.length > maxInitial && !showAll) {
+                const remaining = bets.length - maxInitial;
+                html += `<button onclick="showAllBets()" class="w-full mt-2 py-3 rounded-xl bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 font-semibold text-sm transition-all">
+                    Ver más (${remaining} restantes)
+                </button>`;
+            }
+            
             container.innerHTML = html;
+        }
+        
+        window.showAllBets = function() {
+            renderBetsList(userBets, true);
         }
 
         window.showBetDetail = async (betId) => {
