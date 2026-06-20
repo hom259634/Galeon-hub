@@ -706,7 +706,7 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
                 const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
                 if (bonusAmt2 > 0) {
                     const minDepCUP = await getMinDepositCUP();
-                    if (bonusAmt2 >= minDepCUP) {
+                    if (bonusAmt2 >= minDepCUP - 0.001) {
                         const newCup2 = cupAmt2 + bonusAmt2;
                         await supabase.from('users').update({
                             cup: newCup2,
@@ -4618,7 +4618,7 @@ bot.on(message('text'), async (ctx) => {
             const totalEquivalentCUP = finalCup
                 + (finalUsd * rateUSD)
                 + finalBonus;
-            if (totalEquivalentCUP >= thresholdForBonusMigration) {
+            if (totalEquivalentCUP >= thresholdForBonusMigration - 0.001) {
                 if (isCompletelyNew && currency === 'USD') {
                     const transferWorthCUP = amount * rateUSD;
                     finalUsd += amount;
@@ -4911,7 +4911,7 @@ bot.on(message('text'), async (ctx) => {
                                 newCup += commissionCUP;
                             } else if (hasOnlyBonus) {
                                 const minDepositCUP = await getMinDepositCUP();
-                                if ((newBonus + commissionCUP) >= minDepositCUP) {
+                                if ((newBonus + commissionCUP) >= minDepositCUP - 0.001) {
                                     newCup += newBonus + commissionCUP;
                                     bonusMovedCup = newBonus;
                                     newBonus = 0;

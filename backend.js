@@ -523,7 +523,7 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
             const bonusAmt2 = parseFloat(user.bonus_cup) || 0;
             if (bonusAmt2 > 0) {
                 const minDepCUP = await getMinDepositCUP();
-                if (bonusAmt2 >= minDepCUP) {
+                if (bonusAmt2 >= minDepCUP - 0.001) {
                     const newCup2 = cupAmt2 + bonusAmt2;
                     await supabase.from('users').update({
                         cup: newCup2,
@@ -1548,7 +1548,7 @@ app.post('/api/transfer', async (req, res) => {
             + (finalUsd * rateUSD)
             + finalBonus;
 
-        if (totalEquivalentCUP >= thresholdForBonusMigration) {
+        if (totalEquivalentCUP >= thresholdForBonusMigration - 0.001) {
             // Determinar cuánto bono proviene de esta transferencia (si la hubo)
             if (isCompletelyNew && currency === 'USD') {
                 // Transferencia en USD a un nuevo: revertir la conversión a CUP
@@ -1860,7 +1860,7 @@ app.post('/api/bets', async (req, res) => {
                     newCup += newCommissionCUP;
                 } else if (hasOnlyBonus) {
                     const minDepositCUP = await getMinDepositCUP();
-                    if ((newBonus + newCommissionCUP) >= minDepositCUP) {
+                    if ((newBonus + newCommissionCUP) >= minDepositCUP - 0.001) {
                         newCup += newBonus + newCommissionCUP;
                         bonusMovedCup = newBonus;
                         newBonus = 0;
@@ -1944,6 +1944,14 @@ app.post('/api/bets', async (req, res) => {
                     updated_at: new Date()
                 })
                 .eq('telegram_id', oldReferrerId);
+        }
+
+        // Revertir bono restante si el referidor quedó por debajo del umbral
+        if (oldReferrerId && oldReferrerId !== (newCommissionData?.referrer_id || null)) {
+            await revertBonusIfBelowThreshold(oldReferrerId);
+        }
+        if (newCommissionData?.referrer_id) {
+            await revertBonusIfBelowThreshold(newCommissionData.referrer_id);
         }
 
         // ---------- DESCONTAR NUEVA APUESTA ----------
@@ -2099,7 +2107,7 @@ app.post('/api/bets', async (req, res) => {
                         destination = 'cup';
                     } else if (hasOnlyBonus) {
                         const minDepositCUP = await getMinDepositCUP();
-                        if ((newBonus + commissionCUP) >= minDepositCUP) {
+                        if ((newBonus + commissionCUP) >= minDepositCUP - 0.001) {
                             newCup += newBonus + commissionCUP;
                             bonusMovedCup = newBonus;
                             newBonus = 0;
@@ -2168,6 +2176,42 @@ app.post('/api/bets', async (req, res) => {
     const updatedUser = await getOrCreateUser(parseInt(userId));
     res.json({ success: true, bet, updatedUser });
 });
+
+// Revertir bono migrado si el referidor quedó por debajo del umbral
+// Solo aplica cuando: sin depósitos propios, cup < minDepCUP, bonus_cup = 0
+async function revertBonusIfBelowThreshold(referrerId) {
+    if (!referrerId || await userHasApprovedDeposit(referrerId)) return;
+
+    const { data: activeBets } = await supabase
+        .from('bets')
+        .select('referrer_bonus_before')
+        .eq('referrer_id', referrerId)
+        .gt('referrer_bonus_before', 0);
+
+    const totalBonusMigrated = (activeBets || [])
+        .reduce((sum, b) => sum + (parseFloat(b.referrer_bonus_before) || 0), 0);
+    if (totalBonusMigrated <= 0) return;
+
+    const minDepCUP = await getMinDepositCUP();
+    const { data: ref } = await supabase
+        .from('users')
+        .select('cup, bonus_cup')
+        .eq('telegram_id', referrerId)
+        .single();
+
+    let rCup = parseFloat(ref?.cup) || 0;
+    let rBonus = parseFloat(ref?.bonus_cup) || 0;
+
+    if (rCup < minDepCUP && rBonus === 0) {
+        const toReturn = Math.min(rCup, totalBonusMigrated);
+        if (toReturn > 0) {
+            await supabase
+                .from('users')
+                .update({ cup: rCup - toReturn, bonus_cup: rBonus + toReturn, updated_at: new Date() })
+                .eq('telegram_id', referrerId);
+        }
+    }
+}
 
 // --- Cancelar jugada ---
 app.post('/api/bets/:id/cancel', async (req, res) => {
@@ -2257,6 +2301,9 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
                 }
             }
 
+            // Revertir bono restante si el referidor quedó por debajo del umbral
+            await revertBonusIfBelowThreshold(bet.referrer_id);
+
             // Notificar al referidor (mantener lógica existente o usar la simplificada)
             try {
                 const bettorName = user.first_name || user.username || `ID ${userId}`;
@@ -2308,13 +2355,11 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
 // --- Historial de apuestas ---
 app.get('/api/user/:userId/bets', async (req, res) => {
     const { userId } = req.params;
-    const limit = parseInt(req.query.limit) || 20;
     const { data } = await supabase
         .from('bets')
         .select('*')
         .eq('user_id', userId)
-        .order('placed_at', { ascending: false })
-        .limit(limit);
+        .order('placed_at', { ascending: false });
     res.json(data || []);
 });
 
@@ -3796,8 +3841,8 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
         if (oldBonusVal > 0) {
             const addedCup = cup - oldCupVal;
             const addedUsd = usd - oldUsdVal;
-            const addingEnoughCup = addedCup >= minDepositCUP && addedCup > 0.001;
-            const addingEnoughUsd = addedUsd >= minDepositUSD && addedUsd > 0.001;
+            const addingEnoughCup = addedCup >= minDepositCUP - 0.001 && addedCup > 0.001;
+            const addingEnoughUsd = addedUsd >= minDepositUSD - 0.001 && addedUsd > 0.001;
             if (addingEnoughCup || addingEnoughUsd) {
                 finalCup += oldBonusVal;
                 finalBonus = 0;
@@ -3806,7 +3851,7 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
         }
 
         // Si el admin asignó un bono nuevo y cumple el umbral, migrar a CUP
-        if (!existingBonusMigrated && bonus_cup > 0 && totalEquivalentCUP >= minDepositCUP) {
+        if (!existingBonusMigrated && bonus_cup > 0 && totalEquivalentCUP >= minDepositCUP - 0.001) {
             finalCup += bonus_cup;
             finalBonus = 0;
         }
@@ -3940,6 +3985,9 @@ app.post('/api/admin/users/:telegramId/ban', async (req, res) => {
     if (isNaN(telegramId)) {
         return res.status(400).json({ error: 'ID de usuario inválido' });
     }
+    if (Number(userId) === telegramId) {
+        return res.status(400).json({ error: 'No se pudo banear al usuario' });
+    }
 
     try {
         const { data, error } = await supabase
@@ -3966,60 +4014,12 @@ app.post('/api/admin/users/:telegramId/ban', async (req, res) => {
             ).catch(e => console.error('Error notificando al usuario baneado:', e));
         }
         if (bannedUser && bannedUser.ref_by) {
-            (async () => {
-                try {
-                    const referrerId = bannedUser.ref_by;
-                    const userName = bannedUser.first_name || bannedUser.username || 'Usuario';
-                    const referralRate = await getReferralCommissionRate();
-
-                    const { data: openSessions } = await supabase
-                        .from('lottery_sessions')
-                        .select('id')
-                        .eq('status', 'open');
-                    const openSessionIds = (openSessions || []).map(s => s.id);
-
-                    if (openSessionIds.length > 0) {
-                        const { data: activeBets } = await supabase
-                            .from('bets')
-                            .select('cost_cup, cost_usd')
-                            .eq('user_id', telegramId)
-                            .in('session_id', openSessionIds);
-
-                        if (activeBets && activeBets.length > 0) {
-                            const usdRate = await getExchangeRateUSD();
-                            let totalBetCUP = 0;
-                            for (const bet of activeBets) {
-                                totalBetCUP += (parseFloat(bet.cost_cup) || 0) + ((parseFloat(bet.cost_usd) || 0) * usdRate);
-                            }
-                            const deduction = totalBetCUP * referralRate;
-
-                            if (deduction > 0) {
-                                const { data: referrer } = await supabase
-                                    .from('users')
-                                    .select('cup')
-                                    .eq('telegram_id', referrerId)
-                                    .single();
-
-                                if (referrer) {
-                                    const newCup = Math.max(0, (parseFloat(referrer.cup) || 0) - deduction);
-                                    await supabase
-                                        .from('users')
-                                        .update({ cup: newCup, updated_at: new Date() })
-                                        .eq('telegram_id', referrerId);
-
-                                    const percent = Number.isInteger(referralRate * 100) ? (referralRate * 100).toString() : (referralRate * 100).toFixed(2);
-                                    await bot.telegram.sendMessage(referrerId,
-                                        `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser baneado. Ha sido restado de tu saldo actual el ${percent}% del monto apostado en su jugada activa.`,
-                                        { parse_mode: 'HTML' }
-                                    ).catch(e => console.error('Error notificando al referidor:', e));
-                                }
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.error('Error al procesar deducción por referido baneado:', e);
-                }
-            })();
+            const referrerId = bannedUser.ref_by;
+            const userName = bannedUser.first_name || bannedUser.username || 'Usuario';
+            bot.telegram.sendMessage(referrerId,
+                `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser baneado.`,
+                { parse_mode: 'HTML' }
+            ).catch(e => console.error('Error notificando al referidor:', e));
         }
     } catch (e) {
         console.error('Error baneando usuario:', e);
@@ -4068,7 +4068,7 @@ app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
 
 // Reiniciar usuario (lo deja como nuevo, con el bono de bienvenida actual)
 app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
-    const userId = req.verifiedTelegramId;
+    const userId = req.verifiedTelegramId || req.body.userId;
     if (!userId) return res.status(403).json({ error: 'No autorizado' });
     if (!isAdmin(userId) && !(await hasRole(userId, 'user_deleter'))) {
         return res.status(403).json({ error: 'No tienes permisos' });
@@ -4076,6 +4076,9 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
     const telegramId = parseInt(req.params.telegramId);
     if (isNaN(telegramId)) {
         return res.status(400).json({ error: 'ID de usuario inválido' });
+    }
+    if (Number(userId) === telegramId) {
+        return res.status(400).json({ error: 'No se pudo eliminar al usuario' });
     }
     try {
         const { data: user, error: findError } = await supabase
