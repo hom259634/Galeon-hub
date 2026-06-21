@@ -118,6 +118,11 @@ async function hasAnyRole(userId) {
     return roles.length > 0;
 }
 
+async function hasAdminRoles(userId) {
+    const roles = await getUserRoles(userId);
+    return roles.length > 0;
+}
+
 async function requireAdminOrRole(req, res, next, allowedRoles = []) {
     let userId = req.verifiedTelegramId || req.body.userId || req.query.userId || req.headers['x-telegram-id'];
     if (!userId) return res.status(403).json({ error: 'No autorizado: falta userId' });
@@ -3580,6 +3585,8 @@ app.get('/api/admin/user/:targetUserId', async (req, res) => {
                 created_at: user.created_at,
                 is_banned: user.is_banned,
                 banned_at: user.banned_at,
+                is_superadmin: isAdmin(targetUserId),
+                is_staff: await hasAdminRoles(targetUserId),
             },
             bets: bets || [],
             referrals: {
@@ -3744,7 +3751,18 @@ app.get('/api/admin/users', async (req, res) => {
             }
         });
 
-        // 4. Construir respuesta con los campos extra
+        // 4. Pre-computar qué usuarios tienen roles de admin (para evitar async en map)
+        await ensureRolesCache();
+        const adminRoleUserIds = new Set([
+            ...rolesCache.depositApprovers,
+            ...rolesCache.withdrawApprovers,
+            ...rolesCache.scheduleManagers,
+            ...rolesCache.userManagers,
+            ...rolesCache.userDeleters,
+            ...rolesCache.activitySelf
+        ]);
+
+        // 5. Construir respuesta con los campos extra
         const enrichedUsers = (users || []).map(u => ({
             telegram_id: u.telegram_id,
             first_name: u.first_name,
@@ -3756,7 +3774,9 @@ app.get('/api/admin/users', async (req, res) => {
             has_bets: usersWithBets.has(u.telegram_id),
             referral_count: referralCounts.get(u.telegram_id) || 0,
             is_banned: !!u.is_banned,
-            banned_at: u.banned_at
+            banned_at: u.banned_at,
+            is_superadmin: isAdmin(u.telegram_id),
+            is_staff: adminRoleUserIds.has(u.telegram_id)
         }));
 
         res.json(enrichedUsers);
@@ -3988,6 +4008,12 @@ app.post('/api/admin/users/:telegramId/ban', async (req, res) => {
     if (Number(userId) === telegramId) {
         return res.status(400).json({ error: 'No se pudo banear al usuario' });
     }
+    if (isAdmin(telegramId)) {
+        return res.status(400).json({ error: 'No se pudo banear al usuario' });
+    }
+    if (!isAdmin(userId) && await hasAdminRoles(telegramId)) {
+        return res.status(400).json({ error: 'No se pudo banear al usuario' });
+    }
 
     try {
         const { data, error } = await supabase
@@ -4038,6 +4064,12 @@ app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
     if (isNaN(telegramId)) {
         return res.status(400).json({ error: 'ID de usuario inválido' });
     }
+    if (isAdmin(telegramId)) {
+        return res.status(400).json({ error: 'No se pudo banear al usuario' });
+    }
+    if (!isAdmin(userId) && await hasAdminRoles(telegramId)) {
+        return res.status(400).json({ error: 'No se pudo banear al usuario' });
+    }
 
     try {
         const { data, error } = await supabase
@@ -4080,6 +4112,12 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
     if (Number(userId) === telegramId) {
         return res.status(400).json({ error: 'No se pudo eliminar al usuario' });
     }
+    if (isAdmin(telegramId)) {
+        return res.status(400).json({ error: 'No se pudo eliminar al usuario' });
+    }
+    if (!isAdmin(userId) && await hasAdminRoles(telegramId)) {
+        return res.status(400).json({ error: 'No se pudo eliminar al usuario' });
+    }
     try {
         const { data: user, error: findError } = await supabase
             .from('users')
@@ -4119,6 +4157,40 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
             console.error('Error guardando en deleted_users:', e);
         }
 
+        let deductionData = null;
+        if (userRefBy) {
+            try {
+                const referralRate = await getReferralCommissionRate();
+                const { data: openSessions } = await supabase
+                    .from('lottery_sessions')
+                    .select('id')
+                    .eq('status', 'open');
+                const openSessionIds = (openSessions || []).map(s => s.id);
+                if (openSessionIds.length > 0) {
+                    const { data: activeBets } = await supabase
+                        .from('bets')
+                        .select('cost_cup, cost_usd, referrer_bonus_before')
+                        .eq('user_id', telegramId)
+                        .in('session_id', openSessionIds);
+                    if (activeBets && activeBets.length > 0) {
+                        const usdRate = await getExchangeRateUSD();
+                        let totalBetCUP = 0;
+                        let totalBonusMigrated = 0;
+                        for (const bet of activeBets) {
+                            totalBetCUP += (parseFloat(bet.cost_cup) || 0) + ((parseFloat(bet.cost_usd) || 0) * usdRate);
+                            totalBonusMigrated += (parseFloat(bet.referrer_bonus_before) || 0);
+                        }
+                        const deduction = totalBetCUP * referralRate;
+                        if (deduction > 0) {
+                            deductionData = { referrerId: userRefBy, deduction, totalBonusMigrated, referralRate };
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Error calculando deducción por referido eliminado:', e);
+            }
+        }
+
         await supabase.from('bets').delete().eq('user_id', telegramId);
         await supabase.from('deposit_requests').delete().eq('user_id', telegramId);
         await supabase.from('withdraw_requests').delete().eq('user_id', telegramId);
@@ -4134,56 +4206,52 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
 
         res.json({ success: true, message: 'Usuario eliminado. Podrá registrarse de nuevo como nuevo usuario.' });
 
-        if (userRefBy) {
+        if (deductionData) {
             (async () => {
                 try {
-                    const referrerId = userRefBy;
+                    const { referrerId, deduction, totalBonusMigrated, referralRate } = deductionData;
                     const userName = userFirstName || userUsername || 'Usuario';
-                    const referralRate = await getReferralCommissionRate();
 
-                    const { data: openSessions } = await supabase
-                        .from('lottery_sessions')
-                        .select('id')
-                        .eq('status', 'open');
-                    const openSessionIds = (openSessions || []).map(s => s.id);
+                    const { data: referrer } = await supabase
+                        .from('users')
+                        .select('cup, bonus_cup')
+                        .eq('telegram_id', referrerId)
+                        .single();
 
-                    if (openSessionIds.length > 0) {
-                        const { data: activeBets } = await supabase
-                            .from('bets')
-                            .select('cost_cup, cost_usd')
-                            .eq('user_id', telegramId)
-                            .in('session_id', openSessionIds);
+                    if (referrer) {
+                        let cup = parseFloat(referrer.cup) || 0;
+                        let bonus = parseFloat(referrer.bonus_cup) || 0;
 
-                        if (activeBets && activeBets.length > 0) {
-                            const usdRate = await getExchangeRateUSD();
-                            let totalBetCUP = 0;
-                            for (const bet of activeBets) {
-                                totalBetCUP += (parseFloat(bet.cost_cup) || 0) + ((parseFloat(bet.cost_usd) || 0) * usdRate);
-                            }
-                            const deduction = totalBetCUP * referralRate;
+                        if (cup >= deduction) {
+                            cup -= deduction;
+                        } else {
+                            bonus = Math.max(0, bonus - (deduction - cup));
+                            cup = 0;
+                        }
 
-                            if (deduction > 0) {
-                                const { data: referrer } = await supabase
-                                    .from('users')
-                                    .select('cup')
-                                    .eq('telegram_id', referrerId)
-                                    .single();
+                        await supabase
+                            .from('users')
+                            .update({ cup, bonus_cup: bonus, updated_at: new Date() })
+                            .eq('telegram_id', referrerId);
 
-                                if (referrer) {
-                                    const newCup = Math.max(0, (parseFloat(referrer.cup) || 0) - deduction);
+                        if (totalBonusMigrated > 0 && !await userHasApprovedDeposit(referrerId)) {
+                            const minDepCUP = await getMinDepositCUP();
+                            if (cup < minDepCUP && bonus === 0) {
+                                const toReturn = Math.min(cup, totalBonusMigrated);
+                                if (toReturn > 0) {
                                     await supabase
                                         .from('users')
-                                        .update({ cup: newCup, updated_at: new Date() })
+                                        .update({ cup: cup - toReturn, bonus_cup: bonus + toReturn, updated_at: new Date() })
                                         .eq('telegram_id', referrerId);
-
-                                    const percent = Number.isInteger(referralRate * 100) ? (referralRate * 100).toString() : (referralRate * 100).toFixed(2);
-                                    await bot.telegram.sendMessage(referrerId,
-                                        `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser eliminado. Ha sido restado de tu saldo actual el ${percent}% del monto apostado en su jugada activa.`,
-                                        { parse_mode: 'HTML' }
-                                    ).catch(e => console.error('Error notificando al referidor:', e));
                                 }
                             }
                         }
+
+                        const percent = Number.isInteger(referralRate * 100) ? (referralRate * 100).toString() : (referralRate * 100).toFixed(2);
+                        await bot.telegram.sendMessage(referrerId,
+                            `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser eliminado. Ha sido restado de tu saldo actual el ${percent}% del monto apostado en su jugada activa.`,
+                            { parse_mode: 'HTML' }
+                        ).catch(e => console.error('Error notificando al referidor:', e));
                     }
                 } catch (e) {
                     console.error('Error al procesar deducción por referido eliminado:', e);
