@@ -3587,6 +3587,8 @@ app.get('/api/admin/user/:targetUserId', async (req, res) => {
                 banned_at: user.banned_at,
                 is_superadmin: isAdmin(targetUserId),
                 is_staff: await hasAdminRoles(targetUserId),
+                has_approved_deposit: await userHasApprovedDeposit(targetUserId),
+                bonus_updated_by_admin: !!user.bonus_updated_by_admin,
             },
             bets: bets || [],
             referrals: {
@@ -3876,14 +3878,20 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
             finalBonus = 0;
         }
 
+        const updatePayload = {
+            cup: finalCup,
+            usd: finalUsd,
+            bonus_cup: finalBonus,
+            updated_at: new Date()
+        };
+
+        if (bonus_cup !== oldBonusVal) {
+            updatePayload.bonus_updated_by_admin = new Date();
+        }
+
         const { error: updateError } = await supabase
             .from('users')
-            .update({
-                cup: finalCup,
-                usd: finalUsd,
-                bonus_cup: finalBonus,
-                updated_at: new Date()
-            })
+            .update(updatePayload)
             .eq('telegram_id', telegramId);
 
         if (updateError) {
