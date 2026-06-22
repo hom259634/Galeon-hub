@@ -533,6 +533,7 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
                     await supabase.from('users').update({
                         cup: newCup2,
                         bonus_cup: 0,
+                        bonus_updated_by_admin: new Date(),
                         updated_at: new Date()
                     }).eq('telegram_id', telegramId);
                     user.cup = newCup2;
@@ -3229,7 +3230,7 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
                     bonusMoved = bonusVal;
                 }
 
-                const updatePayload = { usd: newUsd, cup: newCup, updated_at: new Date() };
+                const updatePayload = { usd: newUsd, cup: newCup, bonus_updated_by_admin: new Date(), updated_at: new Date() };
                 if (bonusMoved > 0) updatePayload.bonus_cup = 0;
 
                 await supabase
@@ -3246,7 +3247,7 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
                 const newCup = result.beforeCup + totalPremioCUP;
                 await supabase
                     .from('users')
-                    .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
+                    .update({ usd: newUsd, cup: newCup, bonus_updated_by_admin: new Date(), updated_at: new Date() })
                     .eq('telegram_id', userId);
             }
         }
@@ -3373,7 +3374,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
 
     await supabase
         .from('users')
-        .update({ cup: newCup, usd: newUsd, updated_at: new Date() })
+        .update({ cup: newCup, usd: newUsd, bonus_updated_by_admin: new Date(), updated_at: new Date() })
         .eq('telegram_id', request.user_id);
 
     const { data: prevApproved } = await supabase
@@ -3391,7 +3392,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
         bonusMovedCup = newBonus;
         await supabase
             .from('users')
-            .update({ cup: newCup, bonus_cup: 0, updated_at: new Date() })
+            .update({ cup: newCup, bonus_cup: 0, bonus_updated_by_admin: new Date(), updated_at: new Date() })
             .eq('telegram_id', request.user_id);
     }
 
@@ -3587,7 +3588,6 @@ app.get('/api/admin/user/:targetUserId', async (req, res) => {
                 banned_at: user.banned_at,
                 is_superadmin: isAdmin(targetUserId),
                 is_staff: await hasAdminRoles(targetUserId),
-                has_approved_deposit: await userHasApprovedDeposit(targetUserId),
                 bonus_updated_by_admin: !!user.bonus_updated_by_admin,
             },
             bets: bets || [],
@@ -3885,7 +3885,7 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
             updated_at: new Date()
         };
 
-        if (bonus_cup !== oldBonusVal) {
+        if (finalCup > 0 || finalUsd > 0) {
             updatePayload.bonus_updated_by_admin = new Date();
         }
 
@@ -4842,7 +4842,7 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
         }
     }
 
-    await supabase.from('users').update({ cup: newCup, usd: newUsd, bonus_cup: bonusCup, updated_at: new Date() }).eq('telegram_id', request.user_id);
+    await supabase.from('users').update({ cup: newCup, usd: newUsd, bonus_cup: bonusCup, bonus_updated_by_admin: new Date(), updated_at: new Date() }).eq('telegram_id', request.user_id);
 
     res.json({ success: true });
     (async () => {
