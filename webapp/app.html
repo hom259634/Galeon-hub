@@ -4976,7 +4976,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         };
 
         window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false, bannedAt = '', username = '', isTargetSuperadmin = false, isTargetStaff = false, bonusUpdatedByAdmin = false) => {
-            const canManage = isAdmin || !isTargetSuperadmin;
+            const canManage = true;
             const showBanButton = canManage;
             const showDeleteButton = canManage && (isAdmin || userRoles.includes('user_deleter'));
             const banButtonHtml = isBanned
