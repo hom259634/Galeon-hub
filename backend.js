@@ -4202,6 +4202,7 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         await supabase.from('bets').delete().eq('user_id', telegramId);
         await supabase.from('deposit_requests').delete().eq('user_id', telegramId);
         await supabase.from('withdraw_requests').delete().eq('user_id', telegramId);
+        await supabase.from('admin_roles').delete().eq('telegram_id', telegramId);
 
         const { error: deleteError } = await supabase
             .from('users')
@@ -4209,6 +4210,7 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
             .eq('telegram_id', telegramId);
 
         if (deleteError) {
+            console.error('Error eliminando usuario de la DB:', deleteError);
             return res.status(500).json({ error: 'No se pudo eliminar al usuario.' });
         }
 
