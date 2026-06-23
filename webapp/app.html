@@ -4767,6 +4767,34 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 html += `</div>`;
                 container.innerHTML = html;
 
+                // Mostrar conteo en cada botón de filtro
+                const updateFilterButtonCounts = () => {
+                    const allUsers = window._allUsers || [];
+                    const deletedUsers = window._deletedUsers || [];
+                    container.querySelectorAll('.filter-btn').forEach(btn => {
+                        const filter = btn.dataset.filter;
+                        let count = 0;
+                        switch (filter) {
+                            case 'all': count = allUsers.length; break;
+                            case 'deleted': count = deletedUsers.length; break;
+                            case 'withMainBalance': count = allUsers.filter(u => parseFloat(u.cup) > 0).length; break;
+                            case 'withUsdBalance': count = allUsers.filter(u => parseFloat(u.usd) > 0).length; break;
+                            case 'withMainAndUsdBalance': count = allUsers.filter(u => parseFloat(u.cup) > 0 && parseFloat(u.usd) > 0).length; break;
+                            case 'withBonus': count = allUsers.filter(u => parseFloat(u.bonus_cup) > 0).length; break;
+                            case 'withoutBonus': count = allUsers.filter(u => parseFloat(u.bonus_cup) === 0).length; break;
+                            case 'empty': count = allUsers.filter(u => parseFloat(u.cup) === 0 && parseFloat(u.usd) === 0 && parseFloat(u.bonus_cup) === 0).length; break;
+                            case 'withReferrals': count = allUsers.filter(u => u.referral_count > 0).length; break;
+                            case 'referred': count = allUsers.filter(u => u.is_referred === true).length; break;
+                            case 'withBets': count = allUsers.filter(u => u.has_bets === true).length; break;
+                            case 'onlyId': count = allUsers.filter(u => !u.username || String(u.username).trim() === '').length; break;
+                            case 'banned': count = allUsers.filter(u => u.is_banned === true).length; break;
+                        }
+                        const base = btn.textContent.replace(/\s*\(\d+\)\s*$/, '').trim();
+                        btn.textContent = base + ' (' + count + ')';
+                    });
+                };
+                updateFilterButtonCounts();
+
                 const filterNames = {
                     all: 'Todos',
                     withMainBalance: 'con saldo principal',
