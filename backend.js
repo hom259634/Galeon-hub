@@ -4146,25 +4146,6 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
             supabase.from('withdraw_requests').select('id, amount, currency, account_info, status, created_at, processed_at, processed_by').eq('user_id', telegramId).order('created_at', { ascending: false })
         ]);
 
-        try {
-            const { error: insErr } = await supabase.from('deleted_users').upsert({
-                telegram_id: user.telegram_id,
-                first_name: user.first_name,
-                username: user.username,
-                cup: user.cup,
-                usd: user.usd,
-                bonus_cup: user.bonus_cup,
-                ref_by: user.ref_by,
-                deleted_at: new Date(),
-                deleted_by: userId,
-                deposits_history: JSON.stringify(depositsRes.data || []),
-                withdrawals_history: JSON.stringify(withdrawalsRes.data || [])
-            });
-            if (insErr) console.error('Error guardando en deleted_users:', insErr);
-        } catch (e) {
-            console.error('Error guardando en deleted_users:', e);
-        }
-
         let deductionData = null;
         if (userRefBy) {
             try {
@@ -4204,6 +4185,19 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         await supabase.from('withdraw_requests').delete().eq('user_id', telegramId);
         await supabase.from('admin_roles').delete().eq('telegram_id', telegramId);
 
+        // Refrescar ambos caches después de eliminar admin_roles
+        try {
+            await refreshRolesCache();
+            if (bot && typeof bot.refreshBotRolesCache === 'function') {
+                await bot.refreshBotRolesCache();
+            }
+        } catch (e) {
+            console.error('Error refrescando caches tras eliminar admin_roles:', e);
+        }
+
+        // Eliminar registros stale de deleted_users (de intentos fallidos previos)
+        await supabase.from('deleted_users').delete().eq('telegram_id', telegramId);
+
         const { error: deleteError } = await supabase
             .from('users')
             .delete()
@@ -4212,6 +4206,26 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         if (deleteError) {
             console.error('Error eliminando usuario de la DB:', deleteError);
             return res.status(500).json({ error: 'No se pudo eliminar al usuario.' });
+        }
+
+        // Backup a deleted_users (best-effort: después de eliminar al usuario)
+        try {
+            const { error: insErr } = await supabase.from('deleted_users').upsert({
+                telegram_id: user.telegram_id,
+                first_name: user.first_name,
+                username: user.username,
+                cup: user.cup,
+                usd: user.usd,
+                bonus_cup: user.bonus_cup,
+                ref_by: user.ref_by,
+                deleted_at: new Date(),
+                deleted_by: userId,
+                deposits_history: JSON.stringify(depositsRes.data || []),
+                withdrawals_history: JSON.stringify(withdrawalsRes.data || [])
+            });
+            if (insErr) console.error('Error guardando en deleted_users:', insErr);
+        } catch (e) {
+            console.error('Error guardando en deleted_users:', e);
         }
 
         res.json({ success: true, message: 'Usuario eliminado. Podrá registrarse de nuevo como nuevo usuario.' });
@@ -4467,7 +4481,7 @@ app.put('/api/admin/admin-roles/:telegramId', requireAdmin, async (req, res) => 
 
         // Refrescar caché de backend y del bot
         await refreshRolesCache();
-        if (bot && typeof bot.refreshBotRolesCache === 'function') bot.refreshBotRolesCache();
+        if (bot && typeof bot.refreshBotRolesCache === 'function') bot.refreshBotRolesCache().catch(e => console.error('Error refrescando cache del bot:', e));
 
         res.json({ success: true, telegram_id: telegramId, roles });
     } catch (e) {

@@ -165,6 +165,8 @@ function hasAnyRole(userId) {
 }
 
 refreshBotRolesCache();
+// Refrescar cache de roles cada 15s para reflejar cambios de privilegios rápidamente
+setInterval(() => refreshBotRolesCache().catch(e => console.error('Error refrescando cache de roles del bot:', e)), 15000);
 
 async function userHasApprovedDeposit(telegramId) {
     try {
