@@ -309,7 +309,7 @@ async function safeEdit(ctx, text, keyboard = null) {
 
 function clearPendingFlow(session) {
     const pendingKeys = [
-        'supportReplyTo',
+        'supportReplyTo', 'supportReplyMessageId',
         'awaitingBet', 'betType', 'lottery', 'sessionId',
         'awaitingDepositPhoto', 'awaitingDepositAmount', 'depositMethod', 'depositPhotoBuffer',
         'awaitingWithdrawAmount', 'withdrawMethod', 'withdrawAmount', 'withdrawCurrency',
@@ -1296,6 +1296,10 @@ bot.use(async (ctx, next) => {
 
             if (ctx.dbUser?.is_banned) {
                 if (ctx.updateType === 'message' && ctx.message?.text) {
+                    if (ctx.message.text.startsWith('/')) {
+                        await ctx.reply('🚫 Tu cuenta ha sido baneada.');
+                        return;
+                    }
                     return next();
                 }
                 if (ctx.updateType === 'callback_query') {
@@ -2933,13 +2937,15 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
 
 // ========== SISTEMA DE SOPORTE ==========
 // Acción para que un admin responda a un usuario
-bot.action(/support_reply_(\d+)/, async (ctx) => {
+bot.action(/support_reply_(\d+)(?:_(\d+))?/, async (ctx) => {
     if (!isAdmin(ctx.from.id) && !hasAnyRole(ctx.from.id)) {
         await ctx.answerCbQuery('⛔ No autorizado', { show_alert: true });
         return;
     }
     const userId = parseInt(ctx.match[1]);
+    const messageId = ctx.match[2] ? parseInt(ctx.match[2]) : null;
     ctx.session.supportReplyTo = userId;
+    if (messageId) ctx.session.supportReplyMessageId = messageId;
     await ctx.reply(`✏️ Escribe ahora tu respuesta para el usuario. Se enviará cuando termines.`);
     await ctx.answerCbQuery();
 });
@@ -3030,7 +3036,7 @@ bot.on(message('text'), async (ctx) => {
                     {
                         parse_mode: 'HTML',
                         reply_markup: Markup.inlineKeyboard([
-                            [Markup.button.callback('📩 Responder', `support_reply_${uid}`),
+                            [Markup.button.callback('📩 Responder', `support_reply_${uid}_${ctx.message.message_id}`),
                              Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
                         ]).reply_markup
                     }
@@ -3064,8 +3070,8 @@ bot.on(message('text'), async (ctx) => {
         const targetUserId = session.supportReplyTo;
         try {
             const replyOpts = { parse_mode: 'HTML' };
-            const lastMsgId = supportReplyMessageIds.get(targetUserId);
-            if (lastMsgId) replyOpts.reply_to_message_id = lastMsgId;
+            const targetMsgId = session.supportReplyMessageId || supportReplyMessageIds.get(targetUserId);
+            if (targetMsgId) replyOpts.reply_to_message_id = targetMsgId;
             await bot.telegram.sendMessage(targetUserId,
                 `📨 <b>Respuesta de soporte:</b>\n\n${escapeHTML(text)}`,
                 replyOpts
@@ -3112,6 +3118,7 @@ bot.on(message('text'), async (ctx) => {
         supportReplyMessageIds.delete(targetUserId);
         supportUserMessages.delete(targetUserId);
         delete session.supportReplyTo;
+        delete session.supportReplyMessageId;
         return;
     }
 
@@ -5011,7 +5018,7 @@ bot.on(message('text'), async (ctx) => {
                     {
                         parse_mode: 'HTML',
                         reply_markup: Markup.inlineKeyboard([
-                            [Markup.button.callback('📩 Responder', `support_reply_${uid}`),
+                            [Markup.button.callback('📩 Responder', `support_reply_${uid}_${ctx.message.message_id}`),
                              Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
                         ]).reply_markup
                     }
@@ -5048,7 +5055,7 @@ bot.on(message('text'), async (ctx) => {
                         {
                             parse_mode: 'HTML',
                             reply_markup: Markup.inlineKeyboard([
-                                [Markup.button.callback('📩 Responder', `support_reply_${uid}`),
+                                [Markup.button.callback('📩 Responder', `support_reply_${uid}_${ctx.message.message_id}`),
                                  Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
                             ]).reply_markup
                         }
@@ -5344,7 +5351,7 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
         await ctx.telegram.sendMessage(request.user_id,
             `✅ <b>Retiro aprobado</b>\n\n` +
             `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
-            `💵 Se debitó ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
+            `💵 ${(debitPlan.cupDebit === 0 && debitPlan.usdDebit === 1) ? 'Se debitó' : 'Se debitaron'} ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
             `📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );

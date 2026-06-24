@@ -3677,7 +3677,7 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
         await bot.telegram.sendMessage(request.user_id,
             `✅ <b>Retiro aprobado</b>\n\n` +
             `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
-            `💵 Se debitó ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
+            `💵 ${(debitPlan.cupDebit === 0 && debitPlan.usdDebit === 1) ? 'Se debitó' : 'Se debitaron'} ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
             `📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
@@ -4959,7 +4959,7 @@ app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
 
     try {
         if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id,
-            `✅ <b>Retiro aprobado</b>\n\n💰 Monto retirado: ${request.amount} ${request.currency}\n💵 Se debitó ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n📌 En breve los fondos serán enviados a tu cuenta.`,
+            `✅ <b>Retiro aprobado</b>\n\n💰 Monto retirado: ${request.amount} ${request.currency}\n💵 ${(debitPlan.cupDebit === 0 && debitPlan.usdDebit === 1) ? 'Se debitó' : 'Se debitaron'} ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
     updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`);
