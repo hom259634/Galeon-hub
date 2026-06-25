@@ -33,8 +33,8 @@ const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
 const broadcastMap = new Map();
 const supportReplyMessageIds = new Map();
-const supportNotifyMessageIds = new Map(); // userId -> Map<adminId, messageId>
-const supportUserMessages = new Map(); // userId -> { text, firstName }
+const supportNotifyMessageIds = new Map(); // userId -> Map<userMessageId, Map<adminId, notificationMessageId>>
+const supportUserMessages = new Map(); // userId -> Map<userMessageId, { text, firstName }>
 
 // ========== HORARIO DE RETIROS (hora Cuba) ==========
 // Disponibles diariamente de 10:00 PM a 11:30 PM (hora Cuba)
@@ -613,7 +613,7 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
             rateUSD,
             cupDebit: 0,
             usdDebit: 0,
-            errorMessage: `Saldo insuficiente en ${currency}. Disponible: ${availableInCurrency.toFixed(2)} ${currency}`
+            errorMessage: `❌ Saldo insuficiente en ${currency}. Disponible: ${availableInCurrency.toFixed(2)} ${currency}.`
         };
     }
 
@@ -650,7 +650,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency) {
                 rateUSD,
                 cupDebit: 0,
                 usdDebit: 0,
-                errorMessage: `Saldo insuficiente en USD. Disponible: ${usdBalance.toFixed(2)} USD`
+                errorMessage: `❌ Saldo insuficiente en USD. Disponible: ${usdBalance.toFixed(2)} USD.`
             };
         }
 
@@ -3028,7 +3028,8 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
         const supportNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers]);
-        supportUserMessages.set(uid, { text, firstName: ctx.from.first_name });
+        if (!supportUserMessages.has(uid)) supportUserMessages.set(uid, new Map());
+        supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name });
         for (const adminId of supportNotifyIds) {
             try {
                 const sent = await bot.telegram.sendMessage(adminId,
@@ -3043,7 +3044,8 @@ bot.on(message('text'), async (ctx) => {
                 );
                 if (sent?.message_id) {
                     if (!supportNotifyMessageIds.has(uid)) supportNotifyMessageIds.set(uid, new Map());
-                    supportNotifyMessageIds.get(uid).set(adminId, sent.message_id);
+                    if (!supportNotifyMessageIds.get(uid).has(ctx.message.message_id)) supportNotifyMessageIds.get(uid).set(ctx.message.message_id, new Map());
+                    supportNotifyMessageIds.get(uid).get(ctx.message.message_id).set(adminId, sent.message_id);
                 }
             } catch (e) {
                 console.warn(`Error enviando soporte a admin ${adminId}:`, e.message);
@@ -3080,18 +3082,39 @@ bot.on(message('text'), async (ctx) => {
         } catch (e) {
             await ctx.reply('❌ No se pudo enviar la respuesta. El usuario podría haber bloqueado el bot.');
         }
-        // Eliminar botón Responder de todos los mensajes reenviados a admins
-        const notifyMap = supportNotifyMessageIds.get(targetUserId);
-        if (notifyMap) {
-            for (const [adminId, msgId] of notifyMap) {
-                try {
-                    await bot.telegram.editMessageReplyMarkup(adminId, msgId, undefined, {
-                        reply_markup: Markup.inlineKeyboard([
-                            [Markup.button.callback('🔇 Silenciar', `support_mute_${targetUserId}`)]
-                        ]).reply_markup
-                    });
-                } catch (e) {
-                    console.warn(`Error editando mensaje de soporte para admin ${adminId}:`, e.message);
+        // Eliminar botón Responder del mensaje reenviado correspondiente
+        const targetUserMsgId = session.supportReplyMessageId;
+        const userNotifyMap = supportNotifyMessageIds.get(targetUserId);
+        if (targetUserMsgId && userNotifyMap) {
+            const adminNotifyMap = userNotifyMap.get(targetUserMsgId);
+            if (adminNotifyMap) {
+                for (const [adminId, msgId] of adminNotifyMap) {
+                    try {
+                        await bot.telegram.editMessageReplyMarkup(adminId, msgId, undefined, {
+                            reply_markup: Markup.inlineKeyboard([
+                                [Markup.button.callback('🔇 Silenciar', `support_mute_${targetUserId}`)]
+                            ]).reply_markup
+                        });
+                    } catch (e) {
+                        console.warn(`Error editando mensaje de soporte para admin ${adminId}:`, e.message);
+                    }
+                }
+                userNotifyMap.delete(targetUserMsgId);
+                if (userNotifyMap.size === 0) supportNotifyMessageIds.delete(targetUserId);
+            }
+        } else if (userNotifyMap) {
+            // Fallback: si no hay messageId (ej. mute/desilence), eliminar de todas las notificaciones
+            for (const adminNotifyMap of userNotifyMap.values()) {
+                for (const [adminId, msgId] of adminNotifyMap) {
+                    try {
+                        await bot.telegram.editMessageReplyMarkup(adminId, msgId, undefined, {
+                            reply_markup: Markup.inlineKeyboard([
+                                [Markup.button.callback('🔇 Silenciar', `support_mute_${targetUserId}`)]
+                            ]).reply_markup
+                        });
+                    } catch (e) {
+                        console.warn(`Error editando mensaje de soporte para admin ${adminId}:`, e.message);
+                    }
                 }
             }
             supportNotifyMessageIds.delete(targetUserId);
@@ -3101,7 +3124,13 @@ bot.on(message('text'), async (ctx) => {
             const responderName = ctx.from.username
                 ? `@${escapeHTML(ctx.from.username)}`
                 : escapeHTML(ctx.from.first_name || 'Admin');
-            const userMsg = supportUserMessages.get(targetUserId);
+            const userMsgMap = supportUserMessages.get(targetUserId);
+            let userMsg = userMsgMap?.get(session.supportReplyMessageId);
+            // Fallback: si no hay messageId, usar el último mensaje del usuario
+            if (!userMsg && userMsgMap) {
+                const lastEntry = [...userMsgMap.entries()].pop();
+                userMsg = lastEntry?.[1];
+            }
             const originalText = userMsg?.text || '';
             const originalName = userMsg?.firstName || 'Usuario';
             for (const adminId of ADMIN_IDS) {
@@ -3116,7 +3145,15 @@ bot.on(message('text'), async (ctx) => {
             }
         }
         supportReplyMessageIds.delete(targetUserId);
-        supportUserMessages.delete(targetUserId);
+        const userMsgMap2 = supportUserMessages.get(targetUserId);
+        if (userMsgMap2) {
+            if (session.supportReplyMessageId && userMsgMap2.has(session.supportReplyMessageId)) {
+                userMsgMap2.delete(session.supportReplyMessageId);
+                if (userMsgMap2.size === 0) supportUserMessages.delete(targetUserId);
+            } else {
+                supportUserMessages.delete(targetUserId);
+            }
+        }
         delete session.supportReplyTo;
         delete session.supportReplyMessageId;
         return;
@@ -5010,7 +5047,8 @@ bot.on(message('text'), async (ctx) => {
         }
         // Reenviar a todos los admins y subadmins
         const supportNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers]);
-        supportUserMessages.set(uid, { text, firstName: ctx.from.first_name });
+        if (!supportUserMessages.has(uid)) supportUserMessages.set(uid, new Map());
+        supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name });
         for (const adminId of supportNotifyIds) {
             try {
                 const sent = await bot.telegram.sendMessage(adminId,
@@ -5025,7 +5063,8 @@ bot.on(message('text'), async (ctx) => {
                 );
                 if (sent?.message_id) {
                     if (!supportNotifyMessageIds.has(uid)) supportNotifyMessageIds.set(uid, new Map());
-                    supportNotifyMessageIds.get(uid).set(adminId, sent.message_id);
+                    if (!supportNotifyMessageIds.get(uid).has(ctx.message.message_id)) supportNotifyMessageIds.get(uid).set(ctx.message.message_id, new Map());
+                    supportNotifyMessageIds.get(uid).get(ctx.message.message_id).set(adminId, sent.message_id);
                 }
             } catch (e) {
                 console.warn(`Error enviando soporte a admin ${adminId}:`, e.message);
@@ -5047,7 +5086,8 @@ bot.on(message('text'), async (ctx) => {
                 return;
             }
             const supportNotifyIds2 = new Set(ADMIN_IDS);
-            supportUserMessages.set(uid, { text, firstName: ctx.from.first_name });
+            if (!supportUserMessages.has(uid)) supportUserMessages.set(uid, new Map());
+            supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name });
             for (const adminId of supportNotifyIds2) {
                 try {
                     const sent = await bot.telegram.sendMessage(adminId,
@@ -5062,7 +5102,8 @@ bot.on(message('text'), async (ctx) => {
                     );
                     if (sent?.message_id) {
                         if (!supportNotifyMessageIds.has(uid)) supportNotifyMessageIds.set(uid, new Map());
-                        supportNotifyMessageIds.get(uid).set(adminId, sent.message_id);
+                        if (!supportNotifyMessageIds.get(uid).has(ctx.message.message_id)) supportNotifyMessageIds.get(uid).set(ctx.message.message_id, new Map());
+                        supportNotifyMessageIds.get(uid).get(ctx.message.message_id).set(adminId, sent.message_id);
                     }
                 } catch (e) {
                     console.warn(`Error enviando soporte a admin ${adminId}:`, e.message);
