@@ -1842,7 +1842,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             // marcar que estamos editando para que el submit incluya betId
                             window.editingBetId = bet.id;
                             submitBetBtn.innerHTML = '<i class="fas fa-save mr-2"></i>Guardar cambios';
-                            iziToast.info({ message: 'Jugada cargada para editar. Modifica y guarda los cambios.' });
+                            iziToast.info({ message: 'Jugada cargada para editar. Modifica y guarda los cambios.👇🏻' });
                         }, 500);
                     }
                 }, 1000);
@@ -2225,7 +2225,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             const balance = getWithdrawAvailableBalance(currency);
             if (amount > balance) {
-                iziToast.warning({ message: `Saldo insuficiente en ${currency}. Disponible: ${balance.toFixed(2)} ${currency}` });
+                iziToast.warning({ message: `❌ Saldo insuficiente en ${currency}. Disponible: ${balance.toFixed(2)} ${currency}.` });
                 return;
             }
 
