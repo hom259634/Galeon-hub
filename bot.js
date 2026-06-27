@@ -613,7 +613,7 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
             rateUSD,
             cupDebit: 0,
             usdDebit: 0,
-            errorMessage: `❌ Saldo insuficiente en ${currency}. Disponible: ${availableInCurrency.toFixed(2)} ${currency}.`
+            errorMessage: `❌ Saldo insuficiente. Disponible: ${availableInCurrency.toFixed(2)} ${currency}.`
         };
     }
 
