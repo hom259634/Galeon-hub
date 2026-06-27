@@ -2098,7 +2098,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const balance = getWithdrawAvailableBalance(currency);
 
             if (amount > balance) {
-                iziToast.warning({ message: `❌ Saldo insuficiente. Disponible: ${balance.toFixed(2)} ${currency}` });
+                iziToast.warning({ message: `❌ Saldo insuficiente. Disponible: ${balance.toFixed(2)} ${currency}.` });
                 return;
             }
 
