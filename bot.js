@@ -267,7 +267,7 @@ function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, cred
     let text =
         `✅ <b>Depósito aprobado</b>\n\n` +
         `💰 Monto depositado: ${depositedAmountText}\n` +
-        `${currencySymbol} ${Math.abs(creditedAmount - 1) < 0.001 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
+        `${currencySymbol} ${Math.round(creditedAmount * 100) / 100 === 1.00 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
 
     if (includeUsdFollowup) {
         text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -3942,7 +3942,7 @@ bot.on(message('text'), async (ctx) => {
         const debitPlan = await buildRealBalanceDebitPlan(user, amount, currency);
         if (!debitPlan.ok) {
             await ctx.reply(
-                `❌ ${debitPlan.errorMessage || `Saldo real insuficiente para retirar ${amount} ${currency}.\nDisponible total (CUP+USD): ${debitPlan.totalAvailableCUP.toFixed(2)} CUP\nNecesitas: ${debitPlan.amountCUP.toFixed(2)} CUP`}`,
+                `${debitPlan.errorMessage || `❌ Saldo real insuficiente para retirar ${amount} ${currency}.\nDisponible total (CUP+USD): ${debitPlan.totalAvailableCUP.toFixed(2)} CUP\nNecesitas: ${debitPlan.amountCUP.toFixed(2)} CUP`}`,
                 getMainKeyboard(ctx)
             );
             return;

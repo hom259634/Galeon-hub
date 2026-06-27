@@ -1290,7 +1290,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
     const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(amount), currency);
     if (!debitPlan.ok) {
         return res.status(400).json({
-            error: debitPlan.errorMessage || `Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
+            error: debitPlan.errorMessage || `❌ Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
         });
     }
 
@@ -1481,7 +1481,7 @@ app.post('/api/transfer', async (req, res) => {
     const debitPlan = await buildRealBalanceDebitPlan(userFrom, parsedAmount, currency);
     if (!debitPlan.ok) {
         return res.status(400).json({
-            error: debitPlan.errorMessage || `Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
+            error: debitPlan.errorMessage || `❌ Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
         });
     }
 
@@ -3412,7 +3412,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
                 `💰 Monto depositado: ${depositedAmountText}\n` +
-                `${currencySymbol} ${Math.abs(creditedAmount - 1) < 0.001 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+                `${currencySymbol} ${Math.round(creditedAmount * 100) / 100 === 1.00 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
 
             if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -3662,7 +3662,7 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
     const user = await getOrCreateUser(request.user_id);
     const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency);
     if (!debitPlan.ok) {
-        return res.status(400).json({ error: debitPlan.errorMessage || 'Saldo insuficiente (posible cambio de tasa). Rechace la solicitud.' });
+        return res.status(400).json({ error: debitPlan.errorMessage || '❌ Saldo insuficiente (posible cambio de tasa). Rechace la solicitud.' });
     }
 
     let newCup = (parseFloat(user.cup) || 0) - debitPlan.cupDebit;
@@ -3912,9 +3912,12 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
         const adminAddedBonus = diffBonusReq > 0.001;
         const bonusMigrated = (adminAddedBonus && finalBonus === 0) || existingBonusMigrated;
 
-        const verbForm = (diff, esRestTotal, sumSingular, sumPlural, totalSingularEl, totalPluralLos) => {
+        const amountEsSingular = (diff) => {
             const amt = Math.abs(diff);
-            const esSingular = Math.abs(amt - 1) < 0.001;
+            return amt > 0.001 && Math.round(amt * 100) / 100 === 1.00;
+        };
+        const verbForm = (diff, esRestTotal, sumSingular, sumPlural, totalSingularEl, totalPluralLos) => {
+            const esSingular = amountEsSingular(diff);
             if (diff > 0) return esSingular ? sumSingular : sumPlural;
             if (esRestTotal) return esSingular ? totalSingularEl : totalPluralLos;
             return esSingular ? 'restado' : 'restados';
@@ -3939,14 +3942,13 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
             let msg;
             if (cupUsdParts.length > 0) {
                 const movido = Math.abs(diffUsdReq) <= 0.001 ? 'al mismo' : 'a tu saldo principal';
-                const hasSingular = (Math.abs(diffCupReq) > 0.001 && Math.abs(Math.abs(diffCupReq) - 1) < 0.001) || (Math.abs(diffUsdReq) > 0.001 && Math.abs(Math.abs(diffUsdReq) - 1) < 0.001);
-                const prefix = hasSingular ? 'Ha sido' : 'Han sido';
+                const prefix = cupUsdParts.length > 1 ? (amountEsSingular(diffCupReq) ? 'Ha sido' : 'Han sido') : (amountEsSingular(diffCupReq) || amountEsSingular(diffUsdReq) ? 'Ha sido' : 'Han sido');
                 msg = `⚠️ ${prefix} ${cupUsdParts.join(' y ')}. Tu bono de bienvenida actual se ha movido ${movido}.`;
             } else {
                 const esRestaTotal = diffBonusReq < 0 && Math.abs(Math.abs(diffBonusReq) - oldBonus) < 0.001;
                 const verbo = verbForm(diffBonusReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
                 const prep = diffBonusReq > 0 ? 'a' : 'de';
-                const prefix = Math.abs(Math.abs(diffBonusReq) - 1) < 0.001 ? 'Ha sido' : 'Han sido';
+                const prefix = amountEsSingular(diffBonusReq) ? 'Ha sido' : 'Han sido';
                 msg = `⚠️ ${prefix} ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual, este se ha movido a tu saldo principal.`;
             }
 
@@ -3962,7 +3964,7 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
             const esRestaTotal = diffBonusReq < 0 && Math.abs(Math.abs(diffBonusReq) - oldBonus) < 0.001;
             const verbo = verbForm(diffBonusReq, esRestaTotal, 'sumado', 'sumados', 'restado el', 'restados los');
             const prep = diffBonusReq > 0 ? 'a' : 'de';
-            const prefix = Math.abs(Math.abs(diffBonusReq) - 1) < 0.001 ? 'Ha sido' : 'Han sido';
+            const prefix = amountEsSingular(diffBonusReq) ? 'Ha sido' : 'Han sido';
             try {
                 await bot.telegram.sendMessage(telegramId,
                     adminHeader + `⚠️ ${prefix} ${verbo} ${Math.abs(diffBonusReq).toFixed(2)} CUP ${prep} tu bono de bienvenida actual. Si crees que esto es incorrecto, por favor, contáctanos.`,
@@ -3987,8 +3989,7 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
                 partes.push(`${verbo} ${Math.abs(diffUsdReq).toFixed(2)} USD ${prep} tu saldo USD`);
             }
 
-            const hasSingular = (Math.abs(diffCupReq) > 0.001 && Math.abs(Math.abs(diffCupReq) - 1) < 0.001) || (Math.abs(diffUsdReq) > 0.001 && Math.abs(Math.abs(diffUsdReq) - 1) < 0.001);
-            const prefix = hasSingular ? 'Ha sido' : 'Han sido';
+            const prefix = partes.length > 1 ? (amountEsSingular(diffCupReq) ? 'Ha sido' : 'Han sido') : (amountEsSingular(diffCupReq) || amountEsSingular(diffUsdReq) ? 'Ha sido' : 'Han sido');
             const mensaje = adminHeader + `⚠️ ${prefix} ${partes.join(' y ')}. Si crees que esto es incorrecto, por favor, contáctanos.`;
             try {
                 await bot.telegram.sendMessage(telegramId, mensaje, { parse_mode: 'HTML' });
@@ -4197,6 +4198,9 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
 
         // Eliminar registros stale de deleted_users (de intentos fallidos previos)
         await supabase.from('deleted_users').delete().eq('telegram_id', telegramId);
+
+        // Desvincular referidos antes de eliminar
+        await supabase.from('users').update({ ref_by: null }).eq('ref_by', telegramId);
 
         const { error: deleteError } = await supabase
             .from('users')
@@ -4873,7 +4877,7 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
                 `💰 Monto depositado: ${depositedAmountText}\n` +
-                `${currencySymbol} ${Math.abs(creditedAmount - 1) < 0.001 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+                `${currencySymbol} ${Math.round(creditedAmount * 100) / 100 === 1.00 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
 
             if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -4951,7 +4955,7 @@ app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
 
     const user = await getOrCreateUser(request.user_id);
     const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency);
-    if (!debitPlan.ok) return res.status(400).json({ error: debitPlan.errorMessage || 'Saldo insuficiente' });
+    if (!debitPlan.ok) return res.status(400).json({ error: debitPlan.errorMessage || '❌ Saldo insuficiente' });
 
     let newCup = (parseFloat(user.cup) || 0) - debitPlan.cupDebit;
     let newUsd = (parseFloat(user.usd) || 0) - debitPlan.usdDebit;
