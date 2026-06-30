@@ -1429,7 +1429,7 @@ app.post('/api/transfer', async (req, res) => {
 
     // Si después de todo no hay mínimo (o es 0), no validamos mínimo
     if (minByCurrency !== null && minByCurrency > 0 && parsedAmount < minByCurrency) {
-        return res.status(400).json({ error: `El monto mínimo para transferir en ${currency} es ${minByCurrency.toFixed(2)} ${currency}.` });
+        return res.status(400).json({ error: `El monto mínimo para transferir es ${minByCurrency.toFixed(2)} ${currency}.` });
     }
 
     if (from === to) {

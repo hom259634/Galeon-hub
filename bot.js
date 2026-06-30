@@ -650,7 +650,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency) {
                 rateUSD,
                 cupDebit: 0,
                 usdDebit: 0,
-                errorMessage: `❌ Saldo insuficiente en USD. Disponible: ${usdBalance.toFixed(2)} USD.`
+                errorMessage: `❌ Saldo insuficiente. Disponible: ${usdBalance.toFixed(2)} USD.`
             };
         }
 
@@ -3867,12 +3867,12 @@ bot.on(message('text'), async (ctx) => {
     if (session.awaitingWithdrawAccountMobile) {
         const mobile = text.trim();
         if (!mobile) {
-            await ctx.reply('❌ El móvil no puede estar vacío. Por favor, ingresa un número de móvil válido.', getMainKeyboard(ctx));
+            await ctx.reply('❌ El móvil no puede estar vacío. Por favor, indica un número de móvil válido.', getMainKeyboard(ctx));
             return;
         }
 
          if (!/^\d{8}$/.test(mobile)) {
-            await ctx.reply('❌ Ingresa un número de móvil válido. Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
+            await ctx.reply('❌ Indica un número de móvil válido. Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
             return;
         }
 
