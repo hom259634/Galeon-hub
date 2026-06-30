@@ -508,7 +508,7 @@
                         </select>
                         
                         <input type="number" id="transferAmount" step="0.01" min="0.01" placeholder="Monto (ej: 10, 50,500)" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-500 mb-3">
-                        <p class="text-xs text-gray-400 mb-3" id="transferEquivalent">Equivalente en CUP: 0.00</p>
+                        <p class="text-xs text-gray-400 mb-3" id="transferAvailable">Disponible en CUP: 0.00</p>
                         
                         <button id="submitTransferBtn" class="w-full bg-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-700">Transferir</button>
                     </div>
@@ -801,6 +801,7 @@
             if (withdrawSection) withdrawSection.classList.add('hidden');
             document.getElementById('rechargeSection')?.classList.add('hidden');
             document.getElementById('transferSection')?.classList.add('hidden');
+            resetTransferForm();
             updateBalanceUI();
         }
 
@@ -1926,6 +1927,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             document.getElementById('rechargeSection').classList.toggle('hidden');
             document.getElementById('withdrawSection').classList.add('hidden');
             document.getElementById('transferSection').classList.add('hidden');
+            resetTransferForm();
         });
         function resetWithdrawForm() {
             withdrawMethodSelect.value = '';
@@ -1965,6 +1967,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             document.getElementById('withdrawSection').classList.toggle('hidden');
             document.getElementById('rechargeSection').classList.add('hidden');
             document.getElementById('transferSection').classList.add('hidden');
+            resetTransferForm();
         });
         document.getElementById('transferBtn').addEventListener('click', () => {
             // Validar saldo para mostrar el formulario
@@ -1973,9 +1976,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 iziToast.warning({ message: 'No tienes saldo disponible para transferir' });
                 return;
             }
+            const wasHidden = document.getElementById('transferSection').classList.contains('hidden');
             document.getElementById('transferSection').classList.toggle('hidden');
             document.getElementById('rechargeSection').classList.add('hidden');
             document.getElementById('withdrawSection').classList.add('hidden');
+            if (wasHidden) updateTransferAvailable();
+            else resetTransferForm();
         });
 
         // Función para actualizar el placeholder del monto según la moneda
@@ -1992,27 +1998,25 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         // Evento del select de moneda (se ejecuta al cambiar)
         document.getElementById('transferCurrency').addEventListener('change', () => {
-            updateTransferEquivalent();
+            updateTransferAvailable();
             updateTransferPlaceholder();
         });
 
-        // Evento del input de monto (se mantiene igual)
-        document.getElementById('transferAmount').addEventListener('input', updateTransferEquivalent);
+        function resetTransferForm() {
+            document.getElementById('transferTarget').value = '';
+            document.getElementById('transferAmount').value = '';
+            document.getElementById('transferCurrency').value = 'CUP';
+            updateTransferAvailable();
+            updateTransferPlaceholder();
+        }
 
         // Establecer placeholder inicial (cuando carga la página con "CUP" por defecto)
         updateTransferPlaceholder();
 
-        function updateTransferEquivalent() {
+        function updateTransferAvailable() {
             const currency = document.getElementById('transferCurrency').value;
-            const amount = parseFloat(document.getElementById('transferAmount').value) || 0;
-            let eq;
-            if (currency === 'CUP') eq = amount;
-            else if (currency === 'USD') eq = amount * exchangeRates.rate;
-            else if (currency === 'USDT') eq = amount * exchangeRates.rate_usdt;
-            else if (currency === 'TRX') eq = amount * exchangeRates.rate_trx;
-            else if (currency === 'MLC') eq = amount * exchangeRates.rate_mlc;
-            else eq = amount;
-            document.getElementById('transferEquivalent').innerText = `Equivalente en CUP: ${eq.toFixed(2)}`;
+            const balance = getWithdrawAvailableBalance(currency);
+            document.getElementById('transferAvailable').innerText = `Disponible en ${currency}: ${balance.toFixed(2)}`;
         }
 
         document.getElementById('submitDepositBtn').addEventListener('click', async () => {
@@ -2225,7 +2229,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             const balance = getWithdrawAvailableBalance(currency);
             if (amount > balance) {
-                iziToast.warning({ message: `❌ Saldo insuficiente en ${currency}. Disponible: ${balance.toFixed(2)} ${currency}.` });
+                iziToast.warning({ message: `❌ Saldo insuficiente. Disponible: ${balance.toFixed(2)} ${currency}.` });
                 return;
             }
 
@@ -2266,6 +2270,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     iziToast.success({ message: 'Transferencia realizada' });
                     document.getElementById('transferSection').classList.add('hidden');
+                    resetTransferForm();
                     if (currency === 'USD') {
                         currentUser.usd = (parseFloat(currentUser.usd) || 0) - amount;
                     } else {
@@ -4849,7 +4854,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const labelEl = document.getElementById('userTotalLabel');
                         if (labelEl) labelEl.textContent = `Total de usuarios ${filterNames[filter] || filter}`;
                         if (count === 0) {
-                            noMsg.textContent = searchText ? '👤 Usuario no encontrado' : 'No hay historial de usuarios eliminados.';
+                            noMsg.textContent = searchText ? '👤 Usuario no encontrado' : '📭 No hay historial de usuarios eliminados';
                             noMsg.classList.remove('hidden');
                         } else {
                             noMsg.classList.add('hidden');
@@ -5034,7 +5039,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <button onclick="adjustBalance(${telegramId}, 'usd', 5)" class="bg-green-600 px-3 rounded-lg">+5</button>
                         </div>
                     </div>
-                    ${(cup === 0 && usd === 0 && (bonus > 0 || !bonusUpdatedByAdmin)) ? `
+                    ${(cup === 0 && usd === 0 && bonus > 0) ? `
                     <div>
                         <label class="block text-sm mb-1">🎁 Bono (CUP)</label>
                         <div class="flex gap-2">
