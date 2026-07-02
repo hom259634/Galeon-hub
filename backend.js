@@ -364,6 +364,7 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
     const totalAvailableCUP = cupBalance + (usdBalance * rateUSD);
 
     if (amountCUP <= 0 || totalAvailableCUP < amountCUP) {
+        const availableInCurrency = await convertFromCUP(totalAvailableCUP, currency);
         return {
             ok: false,
             amountCUP,
@@ -372,7 +373,8 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
             usdBalance,
             rateUSD,
             cupDebit: 0,
-            usdDebit: 0
+            usdDebit: 0,
+            errorMessage: `❌ Saldo insuficiente. Disponible: ${availableInCurrency.toFixed(2)} ${currency}.`
         };
     }
 
@@ -514,7 +516,7 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
             const hasApprovedDeposit = await userHasApprovedDeposit(telegramId);
             if (hasApprovedDeposit && bonusAmt > 0) {
                 const newCup = cupAmt + bonusAmt;
-                await supabase.from('users').update({ cup: newCup, bonus_cup: 0, updated_at: new Date() }).eq('telegram_id', telegramId);
+                await supabase.from('users').update({ cup: newCup, bonus_cup: 0, bonus_updated_by_admin: new Date(), updated_at: new Date() }).eq('telegram_id', telegramId);
                 user.cup = newCup;
                 user.bonus_cup = 0;
             }
@@ -1290,7 +1292,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
     const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(amount), currency);
     if (!debitPlan.ok) {
         return res.status(400).json({
-            error: debitPlan.errorMessage || `❌ Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
+            error: debitPlan.errorMessage || `❌ Saldo insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP.`
         });
     }
 
@@ -1481,7 +1483,7 @@ app.post('/api/transfer', async (req, res) => {
     const debitPlan = await buildRealBalanceDebitPlan(userFrom, parsedAmount, currency);
     if (!debitPlan.ok) {
         return res.status(400).json({
-            error: debitPlan.errorMessage || `❌ Saldo real insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP, necesitas ${debitPlan.amountCUP.toFixed(2)} CUP.`
+            error: debitPlan.errorMessage || `❌ Saldo insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP.`
         });
     }
 
@@ -2130,6 +2132,7 @@ app.post('/api/bets', async (req, res) => {
                     const updatePayload = { updated_at: new Date() };
                     if (newCup !== (parseFloat(referrer.cup) || 0)) updatePayload.cup = newCup;
                     if (newBonus !== (parseFloat(referrer.bonus_cup) || 0)) updatePayload.bonus_cup = newBonus;
+                    if (bonusMovedCup > 0) updatePayload.bonus_updated_by_admin = new Date();
 
                     await supabase
                         .from('users')
@@ -3887,6 +3890,10 @@ app.put('/api/admin/users/:telegramId/balance', async (req, res) => {
 
         if (finalCup > 0 || finalUsd > 0) {
             updatePayload.bonus_updated_by_admin = new Date();
+        } else if (oldCupVal === 0 && oldUsdVal === 0 && oldBonusVal > 0 && bonus_cup === 0) {
+            updatePayload.bonus_updated_by_admin = new Date();
+        } else if (finalCup === 0 && finalUsd === 0 && (oldCupVal > 0 || oldUsdVal > 0)) {
+            updatePayload.bonus_updated_by_admin = null;
         }
 
         const { error: updateError } = await supabase

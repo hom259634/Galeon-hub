@@ -694,7 +694,7 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
                 const hasApprovedDeposit = await userHasApprovedDeposit(telegramId);
                 if (hasApprovedDeposit && bonusAmt > 0) {
                     const newCup = cupAmt + bonusAmt;
-                    await supabase.from('users').update({ cup: newCup, bonus_cup: 0, updated_at: new Date() }).eq('telegram_id', telegramId);
+                    await supabase.from('users').update({ cup: newCup, bonus_cup: 0, bonus_updated_by_admin: new Date(), updated_at: new Date() }).eq('telegram_id', telegramId);
                     user.cup = newCup;
                     user.bonus_cup = 0;
                 }
@@ -713,6 +713,7 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
                         await supabase.from('users').update({
                             cup: newCup2,
                             bonus_cup: 0,
+                            bonus_updated_by_admin: new Date(),
                             updated_at: new Date()
                         }).eq('telegram_id', telegramId);
                         user.cup = newCup2;
@@ -3942,7 +3943,7 @@ bot.on(message('text'), async (ctx) => {
         const debitPlan = await buildRealBalanceDebitPlan(user, amount, currency);
         if (!debitPlan.ok) {
             await ctx.reply(
-                `${debitPlan.errorMessage || `❌ Saldo real insuficiente para retirar ${amount} ${currency}.\nDisponible total (CUP+USD): ${debitPlan.totalAvailableCUP.toFixed(2)} CUP\nNecesitas: ${debitPlan.amountCUP.toFixed(2)} CUP`}`,
+                `${debitPlan.errorMessage || `❌ Saldo insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP.`}`,
                 getMainKeyboard(ctx)
             );
             return;
@@ -4972,6 +4973,7 @@ bot.on(message('text'), async (ctx) => {
                             const updatePayload = { updated_at: new Date() };
                             if (newCup !== (parseFloat(referrer.cup) || 0)) updatePayload.cup = newCup;
                             if (newBonus !== (parseFloat(referrer.bonus_cup) || 0)) updatePayload.bonus_cup = newBonus;
+                            if (bonusMovedCup > 0) updatePayload.bonus_updated_by_admin = new Date();
 
                             await supabase
                                 .from('users')
@@ -5272,7 +5274,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                 const newCupAfterBonus = (parseFloat(updatedUser?.cup) || 0) + bonus;
                 await supabase
                     .from('users')
-                    .update({ cup: newCupAfterBonus, bonus_cup: 0, updated_at: new Date() })
+                    .update({ cup: newCupAfterBonus, bonus_cup: 0, bonus_updated_by_admin: new Date(), updated_at: new Date() })
                     .eq('telegram_id', request.user_id);
 
                 bonusMovedCup = bonus;
