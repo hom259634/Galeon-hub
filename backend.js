@@ -497,14 +497,21 @@ async function getOrCreateUser(telegramId, firstName = 'Jugador', username = nul
                 };
             }
         } else {
+            const updates = {};
             if (username && user.username !== username) {
+                updates.username = username;
+            }
+            if (firstName && user.first_name !== firstName) {
+                updates.first_name = firstName;
+            }
+            if (Object.keys(updates).length > 0) {
                 try {
                     await supabase
                         .from('users')
-                        .update({ username })
+                        .update(updates)
                         .eq('telegram_id', telegramId);
                 } catch (e) {
-                    console.error('Error actualizando username:', e);
+                    console.error('Error actualizando perfil:', e);
                 }
             }
         }

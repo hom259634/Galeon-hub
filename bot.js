@@ -684,8 +684,15 @@ async function getUser(telegramId, firstName = 'Jugador', username = null, ctx =
         }
 
         if (user) {
+            const updates = {};
             if (username && user.username !== username) {
-                await supabase.from('users').update({ username }).eq('telegram_id', telegramId);
+                updates.username = username;
+            }
+            if (firstName && user.first_name !== firstName) {
+                updates.first_name = firstName;
+            }
+            if (Object.keys(updates).length > 0) {
+                await supabase.from('users').update(updates).eq('telegram_id', telegramId);
             }
             // Migrar bono a saldo principal solo si el usuario ya tuvo depósito aprobado
             try {
