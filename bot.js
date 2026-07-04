@@ -670,7 +670,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency) {
 }
 
 // ========== FUNCIÓN GETUSER MODIFICADA (AHORA NO ENVÍA BONO DIRECTAMENTE) ==========
-async function getUser(telegramId, firstName = 'Jugador', username = null, ctx = null) {
+async function getUser(telegramId, firstName = '', username = null, ctx = null) {
     try {
         const { data: user, error } = await supabase
             .from('users')
@@ -1296,7 +1296,7 @@ bot.use(async (ctx, next) => {
     const uid = ctx.from?.id;
     if (uid) {
         try {
-            const firstName = ctx.from.first_name || 'Jugador';
+            const firstName = ctx.from.first_name || '';
             const username = ctx.from.username || null;
             // Pasamos ctx para que pueda marcar nuevo usuario en sesión
             const user = await getUser(uid, firstName, username, ctx);
@@ -1326,7 +1326,7 @@ bot.use(async (ctx, next) => {
 // ========== COMANDOS ==========
 bot.command('start', async (ctx) => {
     const uid = ctx.from.id;
-    const firstName = ctx.from.first_name || 'Jugador';
+    const firstName = ctx.from.first_name || '';
     const refParam = ctx.payload;
 
     const me = await ctx.telegram.getMe().catch(() => ({}));
@@ -1525,7 +1525,7 @@ bot.command('cancel', async (ctx) => {
 
 // ========== ACCIONES ==========
 bot.action('main', async (ctx) => {
-    const firstName = ctx.from.first_name || 'Jugador';
+    const firstName = ctx.from.first_name || '';
     await safeEdit(ctx,
         `👋 ¡Hola de nuevo, ${escapeHTML(firstName)}! ¿En qué podemos ayudarte hoy?\n\n` +
         `Selecciona una opción del menú para continuar.`,
@@ -3041,7 +3041,7 @@ bot.on(message('text'), async (ctx) => {
         for (const adminId of supportNotifyIds) {
             try {
                 const sent = await bot.telegram.sendMessage(adminId,
-                    `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name)} (${uid}) <b>[BANEADO]</b>:\n\n${escapeHTML(text)}`,
+                    `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}) <b>[BANEADO]</b>:\n\n${escapeHTML(text)}`,
                     {
                         parse_mode: 'HTML',
                         reply_markup: Markup.inlineKeyboard([
@@ -4029,7 +4029,7 @@ bot.on(message('text'), async (ctx) => {
                         try {
                             const sent = await ctx.telegram.sendMessage(adminId,
                                 `📤 <b>Nueva solicitud de RETIRO</b>\n` +
-                                `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
+                                `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
                                 `💰 Monto: ${amount} ${currency}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                 `👝 Wallet: ${escapeHTML(existingWallet)} (Red: ${escapeHTML(existingNetwork)})\n` +
@@ -4126,7 +4126,7 @@ bot.on(message('text'), async (ctx) => {
                         try {
                             const sent = await ctx.telegram.sendMessage(adminId,
                                 `📤 <b>Nueva solicitud de RETIRO</b>\n` +
-                                `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
+                                `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
                                 `💰 Monto: ${amount} ${currency}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                 `${existingAccountCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingAccountCard)}` : ''}${existingAccountCard && existingAccountMobile ? '\n' : ''}${existingAccountMobile ? `📞 Móvil: ${escapeHTML(existingAccountMobile)}` : ''}\n` +
@@ -4216,7 +4216,7 @@ bot.on(message('text'), async (ctx) => {
                             try {
                                 const sent = await ctx.telegram.sendMessage(adminId,
                                     `📤 <b>Nueva solicitud de RETIRO</b>\n` +
-                                    `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
+                                    `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
                                     `💰 Monto: ${amount} ${currency}\n` +
                                     `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                     `${existingCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingCard)}` : ''}${existingCard && existingMobile ? '\n' : ''}${existingMobile ? `📞 Móvil: ${escapeHTML(existingMobile)}` : ''}\n` +
@@ -4420,7 +4420,7 @@ bot.on(message('text'), async (ctx) => {
                 try {
                     const sent = await bot.telegram.sendMessage(adminId,
                         `📤 <b>Nueva solicitud de RETIRO</b>\n` +
-                        `👤 Usuario: ${ctx.from.first_name} (${uid})\n` +
+                        `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
                         `💰 Monto: ${amount} ${currency}\n` +
                         `🏦 Método: ${escapeHTML(method.name)}\n` +
                         `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} ${escapeHTML(accountInfo)}\n` +
@@ -5061,7 +5061,7 @@ bot.on(message('text'), async (ctx) => {
         for (const adminId of supportNotifyIds) {
             try {
                 const sent = await bot.telegram.sendMessage(adminId,
-                    `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name)} (${uid}):\n\n${escapeHTML(text)}`,
+                    `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}):\n\n${escapeHTML(text)}`,
                     {
                         parse_mode: 'HTML',
                         reply_markup: Markup.inlineKeyboard([
@@ -5100,14 +5100,14 @@ bot.on(message('text'), async (ctx) => {
             for (const adminId of supportNotifyIds2) {
                 try {
                     const sent = await bot.telegram.sendMessage(adminId,
-                        `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name)} (${uid}):\n\n${escapeHTML(text)}`,
-                        {
-                            parse_mode: 'HTML',
-                            reply_markup: Markup.inlineKeyboard([
-                                [Markup.button.callback('📩 Responder', `support_reply_${uid}_${ctx.message.message_id}`),
-                                 Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
-                            ]).reply_markup
-                        }
+                    `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}):\n\n${escapeHTML(text)}`,
+                    {
+                        parse_mode: 'HTML',
+                        reply_markup: Markup.inlineKeyboard([
+                            [Markup.button.callback('📩 Responder', `support_reply_${uid}_${ctx.message.message_id}`),
+                             Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
+                        ]).reply_markup
+                    }
                     );
                     if (sent?.message_id) {
                         if (!supportNotifyMessageIds.has(uid)) supportNotifyMessageIds.set(uid, new Map());
@@ -5152,7 +5152,7 @@ bot.on(message('photo'), async (ctx) => {
                     try {
                         const sent = await bot.telegram.sendMessage(adminId,
                             `📥 <b>Nueva solicitud de DEPÓSITO</b>\n` +
-                            `👤 Usuario: ${escapeHTML(ctx.from.first_name)} (${uid})\n` +
+                            `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
                             `🏦 Método: ${escapeHTML(method.name)} (${escapeHTML(method.currency)})\n` +
                             `💰 Monto: ${escapeHTML(amountText)}\n` +
                             `📎 <a href="${escapeHTML(request.screenshot_url)}">Ver captura</a>\n` +
