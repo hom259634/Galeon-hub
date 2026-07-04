@@ -1399,7 +1399,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     });
                 }
 
-                document.getElementById('userName').innerText = currentUser.first_name || 'Jugador';
+                document.getElementById('userName').innerText = currentUser.first_name || '';
                 // Actualizar título del modal de descartar con el nombre del bot (si está disponible)
                try {
                     const discardTitleEl = document.getElementById('discardModalTitle');
@@ -2069,6 +2069,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.success({ message: 'Solicitud enviada. En breve será procesada. Por favor, espera...' });
                     document.getElementById('rechargeSection').classList.add('hidden');
                 } else {
+                    depositSendBtn.disabled = false;
+                    depositSendBtn.innerHTML = depositBtnOriginalHTML;
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
                 }
@@ -2163,12 +2165,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     })
                 });
                 if (res.ok) {
-
                     withdrawSendBtn.disabled = false;
                     withdrawSendBtn.innerHTML = withdrawBtnOriginalHTML;
                     iziToast.success({ message: 'Solicitud enviada. En breve será procesada. Por favor, espera...' });
                     document.getElementById('withdrawSection').classList.add('hidden');
                 } else {
+                    withdrawSendBtn.disabled = false;
+                    withdrawSendBtn.innerHTML = withdrawBtnOriginalHTML;
                     const err = await res.json();
                     iziToast.error({ message: err.error || 'Error' });
                 }
@@ -2351,6 +2354,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     });
                     if (res.ok) {
                         iziToast.success({ message: `Sesión ${newStatus==='open'?'abierta':'cerrada'}` });
+                        if (btn) { btn.disabled = false; btn.textContent = newStatus === 'open' ? 'Cerrar' : 'Abrir'; }
                         renderSessionsView();
                     } else {
                         const err = await res.json();
@@ -2367,6 +2371,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     });
                     if (res.ok) {
                         iziToast.success({ message: `Sesión de ${lottery} (${timeSlot}) abierta` });
+                        if (btn) { btn.disabled = false; btn.textContent = 'Abrir'; }
                         renderSessionsView();
                     } else {
                         const err = await res.json();
@@ -2414,6 +2419,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: '✅ Números publicados. Los ganadores recibirán notificación.' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = '📢 Publicar'; }
                     // --- Notificación automática de ganador/perdedor para el usuario actual ---
                     try {
                         const res2 = await fetch(`/api/admin/winning-numbers/${sessionId}/winners?userId=${currentUser.telegram_id}`);
@@ -2482,7 +2488,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             modalContent += `<div class="bg-gray-700/50 p-3 rounded-lg">
                                 <div class="flex justify-between items-center">
                                     <div>
-                                        <span class="font-bold">${escapeHTML(w.first_name)}</span>
+                                        <span class="font-bold">${escapeHTML(w.first_name || 'Ganador')}</span>
                                         <span class="ml-2 text-xs bg-gray-800 text-gray-200 px-2 py-0.5 rounded">${betTypeLabel}</span>
                                     </div>
                                     <span class="text-cyan-300">${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</span>
@@ -2540,7 +2546,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             userId: currentUser.telegram_id 
                         })
                     });
-                    if (res.ok) { iziToast.success({ message: 'Método añadido' }); await loadDepositMethods(); renderViewDataView(); }
+                    if (res.ok) { btn.disabled = false; btn.textContent = originalText; iziToast.success({ message: 'Método añadido' }); await loadDepositMethods(); renderViewDataView(); }
                     else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
                 } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
@@ -2587,7 +2593,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             userId: currentUser.telegram_id 
                         })
                     });
-                    if (res.ok) { iziToast.success({ message: 'Método añadido' }); await loadWithdrawMethods(); renderViewDataView(); }
+                    if (res.ok) { btn.disabled = false; btn.textContent = originalText; iziToast.success({ message: 'Método añadido' }); await loadWithdrawMethods(); renderViewDataView(); }
                     else { const err = await res.json(); iziToast.error({ message: err.error }); btn.disabled = false; btn.textContent = originalText; }
                 } catch (e) { iziToast.error({ message: 'Error de conexión' }); btn.disabled = false; btn.textContent = originalText; }
             });
@@ -2684,6 +2690,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Método actualizado' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = 'Guardar cambios'; }
                     adminModal.classList.add('hidden');
                     await loadDepositMethods();
                     renderEditDepositView();
@@ -2776,6 +2783,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Método actualizado' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = 'Guardar cambios'; }
                     adminModal.classList.add('hidden');
                     await loadWithdrawMethods();
                     renderEditWithdrawView();
@@ -2820,6 +2828,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Método eliminado' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash"></i> Eliminar'; }
                     await loadDepositMethods();
                     renderDeleteDepositView();
                 } else {
@@ -2863,6 +2872,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Método eliminado' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash"></i> Eliminar'; }
                     await loadWithdrawMethods();
                     renderDeleteWithdrawView();
                 } else {
@@ -3371,16 +3381,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: `Solicitud ${action === 'approve' ? 'aprobada' : 'rechazada'} correctamente` });
-                    // Recargar la pestaña activa
-                    const activeTab = document.querySelector('.tab-button.active').dataset.tab;
-                    const pendingTabContent = document.getElementById('pendingTabContent');
-                    // Simular recarga de la pestaña llamando a loadTab
-                    const tabButtons = document.querySelectorAll('.tab-button');
-                    const loadTab = async (tab) => {
-                        // Re-ejecutar la lógica de renderPendingRequestsView simplificada
-                        // En este contexto, simplemente recargamos la vista completa
-                        renderPendingRequestsView();
-                    };
+                    if (btn) { btn.disabled = false; btn.innerHTML = action === 'approve' ? '✅ Aprobar' : '❌ Rechazar'; }
                     renderPendingRequestsView(); // Recarga completa
                 } else {
                     const err = await res.json();
@@ -3802,6 +3803,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         });
                         if (res.ok) {
                             iziToast.success({ message: 'Horario de retiros actualizado' });
+                            btn.disabled = false;
+                            btn.textContent = originalText;
                             window.renderSetWithdrawHoursView();
                         } else {
                             const err = await res.json();
@@ -3851,16 +3854,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             });
                             if (res.ok) {
                                 iziToast.success({ message: `Sesión ${action === 'open' ? 'abierta' : 'cerrada'} manualmente` });
-                                await updateToggleBtn();
                             } else {
                                 const err = await res.json();
                                 iziToast.error({ message: err.error || 'Error al ejecutar la acción' });
-                                await updateToggleBtn();
                             }
                         } catch (e) {
                             iziToast.error({ message: 'Error de conexión' });
-                            await updateToggleBtn();
                         }
+                        try { await updateToggleBtn(); } catch (_) {}
                         toggleBtn.disabled = false;
                     });
                 }
@@ -3896,6 +3897,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: action === 'approve' ? 'Depósito aprobado' : 'Depósito rechazado' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = action === 'approve' ? '✅' : '❌'; }
                     if (isAdmin) renderPendingRequestsView();
                     else loadFuncionesDepositos();
                 } else {
@@ -3920,6 +3922,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: action === 'approve' ? 'Retiro aprobado' : 'Retiro rechazado' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = action === 'approve' ? '✅' : '❌'; }
                     if (isAdmin) renderPendingRequestsView();
                     else loadFuncionesRetiros();
                 } else {
@@ -3974,6 +3977,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Horario actualizado' });
+                    if (btn) { btn.disabled = false; btn.innerHTML = '💾 Guardar Horario'; }
                     loadFuncionesHorario();
                 } else {
                     const err = await res.json();
@@ -3997,6 +4001,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 if (res.ok) {
                     iziToast.success({ message: action === 'open' ? 'Retiros abiertos' : 'Retiros cerrados' });
+                    if (btn) { btn.disabled = false; btn.textContent = action === 'open' ? '🔓 Abrir ahora' : '🔒 Cerrar ahora'; }
                     loadFuncionesHorario();
                 } else {
                     const err = await res.json();
@@ -4318,7 +4323,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <i class="fas fa-arrow-left mr-1"></i> Volver
                     </button>
                 </div>
-                <h4 class="text-xl font-bold mb-1 flex items-center"><i class="fas fa-user-shield text-orange-400 mr-2"></i>${escapeHTML(data.first_name)} ${data.username ? '@'+escapeHTML(data.username) : ''}</h4>
+                <h4 class="text-xl font-bold mb-1 flex items-center"><i class="fas fa-user-shield text-orange-400 mr-2"></i>${escapeHTML(data.first_name || 'Sub-Admin')} ${data.username ? '@'+escapeHTML(data.username) : ''}</h4>
                 <p class="text-sm text-gray-400 mb-1">ID: ${data.telegram_id}</p>
                 <p class="text-xs text-gray-200 mb-4">${filterRangeStr()}</p>`;
 
@@ -5285,6 +5290,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         }
                     });
 
+                    const approvedDeposits = deposits.filter(d => d.status === 'approved');
+                    const approvedWithdraws = withdraws.filter(w => w.status === 'approved');
+
                     // Formatear balances
                     const cup = parseFloat(u.cup).toFixed(2);
                     const usd = parseFloat(u.usd).toFixed(2);
@@ -5332,11 +5340,11 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                     // Depósitos
                     let depositsHtml = '';
                     let depositsTotalsHtml = '';
-                    if (deposits.length === 0) {
-                        depositsHtml = '<p class="text-gray-400">No hay depósitos registrados.</p>';
+                    if (approvedDeposits.length === 0) {
+                        depositsHtml = '<p class="text-gray-400">No hay depósitos aprobados.</p>';
                     } else {
                         depositsHtml = '<div class="space-y-1">';
-                        deposits.forEach((d, i) => {
+                        approvedDeposits.forEach((d, i) => {
                             const date = new Date(d.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                             let cupLabel = '';
                             if (d.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(d.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
@@ -5356,11 +5364,11 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                     // Retiros
                     let withdrawsHtml = '';
                     let withdrawsTotalsHtml = '';
-                    if (withdraws.length === 0) {
-                        withdrawsHtml = '<p class="text-gray-400">No hay retiros registrados.</p>';
+                    if (approvedWithdraws.length === 0) {
+                        withdrawsHtml = '<p class="text-gray-400">No hay retiros aprobados.</p>';
                     } else {
                         withdrawsHtml = '<div class="space-y-1">';
-                        withdraws.forEach((w, i) => {
+                        approvedWithdraws.forEach((w, i) => {
                             const date = new Date(w.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                             let cupLabel = '';
                             if (w.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(w.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
@@ -5411,20 +5419,20 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                         </div>
                         <div class="mt-4">
                             <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
-                                <span class="text-cyan-300 font-semibold flex items-center">📥 Últimos 20 depósitos (${deposits.length})</span>
+                                <span class="text-cyan-300 font-semibold flex items-center">📥 Últimos 20 depósitos (${approvedDeposits.length})</span>
                                 <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                             </button>
-                            <div class="mt-2${deposits.length === 0 ? ' hidden' : ''}">
+                            <div class="mt-2${approvedDeposits.length === 0 ? ' hidden' : ''}">
                                 <div class="max-h-96 overflow-y-auto">${depositsHtml}</div>
                                 ${depositsTotalsHtml}
                             </div>
                         </div>
                         <div class="mt-4">
                             <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
-                                <span class="text-pink-300 font-semibold flex items-center">📤 Últimos 20 retiros (${withdraws.length})</span>
+                                <span class="text-pink-300 font-semibold flex items-center">📤 Últimos 20 retiros (${approvedWithdraws.length})</span>
                                 <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                             </button>
-                            <div class="mt-2${withdraws.length === 0 ? ' hidden' : ''}">
+                            <div class="mt-2${approvedWithdraws.length === 0 ? ' hidden' : ''}">
                                 <div class="max-h-96 overflow-y-auto">${withdrawsHtml}</div>
                                 ${withdrawsTotalsHtml}
                             </div>
@@ -5555,6 +5563,8 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario baneado correctamente.' });
+                    btn.disabled = false;
+                    btn.innerHTML = '🚫 Banear usuario';
                     adminModal.classList.add('hidden');
                     renderManageUsersView(_activeUsersContainer);
                 } else {
@@ -5585,6 +5595,8 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario desbaneado correctamente.' });
+                    btn.disabled = false;
+                    btn.innerHTML = '✅ Desbanear usuario';
                     adminModal.classList.add('hidden');
                     renderManageUsersView(_activeUsersContainer);
                 } else {
@@ -5615,6 +5627,8 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                 });
                 if (res.ok) {
                     iziToast.success({ message: 'Usuario eliminado correctamente. Podrá registrarse de nuevo.' });
+                    btn.disabled = false;
+                    btn.innerHTML = '🗑 Eliminar Usuario';
                     adminModal.classList.add('hidden');
                     renderManageUsersView(_activeUsersContainer);
                 } else {
