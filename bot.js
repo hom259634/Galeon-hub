@@ -1241,12 +1241,12 @@ function adminPanelKbd() {
             Markup.button.callback('🗑 Eliminar método RETIRO', 'adm_delete_wit')
         ],
         [
-            Markup.button.callback('💰 Configurar tasa MLC/CUP', 'adm_set_rate_mlc'),
-            Markup.button.callback('💰 Configurar tasa USD/CUP', 'adm_set_rate_usd')
+            Markup.button.callback('💰 Configurar tasa USD/CUP', 'adm_set_rate_usd'),
+            Markup.button.callback('💰 Configurar tasa USDT/CUP', 'adm_set_rate_usdt')
         ],
         [
-            Markup.button.callback('💰 Configurar tasa USDT/CUP', 'adm_set_rate_usdt'),
-            Markup.button.callback('💰 Configurar tasa TRX/CUP', 'adm_set_rate_trx')
+            Markup.button.callback('💰 Configurar tasa TRX/CUP', 'adm_set_rate_trx'),
+            Markup.button.callback('💰 Configurar tasa MLC/CUP', 'adm_set_rate_mlc')
         ],
         [Markup.button.callback('📤 Enviar Actualización', 'adm_send_rate_update')],
         [
@@ -2594,10 +2594,10 @@ bot.action('adm_view', async (ctx) => {
     const minTransUsd = await getTransferMin('USD');
 
     let text = `💰 <b>Tasas de cambio:</b>\n`;
-    text += `MLC/CUP: 1 MLC = ${rates.rate_mlc} CUP\n`;
     text += `USD/CUP: 1 USD = ${rates.rate} CUP\n`;
     text += `USDT/CUP: 1 USDT = ${rates.rate_usdt} CUP\n`;
-    text += `TRX/CUP: 1 TRX = ${rates.rate_trx} CUP\n\n`;
+    text += `TRX/CUP: 1 TRX = ${rates.rate_trx} CUP\n`;
+    text += `MLC/CUP: 1 MLC = ${rates.rate_mlc} CUP\n\n`;
     text += `🔄 <b>Mínimos de transferencia:</b>\n`;
     text += `  CUP: ${minTransCup !== null ? minTransCup : '-'} CUP\n`;
     text += `  USD: ${minTransUsd !== null ? minTransUsd : '-'} USD\n\n`;

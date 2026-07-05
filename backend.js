@@ -411,7 +411,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency) {
                 rateUSD,
                 cupDebit: 0,
                 usdDebit: 0,
-                errorMessage: `❌ Saldo USD insuficiente. Por favor, recarga.`
+                errorMessage: `❌ Saldo insuficiente. Disponible: ${usdBalance.toFixed(2)} USD.`
             };
         }
 
