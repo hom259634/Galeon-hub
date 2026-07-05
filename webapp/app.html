@@ -1253,11 +1253,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 let availableCup = (parseFloat(currentUser?.cup) || 0) + (parseFloat(currentUser?.bonus_cup) || 0);
                 let availableUsd = parseFloat(currentUser?.usd) || 0;
                 if (newTotalCUP > 0 && availableCup < newTotalCUP) {
-                    iziToast.error({ message: `❌ Saldo CUP insuficiente. Por favor, recarga.` });
+                    iziToast.error({ message: `❌ Saldo insuficiente. Disponible: ${availableCup.toFixed(2)} CUP.` });
                     return;
                 }
                 if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
-                    iziToast.error({ message: `❌ Saldo USD insuficiente. Por favor, recarga.` });
+                    iziToast.error({ message: `❌ Saldo insuficiente. Disponible: ${availableUsd.toFixed(2)} USD.` });
                     return;
                 }
             }
@@ -3225,10 +3225,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const minTransUsd = transData.min_usd !== null ? transData.min_usd : '—';
 
                 let text = `💰 <b>Tasas:</b>\n`;
-                text += `MLC/CUP: 1 MLC = ${exchangeRates.rate_mlc} CUP\n`;
                 text += `USD/CUP: 1 USD = ${exchangeRates.rate} CUP\n`;
                 text += `USDT/CUP: 1 USDT = ${exchangeRates.rate_usdt} CUP\n`;
-                text += `TRX/CUP: 1 TRX = ${exchangeRates.rate_trx} CUP\n\n`;
+                text += `TRX/CUP: 1 TRX = ${exchangeRates.rate_trx} CUP\n`;
+                text += `MLC/CUP: 1 MLC = ${exchangeRates.rate_mlc} CUP\n\n`;
                 text += `🔄 <b>Mínimos de transferencia:</b>\n`;
                 text += `  CUP: ${minTransCup} CUP\n`;
                 text += `  USD: ${minTransUsd} USD\n\n`;
@@ -5341,7 +5341,7 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                     let depositsHtml = '';
                     let depositsTotalsHtml = '';
                     if (approvedDeposits.length === 0) {
-                        depositsHtml = '<p class="text-gray-400">No hay depósitos aprobados.</p>';
+                        depositsHtml = '<p class="text-gray-400">No tiene depósitos aprobados.</p>';
                     } else {
                         depositsHtml = '<div class="space-y-1">';
                         approvedDeposits.forEach((d, i) => {
@@ -5365,7 +5365,7 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                     let withdrawsHtml = '';
                     let withdrawsTotalsHtml = '';
                     if (approvedWithdraws.length === 0) {
-                        withdrawsHtml = '<p class="text-gray-400">No hay retiros aprobados.</p>';
+                        withdrawsHtml = '<p class="text-gray-400">No tiene retiros aprobados.</p>';
                     } else {
                         withdrawsHtml = '<div class="space-y-1">';
                         approvedWithdraws.forEach((w, i) => {
