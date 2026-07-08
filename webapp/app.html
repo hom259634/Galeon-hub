@@ -796,13 +796,13 @@
             }
         }
 
-        function onShowWallet() {
+        async function onShowWallet() {
+            await fetchBalance();
             updateWithdrawTimeStatus();
             if (withdrawSection) withdrawSection.classList.add('hidden');
             document.getElementById('rechargeSection')?.classList.add('hidden');
             document.getElementById('transferSection')?.classList.add('hidden');
             resetTransferForm();
-            updateBalanceUI();
         }
 
         function getWithdrawAvailableBalance(currency) {
@@ -1431,6 +1431,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     loadReferralStats()
                 ]);
 
+                setInterval(fetchBalance, 15000);
+
                 globalLoader.classList.add('hidden');
                 mainContent.classList.remove('hidden');
 
@@ -1500,6 +1502,21 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
             } else {
                 withdrawCurrency.classList.add('hidden');
+            }
+        }
+
+        async function fetchBalance() {
+            if (!currentUser?.telegram_id) return;
+            try {
+                const res = await fetch(`/api/user/balance?telegram_id=${currentUser.telegram_id}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                currentUser.cup = data.cup;
+                currentUser.usd = data.usd;
+                currentUser.bonus_cup = data.bonus_cup;
+                updateBalanceUI();
+            } catch (e) {
+                // Silencio — no interrumpir al usuario si falla
             }
         }
 
@@ -1923,7 +1940,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
-        document.getElementById('rechargeBtn').addEventListener('click', () => {
+        document.getElementById('rechargeBtn').addEventListener('click', async () => {
+            await fetchBalance();
             document.getElementById('rechargeSection').classList.toggle('hidden');
             document.getElementById('withdrawSection').classList.add('hidden');
             document.getElementById('transferSection').classList.add('hidden');
@@ -1964,12 +1982,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
 
             resetWithdrawForm();
+            await fetchBalance();
             document.getElementById('withdrawSection').classList.toggle('hidden');
             document.getElementById('rechargeSection').classList.add('hidden');
             document.getElementById('transferSection').classList.add('hidden');
             resetTransferForm();
         });
-        document.getElementById('transferBtn').addEventListener('click', () => {
+        document.getElementById('transferBtn').addEventListener('click', async () => {
+            await fetchBalance();
             // Validar saldo para mostrar el formulario
             const totalCup = (parseFloat(currentUser?.cup) || 0) + (parseFloat(currentUser?.usd) || 0) * exchangeRates.rate;
             if (totalCup <= 0) {
