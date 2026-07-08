@@ -521,77 +521,125 @@ async function convertFromCUP(amountCUP, targetCurrency) {
 // ========== FETCH EXCHANGE RATES FROM EL TOQUE ==========
 const ELTOQUE_BASE = 'https://eltoque.com';
 
-async function fetchElToqueRates() {
-    try {
-        console.log('[ElToque] Fetching rates from elTOQUE...');
+async function fetchElToqueRates(retries = 3, baseDelay = 3000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            console.log(`[ElToque] Fetching rates from elTOQUE (intento ${attempt}/${retries})...`);
 
-        const { data: html } = await axios.get(`${ELTOQUE_BASE}/tasas-de-cambio-cuba`, {
-            timeout: 15000,
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-        });
+            const { data: html } = await axios.get(`${ELTOQUE_BASE}/tasas-de-cambio-cuba`, {
+                timeout: 20000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'es-CU,es;q=0.9,en;q=0.8'
+                }
+            });
 
-        // Extract the full trmiExchange JSON object by counting brace depth
-        const marker = '"trmiExchange":';
-        const startIdx = html.indexOf(marker);
-        if (startIdx === -1) {
-            console.error('[ElToque] Could not find trmiExchange marker in HTML');
-            return null;
-        }
+            // Try multiple markers to extract JSON data
+            const markers = ['__NEXT_DATA__', '"trmiExchange":', '"exchange":', 'window.__INITIAL_STATE__', 'window.__NUXT__'];
+            let parsed = null;
 
-        const jsonStart = html.indexOf('{', startIdx + marker.length);
-        if (jsonStart === -1) {
-            console.error('[ElToque] Could not find start of trmiExchange JSON');
-            return null;
-        }
+            for (const marker of markers) {
+                const startIdx = html.indexOf(marker);
+                if (startIdx === -1) continue;
 
-        let depth = 0;
-        let jsonEnd = jsonStart;
-        for (let i = jsonStart; i < html.length; i++) {
-            const ch = html[i];
-            if (ch === '{') depth++;
-            else if (ch === '}') {
-                depth--;
-                if (depth === 0) {
-                    jsonEnd = i + 1;
+                const jsonStart = html.indexOf('{', startIdx + marker.length);
+                if (jsonStart === -1) continue;
+
+                let depth = 0;
+                let jsonEnd = jsonStart;
+                for (let i = jsonStart; i < html.length; i++) {
+                    const ch = html[i];
+                    if (ch === '{') depth++;
+                    else if (ch === '}') {
+                        depth--;
+                        if (depth === 0) {
+                            jsonEnd = i + 1;
+                            break;
+                        }
+                    }
+                }
+
+                const jsonStr = html.substring(jsonStart, jsonEnd);
+                try {
+                    parsed = JSON.parse(jsonStr);
+                    console.log(`[ElToque] JSON extraído con marker: ${marker}`);
                     break;
+                } catch (e) {
+                    console.warn(`[ElToque] Error parseando JSON con marker ${marker}: ${e.message}`);
+                    continue;
                 }
             }
-        }
 
-        const jsonStr = html.substring(jsonStart, jsonEnd);
-        const trmiData = JSON.parse(jsonStr);
-        const stats = trmiData?.data?.api?.statistics;
-        if (!stats) {
-            console.error('[ElToque] Invalid data structure in JSON');
-            return null;
-        }
-
-        // Helper: choose rate based on whether currency is in main display list
-        const minMessages = trmiData?.data?.api?.info?.minMessages || 30;
-        const monedasSet = new Set((trmiData?.data?.monedas || []).map(m => m.short_db));
-        function getRate(currencyKey) {
-            const c = stats[currencyKey];
-            if (!c) return null;
-            // Currencies in the main display list: median if enough messages, else EMA
-            if (monedasSet.has(currencyKey)) {
-                return (c.count_messages >= minMessages) ? c.median : c.ema_value;
+            if (!parsed) {
+                console.error('[ElToque] No se pudo extraer JSON con ningún marker conocido');
+                if (attempt < retries) {
+                    const delay = baseDelay * Math.pow(2, attempt - 1);
+                    console.log(`[ElToque] Reintentando en ${delay}ms...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    continue;
+                }
+                return null;
             }
-            // Crypto (USDT_TRC20, TRX, etc.): median if available, else EMA
-            return c.median ?? c.ema_value;
+
+            // Navigate possible paths to find statistics
+            const stats =
+                parsed?.props?.pageProps?.trmiExchange?.data?.api?.statistics ||
+                parsed?.data?.api?.statistics ||
+                parsed?.statistics ||
+                parsed?.data?.statistics;
+            if (!stats) {
+                console.error('[ElToque] No se encontraron statistics en la estructura JSON');
+                if (attempt < retries) {
+                    const delay = baseDelay * Math.pow(2, attempt - 1);
+                    console.log(`[ElToque] Reintentando en ${delay}ms...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    continue;
+                }
+                return null;
+            }
+
+            const minMessages =
+                parsed?.props?.pageProps?.trmiExchange?.data?.api?.info?.minMessages ||
+                parsed?.data?.api?.info?.minMessages ||
+                parsed?.info?.minMessages ||
+                30;
+            const monedasSet = new Set(
+                (parsed?.props?.pageProps?.trmiExchange?.data?.monedas ||
+                    parsed?.data?.monedas ||
+                    parsed?.monedas ||
+                    [])
+                    .map(m => m.short_db)
+            );
+
+            function getRate(currencyKey) {
+                const c = stats[currencyKey];
+                if (!c) return null;
+                if (monedasSet.has(currencyKey)) {
+                    return (c.count_messages >= minMessages) ? c.median : c.ema_value;
+                }
+                return c.median ?? c.ema_value;
+            }
+
+            const usd = getRate('USD');
+            const mlc = getRate('MLC');
+            const usdt = getRate('USDT_TRC20');
+            const trx = getRate('TRX');
+
+            console.log(`[ElToque] USD=${usd}, MLC=${mlc}, USDT=${usdt}, TRX=${trx}`);
+
+            return { usd, mlc, usdt, trx };
+        } catch (e) {
+            console.error(`[ElToque] Error en intento ${attempt}/${retries}:`, e.message);
+            if (attempt < retries) {
+                const delay = baseDelay * Math.pow(2, attempt - 1);
+                console.log(`[ElToque] Reintentando en ${delay}ms...`);
+                await new Promise(r => setTimeout(r, delay));
+            }
         }
-
-        const usd = getRate('USD');
-        const mlc = getRate('MLC');
-        const usdt = getRate('USDT_TRC20');
-        const trx = getRate('TRX');
-
-        console.log(`[ElToque] USD=${usd}, MLC=${mlc}, USDT=${usdt}, TRX=${trx}`);
-
-        return { usd, mlc, usdt, trx };
-    } catch (e) {
-        console.error('[ElToque] Error fetching rates:', e.message);
-        return null;
     }
+    console.error('[ElToque] Todos los intentos fallaron.');
+    return null;
 }
 // ========== END FETCH EL TOQUE RATES ==========
 
@@ -1750,6 +1798,10 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
 });
 
 bot.action('withdraw', async (ctx) => {
+    // Refrescar saldo desde la BD
+    const { data: freshUser } = await supabase.from('users').select('*').eq('telegram_id', ctx.from.id).single();
+    if (freshUser) ctx.dbUser = freshUser;
+
     const available = await isWithdrawTime();
 
     if (!available) {
@@ -1880,6 +1932,10 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
 });
 
 bot.action('transfer', async (ctx) => {
+    // Refrescar saldo desde la BD
+    const { data: freshUser } = await supabase.from('users').select('*').eq('telegram_id', ctx.from.id).single();
+    if (freshUser) ctx.dbUser = freshUser;
+
     // Verificar que el usuario tenga saldo principal (sin contar el bono)
     const user = ctx.dbUser;
     const cup = parseFloat(user.cup) || 0;
@@ -2607,7 +2663,7 @@ bot.action('adm_view', async (ctx) => {
     witMethods?.forEach(m => text += `  ID ${m.id}: ${escapeHTML(m.name)} (${m.currency}) - ${escapeHTML(m.card)} / ${escapeHTML(m.confirm)} | Mín: ${m.min_amount !== null ? m.min_amount : '-'} | Máx: ${m.max_amount !== null ? m.max_amount : '-'}\n`);
     text += `\n🎲 <b>Precios por jugada (globales):</b>\n`;
     prices?.forEach(p => text += 
-        `  ${p.bet_type}: Pago x${p.payout_multiplier || 0}  |  Mín: ${p.min_cup||0} CUP / ${p.min_usd||0} USD  |  Máx: ${p.max_cup||'∞'} CUP / ${p.max_usd||'∞'} USD\n`
+        `  ${formatBetTypeLabel(p.bet_type)}: Pago x${p.payout_multiplier || 0}  |  Mín: ${p.min_cup||0} CUP / ${p.min_usd||0} USD  |  Máx: ${p.max_cup||'∞'} CUP / ${p.max_usd||'∞'} USD\n`
     );
     text += `\n🎁 <b>Bono de bienvenida:</b> ${bonusDefault} CUP\n`;
     text += `📈 <b>Comisión por referidos:</b> ${formatReferralPercent(refRate)}%\n`;
@@ -3967,14 +4023,15 @@ bot.on(message('text'), async (ctx) => {
 
         // Calcular amountUSD para mostrar y guardar en la base de datos
         let amountUSD = null;
-        if (currency === 'USD') {
+        if (currency === 'USD' || currency === 'USDT') {
             amountUSD = amount;
         } else if (currency === 'CUP') {
             const rate = await getExchangeRateUSD();
             amountUSD = amount / rate;
-        } else if (currency === 'USDT' || currency === 'TRX' || currency === 'MLC') {
-            // Por ahora asumimos 1:1 con USD
-            amountUSD = amount;
+        } else if (currency === 'TRX' || currency === 'MLC') {
+            const rates = await getExchangeRates();
+            const rateForCurrency = currency === 'TRX' ? rates.rate_trx : rates.rate_mlc;
+            amountUSD = amount * rateForCurrency / rates.rate;
         }
 
         session.withdrawAmount = amount;
@@ -4536,7 +4593,7 @@ bot.on(message('text'), async (ctx) => {
     // --- Flujo: transferencia - monto ---
     if (session.awaitingTransferAmount) {
         let transferDebitDone = false;
-        let transferOrigCup = 0, transferOrigUsd = 0;
+        let transferOrigCup = 0, transferOrigUsd = 0, debitedCup = 0, debitedUsd = 0;
         try {
         const parsed = parseAmountWithCurrency(text);
 
@@ -4602,6 +4659,8 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('❌ Error al validar saldo. Intenta nuevamente.', getMainKeyboard(ctx));
             return;
         }
+        debitedCup = cupDebit;
+        debitedUsd = usdDebit;
         // 4. Debitar origen usando el plan calculado
         transferOrigCup = parseFloat(user.cup) || 0;
         transferOrigUsd = parseFloat(user.usd) || 0;
@@ -4676,9 +4735,9 @@ bot.on(message('text'), async (ctx) => {
                 if (isCompletelyNew && currency === 'USD') {
                     const transferWorthCUP = amount * rateUSD;
                     finalUsd += amount;
-                    finalCup += originalTargetBonus;
-                    bonusMovedCup = originalTargetBonus; // ✅ solo el bono previo
-                    finalBonus = 0
+                    finalCup += originalTargetBonus + transferWorthCUP;
+                    bonusMovedCup = originalTargetBonus;
+                    finalBonus = 0;
                 } else {
                     finalCup += finalBonus;
                     bonusMovedCup = originalTargetBonus;
@@ -4753,9 +4812,11 @@ bot.on(message('text'), async (ctx) => {
         console.error('Error en flujo de transferencia (bot):', transferErr?.message || transferErr);
         if (transferDebitDone) {
             try {
+                const { data: cur } = await supabase.from('users')
+                    .select('cup, usd').eq('telegram_id', uid).single();
                 await supabase.from('users').update({
-                    cup: transferOrigCup,
-                    usd: transferOrigUsd,
+                    cup: (parseFloat(cur?.cup) || 0) + debitedCup,
+                    usd: (parseFloat(cur?.usd) || 0) + debitedUsd,
                     updated_at: new Date()
                 }).eq('telegram_id', uid);
             } catch (rollbackErr) {
@@ -5660,56 +5721,59 @@ cron.schedule('30 8 * * *', async () => {
     try {
         console.log('[Tasas ElToque] Ejecutando actualización diaria de tasas...');
 
-        const rates = await fetchElToqueRates();
-        if (!rates || (!rates.usd && !rates.mlc && !rates.usdt && !rates.trx)) {
-            console.error('[Tasas ElToque] No se pudieron obtener tasas, se cancela la actualización.');
-            return;
-        }
-
         const now = moment().tz(TIMEZONE);
         const dateStr = now.format('DD/MM/YYYY');
         const timeStr = now.format('h:mm A');
 
-        // Actualizar solo las tasas que se obtuvieron correctamente
-        if (rates.usd) await setExchangeRateUSD(rates.usd);
-        if (rates.mlc) await setExchangeRateMLC(rates.mlc);
-        if (rates.usdt) await setExchangeRateUSDT(rates.usdt);
-        if (rates.trx) await setExchangeRateTRX(rates.trx);
+        const rates = await fetchElToqueRates();
+        const fetchOk = rates && (rates.usd != null || rates.mlc != null || rates.usdt != null || rates.trx != null);
 
-        console.log(`[Tasas ElToque] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
+        if (fetchOk) {
+            // Actualizar solo las tasas que se obtuvieron correctamente
+            if (rates.usd) await setExchangeRateUSD(rates.usd);
+            if (rates.mlc) await setExchangeRateMLC(rates.mlc);
+            if (rates.usdt) await setExchangeRateUSDT(rates.usdt);
+            if (rates.trx) await setExchangeRateTRX(rates.trx);
 
-        await updateDepositMinimums();
+            console.log(`[Tasas ElToque] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
+
+            await updateDepositMinimums();
+        } else {
+            console.error('[Tasas ElToque] No se pudieron obtener tasas nuevas. Usando tasas actuales de la BD.');
+        }
+
+        // Usar tasas actuales de la BD para el mensaje (sean nuevas o anteriores)
+        const currentRates = await getExchangeRates();
 
         // Construir mensaje de broadcast
         const prev = bot.lastBroadcastRates;
         const lines = [
             '💹 Tasas de Cambio del Día',
-            `🕐 Actualizado en tiempo real: ${dateStr} ${timeStr}`,
-            'Fuente: eltoque.com',
+            `🕐 ${fetchOk ? 'Actualizado en tiempo real' : 'Últimas tasas disponibles'}: ${dateStr} ${timeStr}`,
+            fetchOk ? 'Fuente: eltoque.com' : '⚠️ No se pudieron actualizar las tasas automáticamente',
             '',
             'Mercado Informal',
         ];
 
-        if (rates.usd) lines.push(`💵 USD: ${rates.usd.toFixed(2)} CUP${formatRateDelta(prev ? rates.usd - prev.rate : null)}`);
-        if (rates.usdt) lines.push(`🪙 USDT: ${rates.usdt.toFixed(2)} CUP${formatRateDelta(prev ? rates.usdt - prev.rate_usdt : null)}`);
-        if (rates.trx) lines.push(`🪙 TRX: ${rates.trx.toFixed(2)} CUP${formatRateDelta(prev ? rates.trx - prev.rate_trx : null)}`);
-        if (rates.mlc) lines.push(`🏦 MLC: ${rates.mlc.toFixed(2)} CUP${formatRateDelta(prev ? rates.mlc - prev.rate_mlc : null)}`);
+        lines.push(`💵 USD: ${currentRates.rate.toFixed(2)} CUP${formatRateDelta(prev ? currentRates.rate - prev.rate : null)}`);
+        lines.push(`🪙 USDT: ${currentRates.rate_usdt.toFixed(2)} CUP${formatRateDelta(prev ? currentRates.rate_usdt - prev.rate_usdt : null)}`);
+        lines.push(`🪙 TRX: ${currentRates.rate_trx.toFixed(2)} CUP${formatRateDelta(prev ? currentRates.rate_trx - prev.rate_trx : null)}`);
+        lines.push(`🏦 MLC: ${currentRates.rate_mlc.toFixed(2)} CUP${formatRateDelta(prev ? currentRates.rate_mlc - prev.rate_mlc : null)}`);
 
         lines.push('');
-        lines.push('📊 Tasas actualizadas.');
+        lines.push(`📊 Tasas ${fetchOk ? 'actualizadas' :'vigentes'}.`);
         lines.push('');
         lines.push('🔄 ¡Listo para tus transacciones!');
 
         const message = lines.join('\n');
         await broadcastToAllUsers(message);
-        console.log('[Tasas ElToque] Broadcast enviado correctamente.');
+        console.log(`[Tasas ElToque] Broadcast enviado correctamente (${fetchOk ? 'tasas nuevas' : 'tasas vigentes'}).`);
 
-        const updatedRates = await getExchangeRates();
         bot.lastBroadcastRates = {
-            rate: updatedRates.rate,
-            rate_usdt: updatedRates.rate_usdt,
-            rate_trx: updatedRates.rate_trx,
-            rate_mlc: updatedRates.rate_mlc
+            rate: currentRates.rate,
+            rate_usdt: currentRates.rate_usdt,
+            rate_trx: currentRates.rate_trx,
+            rate_mlc: currentRates.rate_mlc
         };
     } catch (e) {
         console.error('[Tasas ElToque] Error en cron 8:30 AM:', e.message);

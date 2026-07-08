@@ -1101,6 +1101,19 @@ app.get('/api/exchange-rates', async (req, res) => {
     res.json(rates);
 });
 
+// --- Balance del usuario ---
+app.get('/api/user/balance', async (req, res) => {
+    const telegram_id = parseInt(req.query.telegram_id);
+    if (!telegram_id) return res.status(400).json({ error: 'telegram_id es requerido' });
+    const { data, error } = await supabase
+        .from('users')
+        .select('cup, usd, bonus_cup')
+        .eq('telegram_id', telegram_id)
+        .single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ cup: data.cup, usd: data.usd, bonus_cup: data.bonus_cup });
+});
+
 // --- Mínimo depósito ---
 app.get('/api/config/min-deposit', async (req, res) => {
     const usd = await getMinDepositUSD();
@@ -1279,6 +1292,14 @@ app.post('/api/withdraw-requests', async (req, res) => {
         return res.status(400).json({ error: 'Faltan datos' });
     }
 
+    if (!await isWithdrawTime()) {
+        const start = await getWithdrawTimeStart();
+        const end = await getWithdrawTimeEnd();
+        const startStr = moment.tz(TIMEZONE).startOf('day').add(start, 'hours').format('h:mm A');
+        const endStr = moment.tz(TIMEZONE).startOf('day').add(end, 'hours').format('h:mm A');
+        return res.status(400).json({ error: `⏰ Los retiros están disponibles de ${startStr} a ${endStr} (hora Cuba). Por favor, intenta en ese horario.` });
+    }
+
     const user = await getOrCreateUser(parseInt(userId));
     const { data: method } = await supabase
         .from('withdraw_methods')
@@ -1292,6 +1313,14 @@ app.post('/api/withdraw-requests', async (req, res) => {
 
     if (method.currency !== currency) {
         return res.status(400).json({ error: `La moneda del método es ${method.currency}, no coincide.` });
+    }
+
+    const idempotencyKey = req.body.idempotencyKey || req.headers['x-idempotency-key'];
+    if (idempotencyKey) {
+        const cached = transferIdempotencyStore.get(idempotencyKey);
+        if (cached) {
+            return res.json(cached.response);
+        }
     }
 
     // Regla: USD solo se retira desde saldo USD.
@@ -1328,7 +1357,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
 
     // Calcular amount_usd igual que en el bot
     let amount_usd = null;
-    if (currency === 'USD') {
+    if (currency === 'USD' || currency === 'USDT') {
         amount_usd = parseFloat(amount);
     } else if (currency === 'CUP') {
         // Obtener tasa USD
@@ -1338,8 +1367,10 @@ app.post('/api/withdraw-requests', async (req, res) => {
             .single();
         const rate = rateData?.rate_usd || 1;
         amount_usd = parseFloat(amount) / rate;
-    } else if (currency === 'USDT' || currency === 'TRX' || currency === 'MLC') {
-        amount_usd = parseFloat(amount); // Asumimos 1:1
+    } else if (currency === 'TRX' || currency === 'MLC') {
+        const rates = await getExchangeRates();
+        const rateForCurrency = currency === 'TRX' ? rates.rate_trx : rates.rate_mlc;
+        amount_usd = parseFloat(amount) * rateForCurrency / rates.rate;
     }
 
     // Safety check: re-verificar justo antes del insert para cerrar la ventana de race condition
@@ -1396,7 +1427,11 @@ app.post('/api/withdraw-requests', async (req, res) => {
     }
     if (wdEntries.length > 0) pendingNotifications.set(wdKey, wdEntries);
 
-    res.json({ success: true, requestId: request.id });
+    const responseData = { success: true, requestId: request.id };
+    if (idempotencyKey) {
+        transferIdempotencyStore.set(idempotencyKey, { response: responseData, timestamp: Date.now() });
+    }
+    res.json(responseData);
 });
 
 // --- Transferencia entre usuarios ---
@@ -1450,6 +1485,7 @@ app.post('/api/transfer', async (req, res) => {
 
     // Estado para rollback
     let debitDone = false;
+    let debitedCup = 0, debitedUsd = 0;
     const originalCup = parseFloat(userFrom.cup) || 0;
     const originalUsd = parseFloat(userFrom.usd) || 0;
 
@@ -1504,6 +1540,8 @@ app.post('/api/transfer', async (req, res) => {
         })
         .eq('telegram_id', from);
     debitDone = true;
+    debitedCup = debitPlan.cupDebit || 0;
+    debitedUsd = debitPlan.usdDebit || 0;
 
     // ---------- ACREDITAR AL RECEPTOR (LÓGICA ROBUSTA) ----------
     const { data: freshTarget } = await supabase
@@ -1566,13 +1604,11 @@ app.post('/api/transfer', async (req, res) => {
         if (totalEquivalentCUP >= thresholdForBonusMigration - 0.001) {
             // Determinar cuánto bono proviene de esta transferencia (si la hubo)
             if (isCompletelyNew && currency === 'USD') {
-                // Transferencia en USD a un nuevo: revertir la conversión a CUP
-                // y dejar la transferencia en USD, el resto del bono (si había) pasa a CUP
                 const transferWorthCUP = parsedAmount * rateUSD;
 
-                finalUsd += parsedAmount;            // la transferencia en USD
-                finalCup += originalTargetBonus;      // bono anterior → CUP
-                bonusMovedCup = originalTargetBonus; // ✅ solo el bono previo
+                finalUsd += parsedAmount;
+                finalCup += originalTargetBonus + transferWorthCUP;
+                bonusMovedCup = originalTargetBonus;
                 finalBonus = 0;
             } else {
                 // Caso general: todo el bono pasa a CUP
@@ -1646,9 +1682,11 @@ app.post('/api/transfer', async (req, res) => {
         console.error('Error en POST /api/transfer:', e?.message || e);
         if (debitDone) {
             try {
+                const { data: cur } = await supabase.from('users')
+                    .select('cup, usd').eq('telegram_id', from).single();
                 await supabase.from('users').update({
-                    cup: originalCup,
-                    usd: originalUsd,
+                    cup: (parseFloat(cur?.cup) || 0) + debitedCup,
+                    usd: (parseFloat(cur?.usd) || 0) + debitedUsd,
                     updated_at: new Date()
                 }).eq('telegram_id', from);
             } catch (rollbackErr) {
