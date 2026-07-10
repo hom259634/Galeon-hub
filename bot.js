@@ -526,14 +526,41 @@ async function fetchElToqueRates(retries = 3, baseDelay = 3000) {
         try {
             console.log(`[ElToque] Fetching rates from elTOQUE (intento ${attempt}/${retries})...`);
 
-            const { data: html } = await axios.get(`${ELTOQUE_BASE}/tasas-de-cambio-cuba`, {
+            const resp = await axios.get(`${ELTOQUE_BASE}/tasas-de-cambio-cuba`, {
                 timeout: 20000,
+                decompress: true,
+                validateStatus: status => status < 400 || status === 403,
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'es-CU,es;q=0.9,en;q=0.8'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'Accept-Language': 'es-CU,es;q=0.9,en;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                    'Sec-Ch-Ua': '"Not/A)Brand";v="99", "Google Chrome";v="127", "Chromium";v="127"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Upgrade-Insecure-Requests': '1'
                 }
             });
+
+            if (resp.status === 403) {
+                const snippet = (resp.data || '').substring(0, 800);
+                console.error(`[ElToque] HTTP 403 - Cloudflare bloqueó la solicitud. Body: ${snippet}`);
+                if (attempt < retries) {
+                    const delay = baseDelay * Math.pow(2, attempt - 1);
+                    console.log(`[ElToque] Reintentando en ${delay}ms...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    continue;
+                }
+                return null;
+            }
+
+            const html = resp.data;
 
             // Try multiple markers to extract JSON data
             const markers = ['__NEXT_DATA__', '"trmiExchange":', '"exchange":', 'window.__INITIAL_STATE__', 'window.__NUXT__'];
@@ -749,7 +776,7 @@ async function getUser(telegramId, firstName = '', username = null, ctx = null) 
                 const hasApprovedDeposit = await userHasApprovedDeposit(telegramId);
                 if (hasApprovedDeposit && bonusAmt > 0) {
                     const newCup = cupAmt + bonusAmt;
-                    await supabase.from('users').update({ cup: newCup, bonus_cup: 0, bonus_updated_by_admin: new Date(), updated_at: new Date() }).eq('telegram_id', telegramId);
+                    await supabase.from('users').update({ cup: newCup, bonus_cup: 0, bonus_updated_by_admin: null, updated_at: new Date() }).eq('telegram_id', telegramId);
                     user.cup = newCup;
                     user.bonus_cup = 0;
                 }
@@ -768,7 +795,7 @@ async function getUser(telegramId, firstName = '', username = null, ctx = null) 
                         await supabase.from('users').update({
                             cup: newCup2,
                             bonus_cup: 0,
-                            bonus_updated_by_admin: new Date(),
+                            bonus_updated_by_admin: null,
                             updated_at: new Date()
                         }).eq('telegram_id', telegramId);
                         user.cup = newCup2;
@@ -1801,6 +1828,28 @@ bot.action('withdraw', async (ctx) => {
     // Refrescar saldo desde la BD
     const { data: freshUser } = await supabase.from('users').select('*').eq('telegram_id', ctx.from.id).single();
     if (freshUser) ctx.dbUser = freshUser;
+
+    // Limpiar cualquier session state de retiros previos para evitar interferencias
+    const session = ctx.session;
+    if (session) {
+        delete session.awaitingWithdrawAmount;
+        delete session.withdrawMethod;
+        delete session.withdrawTemplateKey;
+        delete session.withdrawAmount;
+        delete session.withdrawCurrency;
+        delete session.withdrawAmountUSD;
+        delete session.awaitingWithdrawWallet;
+        delete session.withdrawWallet;
+        delete session.awaitingWithdrawNetwork;
+        delete session.withdrawNetwork;
+        delete session.awaitingWithdrawAccountCard;
+        delete session.withdrawAccountCard;
+        delete session.awaitingWithdrawAccountMobile;
+        delete session.withdrawAccountMobile;
+        delete session.awaitingWithdrawAccount;
+        delete session.withdrawRequest;
+        delete session.withdrawFlowAllowed;
+    }
 
     const available = await isWithdrawTime();
 
@@ -2920,7 +2969,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
                     bonusMovedCup = bonusVal;
                 }
 
-                const updatePayload = { usd: newUsd, cup: newCup, updated_at: new Date() };
+                const updatePayload = { usd: newUsd, cup: newCup, bonus_updated_by_admin: null, updated_at: new Date() };
                 if (bonusMovedCup > 0) updatePayload.bonus_cup = 0;
 
                 await supabase
@@ -2936,7 +2985,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
                 const newCup = result.beforeCup + totalPremioCUP;
                 await supabase
                     .from('users')
-                    .update({ usd: newUsd, cup: newCup, updated_at: new Date() })
+                    .update({ usd: newUsd, cup: newCup, bonus_updated_by_admin: null, updated_at: new Date() })
                     .eq('telegram_id', userId);
             }
         }
@@ -4005,6 +4054,22 @@ bot.on(message('text'), async (ctx) => {
 
         const debitPlan = await buildRealBalanceDebitPlan(user, amount, currency);
         if (!debitPlan.ok) {
+            delete session.awaitingWithdrawAmount;
+            delete session.withdrawMethod;
+            delete session.withdrawTemplateKey;
+            delete session.withdrawAmount;
+            delete session.withdrawCurrency;
+            delete session.withdrawAmountUSD;
+            delete session.awaitingWithdrawWallet;
+            delete session.withdrawWallet;
+            delete session.awaitingWithdrawNetwork;
+            delete session.withdrawNetwork;
+            delete session.awaitingWithdrawAccountCard;
+            delete session.withdrawAccountCard;
+            delete session.awaitingWithdrawAccountMobile;
+            delete session.withdrawAccountMobile;
+            delete session.awaitingWithdrawAccount;
+            delete session.withdrawFlowAllowed;
             await ctx.reply(
                 `${debitPlan.errorMessage || `❌ Saldo insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP.`}`,
                 getMainKeyboard(ctx)
@@ -4751,6 +4816,7 @@ bot.on(message('text'), async (ctx) => {
             cup: finalCup,
             usd: finalUsd,
             bonus_cup: finalBonus,
+            bonus_updated_by_admin: null,
             updated_at: new Date()
         };
         await supabase.from('users').update(targetUpdate).eq('telegram_id', targetUserId);
@@ -4817,6 +4883,7 @@ bot.on(message('text'), async (ctx) => {
                 await supabase.from('users').update({
                     cup: (parseFloat(cur?.cup) || 0) + debitedCup,
                     usd: (parseFloat(cur?.usd) || 0) + debitedUsd,
+                    bonus_updated_by_admin: null,
                     updated_at: new Date()
                 }).eq('telegram_id', uid);
             } catch (rollbackErr) {
@@ -5041,7 +5108,7 @@ bot.on(message('text'), async (ctx) => {
                             const updatePayload = { updated_at: new Date() };
                             if (newCup !== (parseFloat(referrer.cup) || 0)) updatePayload.cup = newCup;
                             if (newBonus !== (parseFloat(referrer.bonus_cup) || 0)) updatePayload.bonus_cup = newBonus;
-                            if (bonusMovedCup > 0) updatePayload.bonus_updated_by_admin = new Date();
+                            if (newCup > (parseFloat(referrer.cup) || 0)) updatePayload.bonus_updated_by_admin = null;
 
                             await supabase
                                 .from('users')
@@ -5320,13 +5387,13 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
             const newUsd = (parseFloat(user.usd) || 0) + depositAmount;
             await supabase
                 .from('users')
-                .update({ usd: newUsd, updated_at: new Date() })
+                .update({ usd: newUsd, bonus_updated_by_admin: null, updated_at: new Date() })
                 .eq('telegram_id', request.user_id);
         } else {
             const newCup = (parseFloat(user.cup) || 0) + amountCUP;
             await supabase
                 .from('users')
-                .update({ cup: newCup, updated_at: new Date() })
+                .update({ cup: newCup, bonus_updated_by_admin: null, updated_at: new Date() })
                 .eq('telegram_id', request.user_id);
         }
 
@@ -5342,7 +5409,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                 const newCupAfterBonus = (parseFloat(updatedUser?.cup) || 0) + bonus;
                 await supabase
                     .from('users')
-                    .update({ cup: newCupAfterBonus, bonus_cup: 0, bonus_updated_by_admin: new Date(), updated_at: new Date() })
+                    .update({ cup: newCupAfterBonus, bonus_cup: 0, bonus_updated_by_admin: null, updated_at: new Date() })
                     .eq('telegram_id', request.user_id);
 
                 bonusMovedCup = bonus;
