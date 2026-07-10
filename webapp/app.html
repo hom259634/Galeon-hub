@@ -919,6 +919,8 @@
             const modal = document.getElementById('discardEditModal');
             if (modal) modal.classList.add('hidden');
             delete window._pendingReset;
+            window.editingBetId = null;
+            if (submitBetBtn) submitBetBtn.innerHTML = defaultSubmitBetBtnHtml;
         }
 
         // Exponer a scope global para que los botones inline onclick funcionen
@@ -1855,6 +1857,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     if (typeBtn) {
                         typeBtn.click();
                         setTimeout(() => {
+                            // Solo activar modo edición si la sesión está activa y el tipo se seleccionó
+                            if (!activeSession || selectedBetType !== bet.bet_type) return;
                             betInput.value = bet.raw_text;
                             betInput.dispatchEvent(new Event('input'));
                             // marcar que estamos editando para que el submit incluya betId
@@ -5026,14 +5030,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     bannedAt = d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
                 }
                 const bonusUpdatedByAdmin = !!u.bonus_updated_by_admin;
-                openBalanceModal(telegramId, displayName, cupVal, usdVal, bonusVal, banned, bannedAt, u.username, !!u.is_superadmin, !!u.is_staff, bonusUpdatedByAdmin);
+                const hasHadPrincipalBalance = !!u.hasHadPrincipalBalance;
+                openBalanceModal(telegramId, displayName, cupVal, usdVal, bonusVal, banned, bannedAt, u.username, !!u.is_superadmin, !!u.is_staff, bonusUpdatedByAdmin, hasHadPrincipalBalance);
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión al cargar datos del usuario' });
                 adminModal.classList.add('hidden');
             }
         };
 
-        window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false, bannedAt = '', username = '', isTargetSuperadmin = false, isTargetStaff = false, bonusUpdatedByAdmin = false) => {
+        window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false, bannedAt = '', username = '', isTargetSuperadmin = false, isTargetStaff = false, bonusUpdatedByAdmin = false, hasHadPrincipalBalance = false) => {
             const canManage = true;
             const showBanButton = canManage;
             const showDeleteButton = canManage && (isAdmin || userRoles.includes('user_deleter'));
@@ -5064,7 +5069,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <button onclick="adjustBalance(${telegramId}, 'usd', 5)" class="bg-green-600 px-3 rounded-lg">+5</button>
                         </div>
                     </div>
-                    ${(cup === 0 && usd === 0 && (bonus > 0 || (bonus === 0 && bonusUpdatedByAdmin))) ? `
+                    ${((bonus > 0 || (bonus === 0 && bonusUpdatedByAdmin))) ? `
                     <div>
                         <label class="block text-sm mb-1">🎁 Bono (CUP)</label>
                         <div class="flex gap-2">
