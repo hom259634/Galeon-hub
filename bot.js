@@ -670,6 +670,89 @@ async function fetchElToqueRates(retries = 3, baseDelay = 3000) {
 }
 // ========== END FETCH EL TOQUE RATES ==========
 
+// ========== FETCH TASAS DESDE TELEGRAM @eltoquecom ==========
+async function fetchTelegramRates(retries = 2, baseDelay = 2000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            console.log(`[Telegram] Fetching rates from @eltoquecom (intento ${attempt}/${retries})...`);
+
+            const resp = await axios.get('https://t.me/s/eltoquecom', {
+                timeout: 15000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'es-CU,es;q=0.9,en;q=0.8',
+                }
+            });
+
+            if (resp.status !== 200) {
+                console.error(`[Telegram] HTTP ${resp.status}`);
+                if (attempt < retries) {
+                    await new Promise(r => setTimeout(r, baseDelay * attempt));
+                    continue;
+                }
+                return null;
+            }
+
+            const html = resp.data;
+
+            // Buscar el último mensaje que contenga "Actualización de tasas" o "tasa representativa"
+            // El formato típico es:
+            // EUR: XXX.XX CUP
+            // USD: XXX.XX CUP
+            // MLC: XXX.XX CUP
+            // Buscamos desde el final hacia atrás para obtener el más reciente
+            const markers = ['Actualización de tasas', 'tasa representativa', 'Tasa representativa'];
+            let lastIdx = -1;
+            for (const marker of markers) {
+                const idx = html.lastIndexOf(marker);
+                if (idx > lastIdx) lastIdx = idx;
+            }
+
+            if (lastIdx === -1) {
+                console.error('[Telegram] No se encontró mensaje de tasas en el canal');
+                if (attempt < retries) {
+                    await new Promise(r => setTimeout(r, baseDelay * attempt));
+                    continue;
+                }
+                return null;
+            }
+
+            // Tomar una ventana de 2000 caracteres desde el marcador
+            const window = html.substring(lastIdx, lastIdx + 2000);
+
+            const usdMatch = window.match(/USD[:\s]*([\d,.]+)\s*CUP/i);
+            const mlcMatch = window.match(/MLC[:\s]*([\d,.]+)\s*CUP/i);
+            const eurMatch = window.match(/EUR[:\s]*([\d,.]+)\s*CUP/i);
+
+            const usd = usdMatch ? parseFloat(usdMatch[1].replace(/,/g, '')) : null;
+            const mlc = mlcMatch ? parseFloat(mlcMatch[1].replace(/,/g, '')) : null;
+            const eur = eurMatch ? parseFloat(eurMatch[1].replace(/,/g, '')) : null;
+
+            console.log(`[Telegram] Tasas extraídas: USD=${usd}, MLC=${mlc}, EUR=${eur}`);
+
+            if (usd == null && mlc == null) {
+                console.error('[Telegram] No se pudieron extraer USD ni MLC');
+                if (attempt < retries) {
+                    await new Promise(r => setTimeout(r, baseDelay * attempt));
+                    continue;
+                }
+                return null;
+            }
+
+            return { usd, mlc, eur, usdt: null, trx: null };
+        } catch (e) {
+            console.error(`[Telegram] Error en intento ${attempt}/${retries}:`, e.message);
+            if (attempt < retries) {
+                await new Promise(r => setTimeout(r, baseDelay * attempt));
+            }
+        }
+    }
+    console.error('[Telegram] Todos los intentos fallaron.');
+    return null;
+}
+// ========== END FETCH TELEGRAM RATES ==========
+
 async function buildCrossCurrencyDebitPlan(user, amount, currency) {
     const cupBalance = parseFloat(user?.cup) || 0;
     const usdBalance = parseFloat(user?.usd) || 0;
@@ -4054,22 +4137,6 @@ bot.on(message('text'), async (ctx) => {
 
         const debitPlan = await buildRealBalanceDebitPlan(user, amount, currency);
         if (!debitPlan.ok) {
-            delete session.awaitingWithdrawAmount;
-            delete session.withdrawMethod;
-            delete session.withdrawTemplateKey;
-            delete session.withdrawAmount;
-            delete session.withdrawCurrency;
-            delete session.withdrawAmountUSD;
-            delete session.awaitingWithdrawWallet;
-            delete session.withdrawWallet;
-            delete session.awaitingWithdrawNetwork;
-            delete session.withdrawNetwork;
-            delete session.awaitingWithdrawAccountCard;
-            delete session.withdrawAccountCard;
-            delete session.awaitingWithdrawAccountMobile;
-            delete session.withdrawAccountMobile;
-            delete session.awaitingWithdrawAccount;
-            delete session.withdrawFlowAllowed;
             await ctx.reply(
                 `${debitPlan.errorMessage || `❌ Saldo insuficiente. Disponible: ${debitPlan.totalAvailableCUP.toFixed(2)} CUP.`}`,
                 getMainKeyboard(ctx)
@@ -5792,7 +5859,14 @@ cron.schedule('30 8 * * *', async () => {
         const dateStr = now.format('DD/MM/YYYY');
         const timeStr = now.format('h:mm A');
 
-        const rates = await fetchElToqueRates();
+        // Primero intentar desde eltoque.com, fallback a Telegram @eltoquecom
+        let rates = await fetchElToqueRates();
+        let usedFallback = false;
+        if (!rates || (rates.usd == null && rates.mlc == null && rates.usdt == null && rates.trx == null)) {
+            console.log('[Tasas] ElToque falló, intentando Telegram @eltoquecom...');
+            rates = await fetchTelegramRates();
+            usedFallback = true;
+        }
         const fetchOk = rates && (rates.usd != null || rates.mlc != null || rates.usdt != null || rates.trx != null);
 
         if (fetchOk) {
@@ -5802,11 +5876,11 @@ cron.schedule('30 8 * * *', async () => {
             if (rates.usdt) await setExchangeRateUSDT(rates.usdt);
             if (rates.trx) await setExchangeRateTRX(rates.trx);
 
-            console.log(`[Tasas ElToque] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
+            console.log(`[Tasas] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
 
             await updateDepositMinimums();
         } else {
-            console.error('[Tasas ElToque] No se pudieron obtener tasas nuevas. Usando tasas actuales de la BD.');
+            console.error('[Tasas] No se pudieron obtener tasas nuevas. Usando tasas actuales de la BD.');
         }
 
         // Usar tasas actuales de la BD para el mensaje (sean nuevas o anteriores)
@@ -5817,7 +5891,7 @@ cron.schedule('30 8 * * *', async () => {
         const lines = [
             '💹 Tasas de Cambio del Día',
             `🕐 ${fetchOk ? 'Actualizado en tiempo real' : 'Últimas tasas disponibles'}: ${dateStr} ${timeStr}`,
-            fetchOk ? 'Fuente: eltoque.com' : '⚠️ No se pudieron actualizar las tasas automáticamente',
+            'Fuente: eltoque.com',
             '',
             'Mercado Informal',
         ];
@@ -5834,7 +5908,7 @@ cron.schedule('30 8 * * *', async () => {
 
         const message = lines.join('\n');
         await broadcastToAllUsers(message);
-        console.log(`[Tasas ElToque] Broadcast enviado correctamente (${fetchOk ? 'tasas nuevas' : 'tasas vigentes'}).`);
+        console.log(`[Tasas] Broadcast enviado correctamente (${fetchOk ? 'tasas nuevas' : 'tasas vigentes'}).`);
 
         bot.lastBroadcastRates = {
             rate: currentRates.rate,
@@ -5843,7 +5917,7 @@ cron.schedule('30 8 * * *', async () => {
             rate_mlc: currentRates.rate_mlc
         };
     } catch (e) {
-        console.error('[Tasas ElToque] Error en cron 8:30 AM:', e.message);
+        console.error('[Tasas] Error en cron 8:30 AM:', e.message);
     }
 }, { timezone: TIMEZONE });
 
