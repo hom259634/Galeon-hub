@@ -793,6 +793,35 @@ function formatBetTypeLabel(betType) {
     return labels[String(betType || '').toLowerCase()] || (betType || 'N/D');
 }
 
+// ========== VALIDACIÓN DE LÍMITES ACUMULADOS POR NÚMERO ==========
+function validateBetLimits(items, betType, priceData) {
+    const maxCup = priceData?.max_cup;
+    const maxUsd = priceData?.max_usd;
+    if (maxCup === null && maxUsd === null) return { ok: true };
+
+    const grouped = {};
+    for (const item of items) {
+        const num = betType === 'parle'
+            ? (normalizeParleValue(item.numero) || item.numero)
+            : item.numero;
+        const cup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+        const usd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+        if (!grouped[num]) grouped[num] = { cup: 0, usd: 0 };
+        grouped[num].cup += cup;
+        grouped[num].usd += usd;
+    }
+
+    for (const [num, totals] of Object.entries(grouped)) {
+        if (maxCup !== null && totals.cup > 0 && totals.cup > parseFloat(maxCup)) {
+            return { ok: false, error: `❌ El número ${num} excede el máximo de ${parseFloat(maxCup).toFixed(2)} CUP (total: ${totals.cup.toFixed(2)})` };
+        }
+        if (maxUsd !== null && totals.usd > 0 && totals.usd > parseFloat(maxUsd)) {
+            return { ok: false, error: `❌ El número ${num} excede el máximo de ${parseFloat(maxUsd).toFixed(2)} USD (total: ${totals.usd.toFixed(2)})` };
+        }
+    }
+    return { ok: true };
+}
+
 // ========== FUNCIONES DE PARSEO DE APUESTAS ==========
 function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
@@ -810,6 +839,11 @@ function parseBetLine(line, betType) {
     if (betType === 'parle') {
         const pairs = Array.from(numerosStr.matchAll(/(\d{2})\s*x\s*(\d{2})/gi));
         if (pairs.length) {
+            // Rechazar si los pares están concatenados sin espacio/coma entre ellos
+            const reconstructed = pairs.map(p => `${p[1]}x${p[2]}`).join('');
+            if (pairs.length > 1 && reconstructed !== numerosStr.replace(/\s/g, '')) {
+                return [];
+            }
             numeros = pairs.map(p => `${p[1]}x${p[2]}`);
         } else {
             numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
@@ -1724,7 +1758,7 @@ app.post('/api/bets', async (req, res) => {
     const user = await getOrCreateUser(parseInt(userId));
     const parsed = parseBetMessage(rawText, betType);
     if (!parsed.ok) {
-        return res.status(400).json({ error: 'No se pudo interpretar la apuesta' });
+        return res.status(400).json({ error: 'No se pudo interpretar la apuesta.' });
     }
 
     const totalUSD = parsed.totalUSD;
@@ -1741,22 +1775,23 @@ app.post('/api/bets', async (req, res) => {
 
     const minCup = priceData?.min_cup || 0;
     const minUsd = priceData?.min_usd || 0;
-    const maxCup = priceData?.max_cup;
-    const maxUsd = priceData?.max_usd;
 
+    // Validar mínimos por ítem individual
     for (const item of parsed.items) {
-        // soportar dos formatos: {currency, amount} (backend) y {usd,cup} (frontend)
         const itCup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
         const itUsd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+        if (itCup > 0 && minCup && itCup < parseFloat(minCup)) {
+            return res.status(400).json({ error: `❌ Mínimo en CUP: ${parseFloat(minCup).toFixed(2)}` });
+        }
+        if (itUsd > 0 && minUsd && itUsd < parseFloat(minUsd)) {
+            return res.status(400).json({ error: `❌ Mínimo en USD: ${parseFloat(minUsd).toFixed(2)}` });
+        }
+    }
 
-        if (itCup > 0) {
-            if (itCup < minCup) return res.status(400).json({ error: `❌ Mínimo en CUP: ${parseFloat(minCup).toFixed(2)}` });
-            if (maxCup !== null && itCup > maxCup) return res.status(400).json({ error: `❌ Máximo en CUP: ${parseFloat(maxCup).toFixed(2)}` });
-        }
-        if (itUsd > 0) {
-            if (itUsd < minUsd) return res.status(400).json({ error: `❌ Mínimo en USD: ${parseFloat(minUsd).toFixed(2)}` });
-            if (maxUsd !== null && itUsd > maxUsd) return res.status(400).json({ error: `❌ Máximo en USD: ${parseFloat(maxUsd).toFixed(2)}` });
-        }
+    // Validar máximos acumulados por número único
+    const limitCheck = validateBetLimits(parsed.items, betType, priceData);
+    if (!limitCheck.ok) {
+        return res.status(400).json({ error: limitCheck.error });
     }
 
     // Si NO se está editando (no se proporcionó betId), verificar tempranamente
@@ -4144,6 +4179,12 @@ app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
     }
 
     try {
+        const { data: userBefore } = await supabase
+            .from('users')
+            .select('ref_by, first_name, username')
+            .eq('telegram_id', telegramId)
+            .single();
+
         const { data, error } = await supabase
             .from('users')
             .update({ is_banned: false, banned_at: null, updated_at: new Date().toISOString() })
@@ -4164,6 +4205,15 @@ app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
             `✅ Tu cuenta ha sido desbaneada.`,
             { parse_mode: 'HTML' }
         ).catch(e => console.error('Error notificando al usuario desbaneado:', e));
+
+        if (userBefore && userBefore.ref_by) {
+            const referrerId = userBefore.ref_by;
+            const userName = userBefore.first_name || userBefore.username || 'Usuario';
+            bot.telegram.sendMessage(referrerId,
+                `ℹ️ Tu referido ${escapeHTML(userName)} acaba de ser desbaneado.`,
+                { parse_mode: 'HTML' }
+            ).catch(e => console.error('Error notificando al referidor:', e));
+        }
     } catch (e) {
         console.error('Error desbaneando usuario:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
@@ -4225,17 +4275,18 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
                         .select('cost_cup, cost_usd, referrer_bonus_before')
                         .eq('user_id', telegramId)
                         .in('session_id', openSessionIds);
-                    if (activeBets && activeBets.length > 0) {
+                    const activeBetCount = activeBets ? activeBets.length : 0;
+                    if (activeBetCount > 0) {
                         const usdRate = await getExchangeRateUSD();
                         let totalBetCUP = 0;
                         let totalBonusMigrated = 0;
                         for (const bet of activeBets) {
-                            totalBetCUP += (parseFloat(bet.cost_cup) || 0) + ((parseFloat(bet.cost_usd) || 0) * usdRate);
+                            totalBetCUP += (parseFloat(bet.cost_cup) || 0) + (parseFloat(bet.cost_usd) || 0) * usdRate;
                             totalBonusMigrated += (parseFloat(bet.referrer_bonus_before) || 0);
                         }
                         const deduction = totalBetCUP * referralRate;
                         if (deduction > 0) {
-                            deductionData = { referrerId: userRefBy, deduction, totalBonusMigrated, referralRate };
+                            deductionData = { referrerId: userRefBy, deduction, totalBonusMigrated, referralRate, activeBetCount };
                         }
                     }
                 }
@@ -4300,7 +4351,7 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
         if (deductionData) {
             (async () => {
                 try {
-                    const { referrerId, deduction, totalBonusMigrated, referralRate } = deductionData;
+                    const { referrerId, deduction, totalBonusMigrated, referralRate, activeBetCount } = deductionData;
                     const userName = userFirstName || userUsername || 'Usuario';
 
                     const { data: referrer } = await supabase
@@ -4339,8 +4390,9 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
                         }
 
                         const percent = Number.isInteger(referralRate * 100) ? (referralRate * 100).toString() : (referralRate * 100).toFixed(2);
+                        const pluralSuffix = activeBetCount > 1 ? 's' : '';
                         await bot.telegram.sendMessage(referrerId,
-                            `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser eliminado. Ha sido restado de tu saldo actual el ${percent}% del monto apostado en su jugada activa.`,
+                            `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser eliminado. Ha sido restado de tu saldo actual el ${percent}% del monto apostado en su${pluralSuffix ? 's' : ''} jugada${pluralSuffix} activa${pluralSuffix}.`,
                             { parse_mode: 'HTML' }
                         ).catch(e => console.error('Error notificando al referidor:', e));
                     }

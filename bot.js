@@ -1089,6 +1089,35 @@ function expandDTNumbers(token, betType) {
     return [];
 }
 
+// ========== VALIDACIÓN DE LÍMITES ACUMULADOS POR NÚMERO ==========
+function validateBetLimits(items, betType, priceData) {
+    const maxCup = priceData?.max_cup;
+    const maxUsd = priceData?.max_usd;
+    if (maxCup === null && maxUsd === null) return { ok: true };
+
+    const grouped = {};
+    for (const item of items) {
+        const num = betType === 'parle'
+            ? (normalizeParleValue(item.numero) || item.numero)
+            : item.numero;
+        const cup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+        const usd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+        if (!grouped[num]) grouped[num] = { cup: 0, usd: 0 };
+        grouped[num].cup += cup;
+        grouped[num].usd += usd;
+    }
+
+    for (const [num, totals] of Object.entries(grouped)) {
+        if (maxCup !== null && totals.cup > 0 && totals.cup > parseFloat(maxCup)) {
+            return { ok: false, error: `❌ El número ${num} excede el máximo de ${parseFloat(maxCup).toFixed(2)} CUP (total: ${totals.cup.toFixed(2)})` };
+        }
+        if (maxUsd !== null && totals.usd > 0 && totals.usd > parseFloat(maxUsd)) {
+            return { ok: false, error: `❌ El número ${num} excede el máximo de ${parseFloat(maxUsd).toFixed(2)} USD (total: ${totals.usd.toFixed(2)})` };
+        }
+    }
+    return { ok: true };
+}
+
 function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
     if (!line) return [];
@@ -5006,7 +5035,7 @@ bot.on(message('text'), async (ctx) => {
         const rawText = text;
         const parsed = parseBetMessage(rawText, betType);
         if (!parsed || !parsed.ok) {
-            await ctx.reply('❌ Formato inválido. Por favor, formula correctamente tu apuesta', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Por favor, formula correctamente tu apuesta.', getMainKeyboard(ctx));
             return;
         }
 
@@ -5028,15 +5057,11 @@ bot.on(message('text'), async (ctx) => {
                 .eq('bet_type', betType)
                 .maybeSingle();
 
-            // Validar mínimos/máximos por número (por item)
+            // Validar mínimos por ítem individual
             for (const it of parsed.items) {
                 if (it.cup && it.cup > 0) {
                     if (price && price.min_cup !== null && price.min_cup !== undefined && it.cup < parseFloat(price.min_cup)) {
                         await ctx.reply(`❌ Mínimo en CUP: ${parseFloat(price.min_cup).toFixed(2)}`, getMainKeyboard(ctx));
-                        return;
-                    }
-                    if (price && price.max_cup !== null && price.max_cup !== undefined && it.cup > parseFloat(price.max_cup)) {
-                        await ctx.reply(`❌ Máximo en CUP: ${parseFloat(price.max_cup).toFixed(2)}`, getMainKeyboard(ctx));
                         return;
                     }
                 }
@@ -5045,11 +5070,14 @@ bot.on(message('text'), async (ctx) => {
                         await ctx.reply(`❌ Mínimo en USD: ${parseFloat(price.min_usd).toFixed(2)}`, getMainKeyboard(ctx));
                         return;
                     }
-                    if (price && price.max_usd !== null && price.max_usd !== undefined && it.usd > parseFloat(price.max_usd)) {
-                        await ctx.reply(`❌ Máximo en USD: ${parseFloat(price.max_usd).toFixed(2)}`, getMainKeyboard(ctx));
-                        return;
-                    }
                 }
+            }
+
+            // Validar máximos acumulados por número único
+            const limitCheck = validateBetLimits(parsed.items, betType, price);
+            if (!limitCheck.ok) {
+                await ctx.reply(limitCheck.error, getMainKeyboard(ctx));
+                return;
             }
 
             // Validar saldos y permitir usar bono_cup junto con cup para pagar jugadas en CUP
