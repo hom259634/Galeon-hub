@@ -452,9 +452,9 @@
                     </div>
 
                     <div class="grid grid-cols-3 gap-3 mb-4">
-                        <button id="rechargeBtn" class="bg-indigo-600 p-3 rounded-xl hover:bg-indigo-700 transition"><i class="fas fa-arrow-down mr-1"></i> Recargar</button>
-                        <button id="withdrawBtn" class="bg-pink-600 p-3 rounded-xl hover:bg-pink-700 transition"><i class="fas fa-arrow-up mr-1"></i> Retirar</button>
-                        <button id="transferBtn" class="bg-gray-600 p-3 rounded-xl hover:bg-gray-700 transition"><i class="fas fa-exchange-alt mr-1"></i> Transferir</button>
+                        <button id="rechargeBtn" class="bg-indigo-600 p-3 rounded-xl hover:bg-indigo-700 transition flex items-center justify-center"><i class="fas fa-arrow-down mr-1"></i> Recargar</button>
+                        <button id="withdrawBtn" class="bg-pink-600 p-3 rounded-xl hover:bg-pink-700 transition flex items-center justify-center"><i class="fas fa-arrow-up mr-1"></i> Retirar</button>
+                        <button id="transferBtn" class="bg-gray-600 p-3 rounded-xl hover:bg-gray-700 transition flex items-center justify-center"><i class="fas fa-exchange-alt mr-1"></i> Transferir</button>
                     </div>
 
                     <div id="withdrawTimeInfo" class="bg-gray-800/50 p-3 rounded-xl text-xs text-center text-gray-300 mb-2">
@@ -1117,6 +1117,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const maxUsd = priceData?.max_usd;
             if (maxCup === null && maxUsd === null) return { ok: true };
 
+            const typeLabel = betType === 'fijo' ? 'número' : formatBetTypeLabel(betType).toLowerCase();
+            const article = betType === 'centena' ? 'La' : 'El';
+
             const grouped = {};
             for (const item of items) {
                 const num = betType === 'parle'
@@ -1129,13 +1132,32 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 grouped[num].usd += usd;
             }
 
+            const cupExceeders = [];
+            const usdExceeders = [];
             for (const [num, totals] of Object.entries(grouped)) {
                 if (maxCup !== null && totals.cup > 0 && totals.cup > parseFloat(maxCup)) {
-                    return { ok: false, error: `❌ El número ${num} excede el máximo de ${parseFloat(maxCup).toFixed(2)} CUP (total: ${totals.cup.toFixed(2)})` };
+                    cupExceeders.push(num);
                 }
                 if (maxUsd !== null && totals.usd > 0 && totals.usd > parseFloat(maxUsd)) {
-                    return { ok: false, error: `❌ El número ${num} excede el máximo de ${parseFloat(maxUsd).toFixed(2)} USD (total: ${totals.usd.toFixed(2)})` };
+                    usdExceeders.push(num);
                 }
+            }
+            if (cupExceeders.length > 0 || usdExceeders.length > 0) {
+                const allNums = [...new Set([...cupExceeders, ...usdExceeders])];
+                const isPlural = allNums.length > 1;
+                let label;
+                if (isPlural) {
+                    const pluralArticle = article === 'La' ? 'Las' : 'Los';
+                    const pluralType = typeLabel === 'número' ? 'números' : typeLabel === 'centena' ? 'centenas' : typeLabel === 'parlet' ? 'parlets' : typeLabel;
+                    label = `${pluralArticle} ${pluralType}`;
+                } else {
+                    label = `${article} ${typeLabel}`;
+                }
+                const verb = isPlural ? 'exceden' : 'excede';
+                const maxParts = [];
+                if (cupExceeders.length > 0) maxParts.push(`${parseFloat(maxCup).toFixed(2)} CUP`);
+                if (usdExceeders.length > 0) maxParts.push(`${parseFloat(maxUsd).toFixed(2)} USD`);
+                return { ok: false, error: `❌ ${label} ${allNums.join(', ')} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.` };
             }
             return { ok: true };
         }
