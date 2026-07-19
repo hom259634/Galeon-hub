@@ -1147,7 +1147,12 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
         }
     }
     if (cupExceeders.length > 0 || usdExceeders.length > 0) {
-        const allNums = [...new Set([...cupExceeders, ...usdExceeders])];
+        const allNums = [...new Set([...cupExceeders, ...usdExceeders])].sort((a, b) => {
+            const na = parseInt(a, 10);
+            const nb = parseInt(b, 10);
+            if (!isNaN(na) && !isNaN(nb)) return na - nb;
+            return a.localeCompare(b);
+        });
         const isPlural = allNums.length > 1;
         let label;
         if (isPlural) {
@@ -5955,36 +5960,27 @@ cron.schedule('30 8 * * *', async () => {
             console.error('[Tasas] ElToque fetch error:', e.message);
         }
 
-        // Combinar: Telegram para MLC/USD, ElToque para TRX/USDT
+        // Combinar por moneda: cada una busca su mejor fuente
         const rates = {};
-        // MLC y USD: preferir Telegram, fallback ElToque
-        if (telegramRates && (telegramRates.usd != null || telegramRates.mlc != null)) {
-            rates.usd = telegramRates.usd;
-            rates.mlc = telegramRates.mlc;
-            console.log('[Tasas] USD y MLC obtenidos de Telegram @eltoquecom');
-        } else if (elToqueRates) {
-            rates.usd = elToqueRates.usd;
-            rates.mlc = elToqueRates.mlc;
-            console.log('[Tasas] Telegram falló, USD y MLC obtenidos de ElToque');
-        } else {
-            console.log('[Tasas] No se pudieron obtener USD ni MLC');
-        }
+        // USD: preferir Telegram, fallback ElToque
+        rates.usd = (telegramRates?.usd != null) ? telegramRates.usd : (elToqueRates?.usd ?? null);
+        // MLC: preferir Telegram, fallback ElToque
+        rates.mlc = (telegramRates?.mlc != null) ? telegramRates.mlc : (elToqueRates?.mlc ?? null);
         // TRX y USDT: siempre de ElToque
-        if (elToqueRates) {
-            rates.usdt = elToqueRates.usdt;
-            rates.trx = elToqueRates.trx;
-            console.log('[Tasas] USDT y TRX obtenidos de ElToque');
-        } else {
-            console.log('[Tasas] No se pudieron obtener USDT y TRX (ElToque falló)');
-        }
+        rates.usdt = elToqueRates?.usdt ?? null;
+        rates.trx = elToqueRates?.trx ?? null;
+
+        const srcUsd = (telegramRates?.usd != null) ? 'Telegram' : 'ElToque';
+        const srcMlc = (telegramRates?.mlc != null) ? 'Telegram' : 'ElToque';
+        console.log(`[Tasas] Fuentes → USD: ${srcUsd} (${rates.usd}), MLC: ${srcMlc} (${rates.mlc}), USDT: ${rates.usdt}, TRX: ${rates.trx}`);
         const fetchOk = rates.usd != null || rates.mlc != null || rates.usdt != null || rates.trx != null;
 
         if (fetchOk) {
             // Actualizar solo las tasas que se obtuvieron correctamente
-            if (rates.usd) await setExchangeRateUSD(rates.usd);
-            if (rates.mlc) await setExchangeRateMLC(rates.mlc);
-            if (rates.usdt) await setExchangeRateUSDT(rates.usdt);
-            if (rates.trx) await setExchangeRateTRX(rates.trx);
+            if (rates.usd != null) await setExchangeRateUSD(rates.usd);
+            if (rates.mlc != null) await setExchangeRateMLC(rates.mlc);
+            if (rates.usdt != null) await setExchangeRateUSDT(rates.usdt);
+            if (rates.trx != null) await setExchangeRateTRX(rates.trx);
 
             console.log(`[Tasas] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
 

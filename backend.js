@@ -853,7 +853,12 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
         }
     }
     if (cupExceeders.length > 0 || usdExceeders.length > 0) {
-        const allNums = [...new Set([...cupExceeders, ...usdExceeders])];
+        const allNums = [...new Set([...cupExceeders, ...usdExceeders])].sort((a, b) => {
+            const na = parseInt(a, 10);
+            const nb = parseInt(b, 10);
+            if (!isNaN(na) && !isNaN(nb)) return na - nb;
+            return a.localeCompare(b);
+        });
         const isPlural = allNums.length > 1;
         let label;
         if (isPlural) {
