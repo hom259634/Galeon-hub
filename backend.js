@@ -842,13 +842,32 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
         }
     }
 
+    const cupExceeders = [];
+    const usdExceeders = [];
     for (const [num, totals] of Object.entries(grouped)) {
         if (maxCup !== null && totals.cup > 0 && totals.cup > parseFloat(maxCup)) {
-            return { ok: false, error: `❌ ${article} ${typeLabel} ${num} excede el monto máximo de apuesta permitido de ${parseFloat(maxCup).toFixed(2)} CUP.` };
+            cupExceeders.push(num);
         }
         if (maxUsd !== null && totals.usd > 0 && totals.usd > parseFloat(maxUsd)) {
-            return { ok: false, error: `❌ ${article} ${typeLabel} ${num} excede el monto máximo de apuesta permitido de ${parseFloat(maxUsd).toFixed(2)} USD.` };
+            usdExceeders.push(num);
         }
+    }
+    if (cupExceeders.length > 0 || usdExceeders.length > 0) {
+        const allNums = [...new Set([...cupExceeders, ...usdExceeders])];
+        const isPlural = allNums.length > 1;
+        let label;
+        if (isPlural) {
+            const pluralArticle = article === 'La' ? 'Las' : 'Los';
+            const pluralType = typeLabel === 'número' ? 'números' : typeLabel === 'centena' ? 'centenas' : typeLabel === 'parlet' ? 'parlets' : typeLabel;
+            label = `${pluralArticle} ${pluralType}`;
+        } else {
+            label = `${article} ${typeLabel}`;
+        }
+        const verb = isPlural ? 'exceden' : 'excede';
+        const maxParts = [];
+        if (cupExceeders.length > 0) maxParts.push(`${parseFloat(maxCup).toFixed(2)} CUP`);
+        if (usdExceeders.length > 0) maxParts.push(`${parseFloat(maxUsd).toFixed(2)} USD`);
+        return { ok: false, error: `❌ ${label} ${allNums.join(', ')} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.` };
     }
     return { ok: true };
 }
