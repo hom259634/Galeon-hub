@@ -5997,7 +5997,7 @@ cron.schedule('30 8 * * *', async () => {
         const lines = [
             '💹 Tasas de Cambio del Día',
             `🕐 ${fetchOk ? 'Actualizado en tiempo real' : 'Últimas tasas disponibles'}: ${dateStr} ${timeStr}`,
-            'Fuente: Telegram @eltoquecom / eltoque.com',
+            'Fuente: eltoque.com',
             '',
             'Mercado Informal',
         ];
