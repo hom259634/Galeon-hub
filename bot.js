@@ -719,9 +719,18 @@ async function fetchTelegramRates(retries = 2, baseDelay = 2000) {
             // Tomar una ventana de 2000 caracteres desde el marcador
             const window = html.substring(lastIdx, lastIdx + 2000);
 
-            const usdMatch = window.match(/USD[:\s]*([\d,.]+)\s*CUP/i);
-            const mlcMatch = window.match(/MLC[:\s]*([\d,.]+)\s*CUP/i);
-            const eurMatch = window.match(/EUR[:\s]*([\d,.]+)\s*CUP/i);
+            // Usar regex global para obtener TODOS los matches y quedarnos con el ÚLTIMO (el más reciente)
+            function getLastMatch(str, regex) {
+                let match = null;
+                let lastMatch = null;
+                while ((match = regex.exec(str)) !== null) {
+                    lastMatch = match;
+                }
+                return lastMatch;
+            }
+            const usdMatch = getLastMatch(window, /USD[:\s]*([\d,.]+)\s*CUP/gi);
+            const mlcMatch = getLastMatch(window, /MLC[:\s]*([\d,.]+)\s*CUP/gi);
+            const eurMatch = getLastMatch(window, /EUR[:\s]*([\d,.]+)\s*CUP/gi);
 
             const usd = usdMatch ? parseFloat(usdMatch[1].replace(/,/g, '')) : null;
             const mlc = mlcMatch ? parseFloat(mlcMatch[1].replace(/,/g, '')) : null;
@@ -5952,12 +5961,18 @@ cron.schedule('30 8 * * *', async () => {
             console.error('[Tasas] Telegram fetch error:', e.message);
         }
 
-        // 2) ElToque → TRX y USDT (+ MLC/USD como fallback si Telegram falló)
+        // 2) ElToque → TRX y USDT (+ MLC/USD como fallback SOLO si Telegram falló para alguna)
+        const telegramGotUsd = telegramRates?.usd != null;
+        const telegramGotMlc = telegramRates?.mlc != null;
         let elToqueRates = null;
-        try {
-            elToqueRates = await fetchElToqueRates();
-        } catch (e) {
-            console.error('[Tasas] ElToque fetch error:', e.message);
+        if (!telegramGotUsd || !telegramGotMlc) {
+            try {
+                elToqueRates = await fetchElToqueRates();
+            } catch (e) {
+                console.error('[Tasas] ElToque fetch error:', e.message);
+            }
+        } else {
+            console.log('[Tasas] Telegram extrajo USD y MLC correctamente. ElToque omitido.');
         }
 
         // Combinar por moneda: cada una busca su mejor fuente
