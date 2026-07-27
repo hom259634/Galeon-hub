@@ -461,30 +461,62 @@ function canonicalizeCurrency(currency) {
 
 
 async function setExchangeRateUSD(rate) {
+    const current = await getExchangeRates();
     const { error } = await supabase
         .from('exchange_rate')
-        .upsert({ id: 1, rate, updated_at: new Date() }, { onConflict: 'id' });
+        .upsert({
+            id: 1,
+            rate: rate ?? current.rate,
+            rate_mlc: current.rate_mlc,
+            rate_usdt: current.rate_usdt,
+            rate_trx: current.rate_trx,
+            updated_at: new Date()
+        }, { onConflict: 'id' });
     if (error) console.error('[Tasas] Error guardando USD:', error.message);
 }
 
 async function setExchangeRateUSDT(rate) {
+    const current = await getExchangeRates();
     const { error } = await supabase
         .from('exchange_rate')
-        .upsert({ id: 1, rate_usdt: rate, updated_at: new Date() }, { onConflict: 'id' });
+        .upsert({
+            id: 1,
+            rate: current.rate,
+            rate_mlc: current.rate_mlc,
+            rate_usdt: rate ?? current.rate_usdt,
+            rate_trx: current.rate_trx,
+            updated_at: new Date()
+        }, { onConflict: 'id' });
     if (error) console.error('[Tasas] Error guardando USDT:', error.message);
 }
 
 async function setExchangeRateTRX(rate) {
+    const current = await getExchangeRates();
     const { error } = await supabase
         .from('exchange_rate')
-        .upsert({ id: 1, rate_trx: rate, updated_at: new Date() }, { onConflict: 'id' });
+        .upsert({
+            id: 1,
+            rate: current.rate,
+            rate_mlc: current.rate_mlc,
+            rate_usdt: current.rate_usdt,
+            rate_trx: rate ?? current.rate_trx,
+            updated_at: new Date()
+        }, { onConflict: 'id' });
     if (error) console.error('[Tasas] Error guardando TRX:', error.message);
 }
 
 async function setExchangeRateMLC(rate) {
+    const current = await getExchangeRates();
     const { error } = await supabase
         .from('exchange_rate')
-        .upsert({ id: 1, rate_mlc: rate, updated_at: new Date() }, { onConflict: 'id' });
+        .upsert({
+            id: 1,
+            rate: current.rate,
+            rate_mlc: rate ?? current.rate_mlc,
+            rate_usdt: current.rate_usdt,
+            rate_trx: current.rate_trx,
+            updated_at: new Date()
+        }, { onConflict: 'id' });
     if (error) {
         console.error('[Tasas] Error guardando MLC:', error.message);
         return { ok: false, error };

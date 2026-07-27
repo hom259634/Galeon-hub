@@ -297,16 +297,32 @@ async function getExchangeRateMLC() {
 }
 
 async function setExchangeRateUSD(rate) {
-    await supabase
+    const current = await getExchangeRates();
+    const { error } = await supabase
         .from('exchange_rate')
-        .update({ rate, updated_at: new Date() })
-        .eq('id', 1);
+        .upsert({
+            id: 1,
+            rate: rate ?? current.rate,
+            rate_mlc: current.rate_mlc,
+            rate_usdt: current.rate_usdt,
+            rate_trx: current.rate_trx,
+            updated_at: new Date()
+        }, { onConflict: 'id' });
+    if (error) console.error('[Tasas] Error guardando USD:', error.message);
 }
 
 async function setExchangeRateMLC(rate) {
+    const current = await getExchangeRates();
     const { error } = await supabase
         .from('exchange_rate')
-        .upsert({ id: 1, rate_mlc: rate, updated_at: new Date() }, { onConflict: 'id' });
+        .upsert({
+            id: 1,
+            rate: current.rate,
+            rate_mlc: rate ?? current.rate_mlc,
+            rate_usdt: current.rate_usdt,
+            rate_trx: current.rate_trx,
+            updated_at: new Date()
+        }, { onConflict: 'id' });
 
     if (error) {
         return { ok: false, error };
@@ -316,17 +332,33 @@ async function setExchangeRateMLC(rate) {
 }
 
 async function setExchangeRateUSDT(rate) {
-    await supabase
+    const current = await getExchangeRates();
+    const { error } = await supabase
         .from('exchange_rate')
-        .update({ rate_usdt: rate, updated_at: new Date() })
-        .eq('id', 1);
+        .upsert({
+            id: 1,
+            rate: current.rate,
+            rate_mlc: current.rate_mlc,
+            rate_usdt: rate ?? current.rate_usdt,
+            rate_trx: current.rate_trx,
+            updated_at: new Date()
+        }, { onConflict: 'id' });
+    if (error) console.error('[Tasas] Error guardando USDT:', error.message);
 }
 
 async function setExchangeRateTRX(rate) {
-    await supabase
+    const current = await getExchangeRates();
+    const { error } = await supabase
         .from('exchange_rate')
-        .update({ rate_trx: rate, updated_at: new Date() })
-        .eq('id', 1);
+        .upsert({
+            id: 1,
+            rate: current.rate,
+            rate_mlc: current.rate_mlc,
+            rate_usdt: current.rate_usdt,
+            rate_trx: rate ?? current.rate_trx,
+            updated_at: new Date()
+        }, { onConflict: 'id' });
+    if (error) console.error('[Tasas] Error guardando TRX:', error.message);
 }
 
 // Convertir cualquier moneda a CUP
