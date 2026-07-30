@@ -5976,70 +5976,85 @@ cron.schedule('* * * * *', async () => {
     }
 }, { timezone: TIMEZONE });
 
-// Cron diario 8:30 AM - Actualizar tasas desde El Toque y broadcast
+// Cron 7:31 AM - Colectar tasas desde Telegram @eltoquecom (SIN broadcast)
+cron.schedule('31 7 * * *', async () => {
+    try {
+        console.log('[Tasas 7:31] Colectando tasas desde Telegram @eltoquecom...');
+        const rates = await fetchTelegramRates();
+        const collected = { usd: false, mlc: false };
+        if (rates && (rates.usd != null || rates.mlc != null)) {
+            if (rates.usd != null) { await setExchangeRateUSD(rates.usd); collected.usd = true; }
+            if (rates.mlc != null) { await setExchangeRateMLC(rates.mlc); collected.mlc = true; }
+            console.log(`[Tasas 7:31] Tasas de Telegram guardadas: USD=${rates.usd}, MLC=${rates.mlc}`);
+        } else {
+            console.warn('[Tasas 7:31] Telegram no devolvio tasas. Se intentara obtener todo de ElToque a las 8:30.');
+        }
+        // Guardar qué monedas se colectaron (para que el cron de 8:30 lo lea por moneda)
+        await supabase
+            .from('app_config')
+            .upsert({ key: 'telegram_731', value: JSON.stringify(collected) }, { onConflict: 'key' });
+    } catch (e) {
+        console.error('[Tasas 7:31] Error:', e.message);
+    }
+}, { timezone: TIMEZONE });
+
+// Cron diario 8:30 AM - Completar tasas desde ElToque (USDT, TRX) y broadcast
 cron.schedule('30 8 * * *', async () => {
     try {
-        console.log('[Tasas ElToque] Ejecutando actualización diaria de tasas...');
+        console.log('[Tasas 8:30] Ejecutando actualización diaria de tasas...');
 
         const now = moment().tz(TIMEZONE);
         const dateStr = now.format('DD/MM/YYYY');
         const timeStr = now.format('h:mm A');
 
-        // 1) Telegram primero → MLC y USD
-        let telegramRates = null;
-        try {
-            telegramRates = await fetchTelegramRates();
-        } catch (e) {
-            console.error('[Tasas] Telegram fetch error:', e.message);
-        }
+        // 1) Leer tasas actuales de la DB (pueden venir del cron de 7:31 si Telegram funcionó)
+        const dbRates = await getExchangeRates();
 
-        // 2) ElToque → TRX y USDT (+ MLC/USD como fallback SOLO si Telegram falló para alguna)
-        const telegramGotUsd = telegramRates?.usd != null;
-        const telegramGotMlc = telegramRates?.mlc != null;
+        // 2) Fetch ElToque para USDT, TRX (y USD/MLC como fallback)
         let elToqueRates = null;
-        if (!telegramGotUsd || !telegramGotMlc) {
-            try {
-                elToqueRates = await fetchElToqueRates();
-            } catch (e) {
-                console.error('[Tasas] ElToque fetch error:', e.message);
-            }
-        } else {
-            console.log('[Tasas] Telegram extrajo USD y MLC correctamente. ElToque omitido.');
+        try {
+            elToqueRates = await fetchElToqueRates();
+        } catch (e) {
+            console.error('[Tasas 8:30] ElToque fetch error:', e.message);
         }
 
-        // Combinar por moneda: cada una busca su mejor fuente
-        const rates = {};
-        // USD: preferir Telegram, fallback ElToque
-        rates.usd = (telegramRates?.usd != null) ? telegramRates.usd : (elToqueRates?.usd ?? null);
-        // MLC: preferir Telegram, fallback ElToque
-        rates.mlc = (telegramRates?.mlc != null) ? telegramRates.mlc : (elToqueRates?.mlc ?? null);
-        // TRX y USDT: siempre de ElToque
-        rates.usdt = elToqueRates?.usdt ?? null;
-        rates.trx = elToqueRates?.trx ?? null;
+        // 3) Determinar qué monedas colectó Telegram a las 7:31
+        const { data: tgFlag } = await supabase
+            .from('app_config')
+            .select('value')
+            .eq('key', 'telegram_731')
+            .single();
+        const tgCollected = tgFlag ? JSON.parse(tgFlag.value) : {};
+        const tgUsdOk = !!tgCollected.usd;
+        const tgMlcOk = !!tgCollected.mlc;
 
-        const srcUsd = (telegramRates?.usd != null) ? 'Telegram' : 'ElToque';
-        const srcMlc = (telegramRates?.mlc != null) ? 'Telegram' : 'ElToque';
-        console.log(`[Tasas] Fuentes → USD: ${srcUsd} (${rates.usd}), MLC: ${srcMlc} (${rates.mlc}), USDT: ${rates.usdt}, TRX: ${rates.trx}`);
+        // 4) Combinar: USD/MLC de Telegram (si se obtuvieron), USDT/TRX de ElToque siempre
+        const rates = {};
+        rates.usd = tgUsdOk ? dbRates.rate : (elToqueRates?.usd != null ? elToqueRates.usd : dbRates.rate);
+        rates.mlc = tgMlcOk ? dbRates.rate_mlc : (elToqueRates?.mlc != null ? elToqueRates.mlc : dbRates.rate_mlc);
+        console.log(`[Tasas 8:30] Fuentes → USD: ${tgUsdOk ? 'Telegram' : (elToqueRates?.usd != null ? 'ElToque' : 'DB')}, MLC: ${tgMlcOk ? 'Telegram' : (elToqueRates?.mlc != null ? 'ElToque' : 'DB')}`);
+        rates.usdt = (elToqueRates?.usdt != null) ? elToqueRates.usdt : dbRates.rate_usdt;
+        rates.trx = (elToqueRates?.trx != null) ? elToqueRates.trx : dbRates.rate_trx;
+
+        console.log(`[Tasas 8:30] Fuentes → USD: ${rates.usd}, MLC: ${rates.mlc}, USDT: ${rates.usdt}, TRX: ${rates.trx}`);
         const fetchOk = rates.usd != null || rates.mlc != null || rates.usdt != null || rates.trx != null;
 
         if (fetchOk) {
-            // Actualizar solo las tasas que se obtuvieron correctamente
             if (rates.usd != null) await setExchangeRateUSD(rates.usd);
             if (rates.mlc != null) await setExchangeRateMLC(rates.mlc);
             if (rates.usdt != null) await setExchangeRateUSDT(rates.usdt);
             if (rates.trx != null) await setExchangeRateTRX(rates.trx);
 
-            console.log(`[Tasas] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
+            console.log(`[Tasas 8:30] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
 
             await updateDepositMinimums();
         } else {
-            console.error('[Tasas] No se pudieron obtener tasas nuevas. Usando tasas actuales de la BD.');
+            console.error('[Tasas 8:30] No se pudieron obtener tasas nuevas. Usando tasas actuales de la BD.');
         }
 
-        // Usar tasas actuales de la BD para el mensaje (sean nuevas o anteriores)
+        // 5) Broadcast con tasas de la DB (ya actualizadas)
         const currentRates = await getExchangeRates();
 
-        // Construir mensaje de broadcast
         const prev = bot.lastBroadcastRates;
         const lines = [
             '💹 Tasas de Cambio del Día',
@@ -6061,7 +6076,7 @@ cron.schedule('30 8 * * *', async () => {
 
         const message = lines.join('\n');
         await broadcastToAllUsers(message);
-        console.log(`[Tasas] Broadcast enviado correctamente (${fetchOk ? 'tasas nuevas' : 'tasas vigentes'}).`);
+        console.log(`[Tasas 8:30] Broadcast enviado correctamente (${fetchOk ? 'tasas nuevas' : 'tasas vigentes'}).`);
 
         bot.lastBroadcastRates = {
             rate: currentRates.rate,
@@ -6070,7 +6085,7 @@ cron.schedule('30 8 * * *', async () => {
             rate_mlc: currentRates.rate_mlc
         };
     } catch (e) {
-        console.error('[Tasas] Error en cron 8:30 AM:', e.message);
+        console.error('[Tasas 8:30] Error en cron 8:30 AM:', e.message);
     }
 }, { timezone: TIMEZONE });
 
