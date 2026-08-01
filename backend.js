@@ -31,6 +31,7 @@ const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const BOT_LAUNCH_MAX_RETRIES = parseInt(process.env.BOT_LAUNCH_MAX_RETRIES || '0', 10); // 0 = infinito
 const BOT_LAUNCH_RETRY_BASE_MS = parseInt(process.env.BOT_LAUNCH_RETRY_BASE_MS || '5000', 10);
 const BOT_LAUNCH_RETRY_MAX_MS = parseInt(process.env.BOT_LAUNCH_RETRY_MAX_MS || '120000', 10);
+const RENDER_URL = process.env.RENDER_URL || '';
 
 // ========== INICIALIZAR SUPABASE ==========
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -5453,15 +5454,16 @@ app.get('/app.html', (req, res) => {
     res.sendFile(path.join(__dirname, 'webapp', 'app.html'));
 });
 
-// ========== KEEP-ALIVE ==========
-setInterval(async () => {
-    try {
-        await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`);
-        console.log('[Keep-Alive] Ping a Telegram OK');
-    } catch (e) {
-        console.error('[Keep-Alive] Error:', e.message);
-    }
-}, 5 * 60 * 1000);
+// ========== SELF-PING (mantener instancia despierta en Render) ==========
+if (RENDER_URL) {
+    setInterval(async () => {
+        try {
+            await axios.get(RENDER_URL, { timeout: 30000 });
+        } catch (e) {
+            console.error('[Self-ping] Error:', e.message);
+        }
+    }, 5 * 60 * 1000);
+}
 
 // ========== MANEJADORES GLOBALES DE ERRORES ==========
 process.on('unhandledRejection', (reason, promise) => {

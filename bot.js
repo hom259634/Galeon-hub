@@ -31,6 +31,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const BONUS_CUP_DEFAULT = parseFloat(process.env.BONUS_CUP_DEFAULT) || 0;
 const TIMEZONE = process.env.TIMEZONE || 'America/Havana';
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000';
+const OCR_API_KEY = process.env.OCR_API_KEY || '';
 const broadcastMap = new Map();
 const supportReplyMessageIds = new Map();
 const supportNotifyMessageIds = new Map(); // userId -> Map<userMessageId, Map<adminId, notificationMessageId>>
@@ -700,6 +701,62 @@ async function fetchElToqueRates(retries = 3, baseDelay = 3000) {
 }
 // ========== END FETCH EL TOQUE RATES ==========
 
+// Encuentra el índice del mensaje de tasas más reciente de @eltoquecom.
+// Prioriza el marcador "Actualización de tasas" (único y sin ambigüedad) y
+// valida que la fecha del mensaje ("Fecha: DD/MM/YYYY") corresponda al día de
+// hoy en la zona horaria configurada, para no guardar tasas de días anteriores.
+function findLatestRatesMessageIndex(html) {
+    const PRIMARY = 'Actualización de tasas';
+    const FALLBACKS = ['Tasa representativa', 'tasa representativa'];
+    const today = moment.tz(TIMEZONE).format('DD/MM/YYYY');
+
+    const isToday = (snippet) => {
+        const dateMatch = snippet.match(/Fecha:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (!dateMatch) return { ok: false, date: null };
+        const msgDate = `${dateMatch[1].padStart(2, '0')}/${dateMatch[2].padStart(2, '0')}/${dateMatch[3]}`;
+        return { ok: msgDate === today, date: msgDate };
+    };
+
+    const occurrences = [];
+    let searchFrom = 0;
+    while (true) {
+        const idx = html.indexOf(PRIMARY, searchFrom);
+        if (idx === -1) break;
+        occurrences.push(idx);
+        searchFrom = idx + PRIMARY.length;
+    }
+
+    for (let i = occurrences.length - 1; i >= 0; i--) {
+        const snippet = html.substring(occurrences[i], Math.min(occurrences[i] + 800, html.length));
+        const { ok, date } = isToday(snippet);
+        if (!date) {
+            console.warn('[Tasas] Mensaje "Actualización de tasas" sin fecha válida cerca del marcador. Se ignora.');
+            continue;
+        }
+        if (ok) return occurrences[i];
+        console.log(`[Tasas] Mensaje de tasas con fecha ${date} (hoy ${today}). Se ignora por no ser de hoy.`);
+    }
+
+    for (const marker of FALLBACKS) {
+        const idxs = [];
+        let searchFrom = 0;
+        while (true) {
+            const idx = html.indexOf(marker, searchFrom);
+            if (idx === -1) break;
+            idxs.push(idx);
+            searchFrom = idx + marker.length;
+        }
+        for (let i = idxs.length - 1; i >= 0; i--) {
+            const snippet = html.substring(idxs[i], Math.min(idxs[i] + 800, html.length));
+            const { ok, date } = isToday(snippet);
+            if (ok) return idxs[i];
+            if (!date) continue;
+            console.log(`[Tasas] Mensaje con marcador "${marker}" tiene fecha ${date} (hoy ${today}). Se ignora.`);
+        }
+    }
+    return -1;
+}
+
 // ========== FETCH TASAS DESDE TELEGRAM @eltoquecom ==========
 async function fetchTelegramRates(retries = 2, baseDelay = 2000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -726,21 +783,13 @@ async function fetchTelegramRates(retries = 2, baseDelay = 2000) {
 
             const html = resp.data;
 
-            // Buscar el último mensaje que contenga "Actualización de tasas" o "tasa representativa"
-            // El formato típico es:
-            // EUR: XXX.XX CUP
-            // USD: XXX.XX CUP
-            // MLC: XXX.XX CUP
-            // Buscamos desde el final hacia atrás para obtener el más reciente
-            const markers = ['Actualización de tasas', 'tasa representativa', 'Tasa representativa'];
-            let lastIdx = -1;
-            for (const marker of markers) {
-                const idx = html.lastIndexOf(marker);
-                if (idx > lastIdx) lastIdx = idx;
-            }
+            // Buscar el mensaje de tasas más reciente de HOY, priorizando el
+            // marcador "Actualización de tasas" y validando la fecha (evita
+            // anclar en "Tasa representativa del mercado de criptomonedas").
+            const lastIdx = findLatestRatesMessageIndex(html);
 
             if (lastIdx === -1) {
-                console.error('[Telegram] No se encontró mensaje de tasas en el canal');
+                console.error('[Telegram] No se encontró mensaje de tasas de HOY en el canal (¿aún no publican? o elTOQUE cambió el formato)');
                 if (attempt < retries) {
                     await new Promise(r => setTimeout(r, baseDelay * attempt));
                     continue;
@@ -791,6 +840,150 @@ async function fetchTelegramRates(retries = 2, baseDelay = 2000) {
     return null;
 }
 // ========== END FETCH TELEGRAM RATES ==========
+
+// ========== FETCH TASAS USDT/TRX POR OCR DE IMÁGENES @eltoquecom ==========
+async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
+    if (!OCR_API_KEY) {
+        console.warn('[OCR] No hay API key (OCR_API_KEY). Omitiendo OCR.');
+        return null;
+    }
+
+    let dbUsdt = null, dbTrx = null;
+    try {
+        const current = await getExchangeRates();
+        dbUsdt = current.rate_usdt;
+        dbTrx = current.rate_trx;
+    } catch (e) {
+        console.warn('[OCR] No se pudieron leer tasas actuales:', e.message);
+    }
+
+    function isPlausible(currency, value) {
+        if (value == null || isNaN(value)) return false;
+        const base = currency === 'USDT' ? dbUsdt : dbTrx;
+        if (base != null && base > 0) {
+            return value >= (base - 200) && value <= (base + 200);
+        }
+        return true;
+    }
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            console.log(`[OCR] Intento ${attempt}/${retries}: Buscando imágenes en @eltoquecom...`);
+
+            const resp = await axios.get('https://t.me/s/eltoquecom', {
+                timeout: 15000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'text/html,application/xhtml+xml',
+                    'Accept-Language': 'es-CU,es;q=0.9',
+                }
+            });
+
+            if (resp.status !== 200) {
+                console.error(`[OCR] HTTP ${resp.status}`);
+                if (attempt < retries) await new Promise(r => setTimeout(r, baseDelay * attempt));
+                continue;
+            }
+
+            const html = resp.data;
+
+            const lastIdx = findLatestRatesMessageIndex(html);
+
+            if (lastIdx === -1) {
+                console.error('[OCR] No se encontró mensaje de tasas de HOY en el canal');
+                if (attempt < retries) await new Promise(r => setTimeout(r, baseDelay * attempt));
+                continue;
+            }
+
+            const searchWindow = html.substring(Math.max(0, lastIdx - 8000), lastIdx + 500);
+            const imgRegex = /background-image:url\('([^']+)'\)/g;
+            const allUrls = [];
+            let match;
+            while ((match = imgRegex.exec(searchWindow)) !== null) {
+                const url = match[1];
+                if (url.startsWith('//telegram.org')) continue;
+                if (allUrls.includes(url)) continue;
+                allUrls.push(url);
+            }
+
+            if (allUrls.length === 0) {
+                console.error('[OCR] No se encontraron imágenes en el mensaje');
+                if (attempt < retries) await new Promise(r => setTimeout(r, baseDelay * attempt));
+                continue;
+            }
+
+            console.log(`[OCR] ${allUrls.length} imágenes en el mensaje. Procesando solo la última (imagen cripto)...`);
+
+            const imageUrl = allUrls[allUrls.length - 1];
+            let foundUsdt = null, foundTrx = null;
+
+            try {
+                const ocrResp = await axios.post('https://api.ocr.space/parse/image',
+                    new URLSearchParams({
+                        url: imageUrl,
+                        language: 'spa',
+                        OCREngine: '2',
+                        isOverlayRequired: 'false'
+                    }).toString(),
+                    {
+                        headers: {
+                            apikey: OCR_API_KEY,
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                        },
+                        timeout: 30000
+                    }
+                );
+
+                const ocrData = ocrResp.data;
+                if (ocrData.IsErroredOnProcessing) {
+                    console.warn('[OCR] Error OCR.space en imagen cripto:', ocrData.ErrorMessage);
+                } else {
+                    const parsedText = ocrData.ParsedResults?.[0]?.ParsedText || '';
+                    if (parsedText) {
+                        const usdtMatch = parsedText.match(/USDT[:\s]*([\d,.]+)\s*CUP/i);
+                        if (usdtMatch) {
+                            const val = parseFloat(usdtMatch[1].replace(/,/g, ''));
+                            if (isPlausible('USDT', val)) {
+                                foundUsdt = val;
+                                console.log(`[OCR] USDT encontrado: ${val} (imagen cripto)`);
+                            } else {
+                                console.warn(`[OCR] USDT=${val} fuera de rango (base=${dbUsdt}), se ignora`);
+                            }
+                        }
+
+                        const trxMatch = parsedText.match(/TRX[:\s]*([\d,.]+)\s*CUP/i);
+                        if (trxMatch) {
+                            const val = parseFloat(trxMatch[1].replace(/,/g, ''));
+                            if (isPlausible('TRX', val)) {
+                                foundTrx = val;
+                                console.log(`[OCR] TRX encontrado: ${val} (imagen cripto)`);
+                            } else {
+                                console.warn(`[OCR] TRX=${val} fuera de rango (base=${dbTrx}), se ignora`);
+                            }
+                        }
+                    }
+                }
+            } catch (imgErr) {
+                console.warn('[OCR] Error procesando imagen cripto:', imgErr.message);
+            }
+
+            if (foundUsdt === null && foundTrx === null) {
+                console.warn('[OCR] No se encontraron USDT ni TRX en la imagen cripto');
+                if (attempt < retries) await new Promise(r => setTimeout(r, baseDelay * attempt));
+                continue;
+            }
+
+            return { usdt: foundUsdt, trx: foundTrx };
+        } catch (e) {
+            console.error(`[OCR] Error en intento ${attempt}/${retries}:`, e.message);
+            if (attempt < retries) await new Promise(r => setTimeout(r, baseDelay * attempt));
+        }
+    }
+
+    console.error('[OCR] Todos los intentos fallaron.');
+    return null;
+}
+// ========== END FETCH OCR RATES ==========
 
 async function buildCrossCurrencyDebitPlan(user, amount, currency) {
     const cupBalance = parseFloat(user?.cup) || 0;
@@ -5981,7 +6174,7 @@ cron.schedule('31 7 * * *', async () => {
     try {
         console.log('[Tasas 7:31] Colectando tasas desde Telegram @eltoquecom...');
         const rates = await fetchTelegramRates();
-        const collected = { usd: false, mlc: false };
+        const collected = { usd: false, mlc: false, usdt: false, trx: false };
         if (rates && (rates.usd != null || rates.mlc != null)) {
             if (rates.usd != null) { await setExchangeRateUSD(rates.usd); collected.usd = true; }
             if (rates.mlc != null) { await setExchangeRateMLC(rates.mlc); collected.mlc = true; }
@@ -5989,10 +6182,22 @@ cron.schedule('31 7 * * *', async () => {
         } else {
             console.warn('[Tasas 7:31] Telegram no devolvio tasas. Se intentara obtener todo de ElToque a las 8:30.');
         }
+        try {
+            const ocrRates = await fetchOCRRatesFromImage();
+            if (ocrRates && (ocrRates.usdt != null || ocrRates.trx != null)) {
+                if (ocrRates.usdt != null) { await setExchangeRateUSDT(ocrRates.usdt); collected.usdt = true; }
+                if (ocrRates.trx != null) { await setExchangeRateTRX(ocrRates.trx); collected.trx = true; }
+                console.log(`[Tasas 7:31] OCR guardado: USDT=${ocrRates.usdt}, TRX=${ocrRates.trx}`);
+            } else {
+                console.warn('[Tasas 7:31] OCR no devolvio USDT/TRX. Se intentaran obtener de ElToque a las 8:30.');
+            }
+        } catch (ocrErr) {
+            console.error('[Tasas 7:31] Error en OCR:', ocrErr.message);
+        }
         // Guardar qué monedas se colectaron (para que el cron de 8:30 lo lea por moneda)
         await supabase
             .from('app_config')
-            .upsert({ key: 'telegram_731', value: JSON.stringify(collected) }, { onConflict: 'key' });
+            .upsert({ key: 'telegram_731', value: JSON.stringify({ ...collected, timestamp: new Date().toISOString() }) }, { onConflict: 'key' });
     } catch (e) {
         console.error('[Tasas 7:31] Error:', e.message);
     }
@@ -6010,7 +6215,7 @@ cron.schedule('30 8 * * *', async () => {
         // 1) Leer tasas actuales de la DB (pueden venir del cron de 7:31 si Telegram funcionó)
         const dbRates = await getExchangeRates();
 
-        // 2) Fetch ElToque para USDT, TRX (y USD/MLC como fallback)
+        // 2) Fetch ElToque (fallback de todo si el cron de 7:31 no colectó alguna moneda)
         let elToqueRates = null;
         try {
             elToqueRates = await fetchElToqueRates();
@@ -6018,25 +6223,37 @@ cron.schedule('30 8 * * *', async () => {
             console.error('[Tasas 8:30] ElToque fetch error:', e.message);
         }
 
-        // 3) Determinar qué monedas colectó Telegram a las 7:31
-        const { data: tgFlag } = await supabase
-            .from('app_config')
-            .select('value')
-            .eq('key', 'telegram_731')
-            .single();
-        const tgCollected = tgFlag ? JSON.parse(tgFlag.value) : {};
-        const tgUsdOk = !!tgCollected.usd;
-        const tgMlcOk = !!tgCollected.mlc;
+        // 3) Determinar qué monedas colectó el cron de 7:31 (solo si el flag es de HOY, no de ayer)
+        let tgCollected = {};
+        try {
+            const { data: tgFlag } = await supabase
+                .from('app_config')
+                .select('value')
+                .eq('key', 'telegram_731')
+                .single();
+            if (tgFlag) tgCollected = JSON.parse(tgFlag.value);
+        } catch (e) {
+            console.error('[Tasas 8:30] No se pudo leer flag telegram_731:', e.message);
+        }
+        const flagIsToday = !!tgCollected.timestamp &&
+            moment(tgCollected.timestamp).tz(TIMEZONE).format('YYYY-MM-DD') === now.format('YYYY-MM-DD');
+        const tgUsdOk = flagIsToday && !!tgCollected.usd;
+        const tgMlcOk = flagIsToday && !!tgCollected.mlc;
+        const tgUsdtOk = flagIsToday && !!tgCollected.usdt;
+        const tgTrxOk = flagIsToday && !!tgCollected.trx;
+        if (!flagIsToday) {
+            console.warn('[Tasas 8:30] El flag de 7:31 no es de hoy. Todas las tasas se toman de ElToque/DB.');
+        }
 
-        // 4) Combinar: USD/MLC de Telegram (si se obtuvieron), USDT/TRX de ElToque siempre
+        // 4) Combinar: Telegram 7:31 (si es de hoy), si no ElToque, si no DB
         const rates = {};
         rates.usd = tgUsdOk ? dbRates.rate : (elToqueRates?.usd != null ? elToqueRates.usd : dbRates.rate);
         rates.mlc = tgMlcOk ? dbRates.rate_mlc : (elToqueRates?.mlc != null ? elToqueRates.mlc : dbRates.rate_mlc);
-        console.log(`[Tasas 8:30] Fuentes → USD: ${tgUsdOk ? 'Telegram' : (elToqueRates?.usd != null ? 'ElToque' : 'DB')}, MLC: ${tgMlcOk ? 'Telegram' : (elToqueRates?.mlc != null ? 'ElToque' : 'DB')}`);
-        rates.usdt = (elToqueRates?.usdt != null) ? elToqueRates.usdt : dbRates.rate_usdt;
-        rates.trx = (elToqueRates?.trx != null) ? elToqueRates.trx : dbRates.rate_trx;
+        rates.usdt = tgUsdtOk ? dbRates.rate_usdt : (elToqueRates?.usdt != null ? elToqueRates.usdt : dbRates.rate_usdt);
+        rates.trx = tgTrxOk ? dbRates.rate_trx : (elToqueRates?.trx != null ? elToqueRates.trx : dbRates.rate_trx);
+        console.log(`[Tasas 8:30] Fuentes → USD: ${tgUsdOk ? 'Telegram 7:31' : (elToqueRates?.usd != null ? 'ElToque' : 'DB')}, MLC: ${tgMlcOk ? 'Telegram 7:31' : (elToqueRates?.mlc != null ? 'ElToque' : 'DB')}, USDT: ${tgUsdtOk ? 'Telegram 7:31' : (elToqueRates?.usdt != null ? 'ElToque' : 'DB')}, TRX: ${tgTrxOk ? 'Telegram 7:31' : (elToqueRates?.trx != null ? 'ElToque' : 'DB')}`);
 
-        console.log(`[Tasas 8:30] Fuentes → USD: ${rates.usd}, MLC: ${rates.mlc}, USDT: ${rates.usdt}, TRX: ${rates.trx}`);
+        console.log(`[Tasas 8:30] Tasas finales → USD: ${rates.usd}, MLC: ${rates.mlc}, USDT: ${rates.usdt}, TRX: ${rates.trx}`);
         const fetchOk = rates.usd != null || rates.mlc != null || rates.usdt != null || rates.trx != null;
 
         if (fetchOk) {
