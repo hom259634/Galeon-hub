@@ -757,6 +757,42 @@ function findLatestRatesMessageIndex(html) {
     return -1;
 }
 
+// Como findLatestRatesMessageIndex, pero prefiere el mensaje de tasas de HOY que contiene
+// la tarjeta de criptomonedas. elTOQUE suele publicar durante el día actualizaciones que
+// solo traen informal + oficiales (sin la tarjeta cripto); con el mensaje más reciente el
+// OCR tomaría la última imagen equivocada (p. ej. tasas oficiales) y no hallaría USDT/TRX.
+function findLatestCryptoRatesMessageIndex(html) {
+    const PRIMARY = 'Actualización de tasas';
+    const today = moment.tz(TIMEZONE).format('DD/MM/YYYY');
+
+    const isToday = (snippet) => {
+        const dateMatch = snippet.match(/Fecha:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (!dateMatch) return false;
+        const msgDate = `${dateMatch[1].padStart(2, '0')}/${dateMatch[2].padStart(2, '0')}/${dateMatch[3]}`;
+        return msgDate === today;
+    };
+
+    const occurrences = [];
+    let searchFrom = 0;
+    while (true) {
+        const idx = html.indexOf(PRIMARY, searchFrom);
+        if (idx === -1) break;
+        occurrences.push(idx);
+        searchFrom = idx + PRIMARY.length;
+    }
+
+    // De más reciente a más antiguo
+    for (let i = occurrences.length - 1; i >= 0; i--) {
+        const idx = occurrences[i];
+        const snippet = html.substring(idx, Math.min(idx + 3000, html.length));
+        if (!isToday(snippet)) continue;
+        if (snippet.includes('criptomonedas')) return idx;
+    }
+
+    // Fallback: cualquier mensaje de tasas de hoy
+    return findLatestRatesMessageIndex(html);
+}
+
 // ========== FETCH TASAS DESDE TELEGRAM @eltoquecom ==========
 async function fetchTelegramRates(retries = 2, baseDelay = 2000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -866,6 +902,93 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
         return true;
     }
 
+    // Normaliza un número que viene del OCR en español: la coma es separador decimal.
+    // "690,00" → 690.00 · "1.234,56" → 1234.56 · "690.00" → 690.00
+    function normalizeNumber(raw) {
+        let s = String(raw == null ? '' : raw).trim();
+        if (!s) return null;
+        if (s.includes(',')) {
+            s = s.replace(/\./g, '').replace(',', '.');
+        }
+        const val = parseFloat(s);
+        return isNaN(val) ? null : val;
+    }
+
+    // Entre varios números candidatos, elige el plausible más cercano a la tasa de la BD.
+    function pickBest(currency, candidates) {
+        const base = currency === 'USDT' ? dbUsdt : dbTrx;
+        let best = null, bestDist = Infinity;
+        for (const cand of (candidates || [])) {
+            const val = normalizeNumber(cand);
+            if (val == null || !isPlausible(currency, val)) continue;
+            const dist = base != null && base > 0 ? Math.abs(val - base) : 0;
+            if (dist < bestDist) { best = val; bestDist = dist; }
+        }
+        return best;
+    }
+
+    // La tarjeta de elTOQUE es una TABLA (nombres en una columna y precios en CUP en otra),
+    // por lo que el regex anterior "USDT <num> CUP" jamás podía coincidir con su layout.
+    // Se prueban varias estrategias y cada valor se valida con isPlausible contra la BD.
+    function extractCryptoRatesFromOcr(parsedText) {
+        const result = { usdt: null, trx: null };
+        const text = String(parsedText || '');
+        if (!text) return result;
+
+        // 1) Línea a línea (con isTable=true OCR.space devuelve una fila por línea: "USDT (TRC20) 690,00")
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        for (const line of lines) {
+            for (const cur of ['USDT', 'TRX']) {
+                const key = cur.toLowerCase();
+                if (result[key] != null) continue;
+                if (!line.includes(cur)) continue;
+                result[key] = pickBest(cur, line.match(/\d[\d.,]*/g));
+            }
+        }
+        if (result.usdt != null && result.trx != null) return result;
+
+        // 2) Adyacente: primer número plausible que sigue al ticker (aunque haya texto de por medio)
+        const flat = text.replace(/\s+/g, ' ').trim();
+        for (const cur of ['USDT', 'TRX']) {
+            const key = cur.toLowerCase();
+            if (result[key] != null) continue;
+            const idx = flat.indexOf(cur);
+            if (idx === -1) continue;
+            const window = flat.substring(idx + cur.length, idx + cur.length + 300);
+            result[key] = pickBest(cur, window.match(/\d[\d.,]*/g));
+        }
+        if (result.usdt != null && result.trx != null) return result;
+
+        // 3) Posicional: los precios CUP aparecen (tras los nombres) en el MISMO orden que los
+        //    tickers. El patrón tolera nombres partidos tipo "B T C".
+        const up = flat.toUpperCase();
+        const tickerRegex = /(?:\b)?(?:U\s*S\s*D\s*T|T\s*R\s*X|B\s*T\s*C|B\s*N\s*B|E\s*T\s*H|L\s*T\s*C)(?:\b)?/g;
+        const tickers = [];
+        let lastTickIdx = -1;
+        let m;
+        while ((m = tickerRegex.exec(up)) !== null) {
+            tickers.push(m[0].replace(/\s+/g, '').toUpperCase());
+            lastTickIdx = m.index;
+        }
+        if (tickers.length > 0) {
+            const anchor = up.indexOf('ESTABLECIDA');
+            const numberSource = anchor !== -1 ? up.substring(anchor) : up.substring(Math.max(0, lastTickIdx));
+            const cleanNums = (numberSource.match(/\d[\d.,]*/g) || []).map(normalizeNumber).filter(v => v != null);
+            for (const cur of ['USDT', 'TRX']) {
+                const key = cur.toLowerCase();
+                if (result[key] != null) continue;
+                const rel = tickers.lastIndexOf(cur);
+                if (rel === -1) continue;
+                if (rel < cleanNums.length) {
+                    const cand = cleanNums[rel];
+                    if (isPlausible(cur, cand)) result[key] = cand;
+                }
+            }
+        }
+
+        return result;
+    }
+
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
             console.log(`[OCR] Intento ${attempt}/${retries}: Buscando imágenes en @eltoquecom...`);
@@ -887,7 +1010,7 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
 
             const html = resp.data;
 
-            const lastIdx = findLatestRatesMessageIndex(html);
+            const lastIdx = findLatestCryptoRatesMessageIndex(html);
 
             if (lastIdx === -1) {
                 console.error('[OCR] No se encontró mensaje de tasas de HOY en el canal');
@@ -923,6 +1046,7 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
                         url: imageUrl,
                         language: 'spa',
                         OCREngine: '2',
+                        isTable: 'true',
                         isOverlayRequired: 'false'
                     }).toString(),
                     {
@@ -940,27 +1064,22 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
                 } else {
                     const parsedText = ocrData.ParsedResults?.[0]?.ParsedText || '';
                     if (parsedText) {
-                        const usdtMatch = parsedText.match(/USDT[:\s]*([\d,.]+)\s*CUP/i);
-                        if (usdtMatch) {
-                            const val = parseFloat(usdtMatch[1].replace(/,/g, ''));
-                            if (isPlausible('USDT', val)) {
-                                foundUsdt = val;
-                                console.log(`[OCR] USDT encontrado: ${val} (imagen cripto)`);
-                            } else {
-                                console.warn(`[OCR] USDT=${val} fuera de rango (base=${dbUsdt}), se ignora`);
-                            }
+                        console.log(`[OCR] Texto OCR (primeros 400): ${parsedText.replace(/\s+/g, ' ').trim().substring(0, 400)}`);
+                        const rates = extractCryptoRatesFromOcr(parsedText);
+                        if (rates.usdt != null) {
+                            foundUsdt = rates.usdt;
+                            console.log(`[OCR] USDT encontrado: ${foundUsdt} (imagen cripto)`);
+                        } else {
+                            console.warn(`[OCR] USDT no detectado en la imagen cripto (base=${dbUsdt})`);
                         }
-
-                        const trxMatch = parsedText.match(/TRX[:\s]*([\d,.]+)\s*CUP/i);
-                        if (trxMatch) {
-                            const val = parseFloat(trxMatch[1].replace(/,/g, ''));
-                            if (isPlausible('TRX', val)) {
-                                foundTrx = val;
-                                console.log(`[OCR] TRX encontrado: ${val} (imagen cripto)`);
-                            } else {
-                                console.warn(`[OCR] TRX=${val} fuera de rango (base=${dbTrx}), se ignora`);
-                            }
+                        if (rates.trx != null) {
+                            foundTrx = rates.trx;
+                            console.log(`[OCR] TRX encontrado: ${foundTrx} (imagen cripto)`);
+                        } else {
+                            console.warn(`[OCR] TRX no detectado en la imagen cripto (base=${dbTrx})`);
                         }
+                    } else {
+                        console.warn('[OCR] OCR.space no devolvió texto (ParsedText vacío).');
                     }
                 }
             } catch (imgErr) {
