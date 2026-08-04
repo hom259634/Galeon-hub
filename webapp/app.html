@@ -2103,7 +2103,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         function updateTransferAvailable() {
             const currency = document.getElementById('transferCurrency').value;
             const balance = getWithdrawAvailableBalance(currency);
-            document.getElementById('transferAvailable').innerText = `Disponible en ${currency}: ${balance.toFixed(2)}`;
+            if (currency === 'USD') {
+                const cupApprox = (balance * exchangeRates.rate).toFixed(2);
+                document.getElementById('transferAvailable').innerText = `Disponible en ${currency}: ${balance.toFixed(2)} (aprox. ${cupApprox} CUP)`;
+            } else {
+                document.getElementById('transferAvailable').innerText = `Disponible en ${currency}: ${balance.toFixed(2)}`;
+            }
         }
 
         document.getElementById('submitDepositBtn').addEventListener('click', async () => {
