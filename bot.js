@@ -1244,21 +1244,6 @@ async function getUser(telegramId, firstName = '', username = null, ctx = null) 
 
         const currentBonus = await getBonusCupDefault();
 
-        // Si el usuario fue eliminado previamente (existe en deleted_users), marcar la
-        // re-registración: así /start mostrará el mensaje de "vuelta" en lugar de repetir
-        // bienvenida y bono, aunque se conserva la lógica de ingreso (bono y referido).
-        let isReRegistered = false;
-        try {
-            const { data: deletedRecord } = await supabase
-                .from('deleted_users')
-                .select('telegram_id')
-                .eq('telegram_id', telegramId)
-                .maybeSingle();
-            isReRegistered = !!deletedRecord;
-        } catch (e) {
-            console.error('Error consultando deleted_users en getUser:', e?.message || e);
-        }
-
         const { data: newUser, error: insertError } = await supabase
             .from('users')
             .insert({
@@ -1286,7 +1271,6 @@ async function getUser(telegramId, firstName = '', username = null, ctx = null) 
 
         if (ctx?.session) {
             ctx.session.isNewUser = true;
-            ctx.session.reRegistered = isReRegistered;
         }
 
         return newUser;
@@ -1942,11 +1926,6 @@ bot.command('start', async (ctx) => {
     const me = await ctx.telegram.getMe().catch(() => ({}));
     const botName = me.first_name || 'el Bot';
 
-    // Usuario re-registrado tras haber sido eliminado: se conserva la lógica de ingreso
-    // (bono y referido), pero /start muestra el mensaje de "vuelta" en lugar de repetir
-    // la bienvenida y el mensaje de otorgamiento del bono.
-    const isReRegistered = !!ctx.session?.reRegistered;
-
     if (refParam && ctx.session?.isNewUser) {
         const refId = parseInt(refParam);
         if (refId && refId !== uid) {
@@ -1959,7 +1938,7 @@ bot.command('start', async (ctx) => {
         }
     }
 
-    if (ctx.session?.isNewUser && !isReRegistered) {
+    if (ctx.session?.isNewUser) {
         await safeEdit(ctx,
             `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(formatBotDisplayName(botName))}, tu asistente de la suerte 🍀\n\n` +
             `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
@@ -1975,19 +1954,17 @@ bot.command('start', async (ctx) => {
     }
 
     if (ctx.session?.isNewUser) {
-        if (!isReRegistered) {
-            const bonusAmount = parseFloat(ctx.dbUser?.bonus_cup);
-            const normalizedBonus = Number.isFinite(bonusAmount) ? bonusAmount : BONUS_CUP_DEFAULT;
-            if (normalizedBonus > 0)
-            {
-                const bonusDisplay = Number.isInteger(normalizedBonus) ? normalizedBonus.toFixed(0) : normalizedBonus.toFixed(2);
-                await ctx.reply(
-                    `🎁 <b>¡Bono de bienvenida!</b>\n\n` +
-                    `Has recibido <b>${bonusDisplay} CUP</b> como bono no transferible ni retirable.\n` +
-                    `Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`,
-                    { parse_mode: 'HTML' }
-                );
-            }
+        const bonusAmount = parseFloat(ctx.dbUser?.bonus_cup);
+        const normalizedBonus = Number.isFinite(bonusAmount) ? bonusAmount : BONUS_CUP_DEFAULT;
+        if (normalizedBonus > 0)
+        {
+            const bonusDisplay = Number.isInteger(normalizedBonus) ? normalizedBonus.toFixed(0) : normalizedBonus.toFixed(2);
+            await ctx.reply(
+                `🎁 <b>¡Bono de bienvenida!</b>\n\n` +
+                `Has recibido <b>${bonusDisplay} CUP</b> como bono no transferible ni retirable.\n` +
+                `Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`,
+                { parse_mode: 'HTML' }
+            );
         }
         ctx.session.isNewUser = false;
     }

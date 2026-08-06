@@ -1925,6 +1925,7 @@ app.post('/api/bets', async (req, res) => {
 
         // ---------- REVERTIR COMISIÓN ANTERIOR (SIN NOTIFICAR AÚN) ----------
         let referrerStateAfterRevert = { cup: 0, usd: 0, bonus_cup: 0 };
+        let revertReady = false;
         let oldReferrerId = null;
 
         if (existingBet.referrer_id && existingBet.commission_amount > 0) {
@@ -1969,6 +1970,7 @@ app.post('/api/bets', async (req, res) => {
                 }
 
                 referrerStateAfterRevert = { cup: cupAfter, usd: usdAfter, bonus_cup: bonusAfter };
+                revertReady = true;
                 // ❗️ NO se envía notificación aquí
             }
         }
@@ -1991,6 +1993,25 @@ app.post('/api/bets', async (req, res) => {
             }
         }
 
+        // ---------- REVERTIR COMISIÓN ANTERIOR EN LA BD ----------
+        // Se persiste SIEMPRE (independiente de comparaciones de IDs), para que el
+        // saldo del referidor quede sin la comisión vieja antes de acreditar la nueva.
+        if (oldReferrerId && revertReady) {
+            const { error: revertPersistError } = await supabase
+                .from('users')
+                .update({
+                    cup: referrerStateAfterRevert.cup,
+                    usd: referrerStateAfterRevert.usd,
+                    bonus_cup: referrerStateAfterRevert.bonus_cup,
+                    updated_at: new Date()
+                })
+                .eq('telegram_id', oldReferrerId);
+            if (revertPersistError) {
+                console.error('Error revirtiendo comisión anterior en edición:', revertPersistError);
+                return res.status(500).json({ error: 'Error al procesar la edición' });
+            }
+        }
+
         // ---------- CALCULAR NUEVA COMISIÓN (SOLO CUP) ----------
         let newCommissionData = null;
         const { data: userWithRef } = await supabase
@@ -2001,17 +2022,14 @@ app.post('/api/bets', async (req, res) => {
 
         if (userWithRef && userWithRef.ref_by) {
             const newReferrerId = userWithRef.ref_by;
-            let newReferrer;
-            if (newReferrerId === oldReferrerId) {
-                newReferrer = referrerStateAfterRevert;
-            } else {
-                const { data: fetched } = await supabase
-                    .from('users')
-                    .select('cup, usd, bonus_cup')
-                    .eq('telegram_id', newReferrerId)
-                    .single();
-                newReferrer = fetched || { cup: 0, usd: 0, bonus_cup: 0 };
-            }
+            // Volver a leer el saldo del referidor: si es el mismo referidor, ya
+            // quedó sin la comisión vieja gracias a la reversión persistida arriba.
+            const { data: fetched } = await supabase
+                .from('users')
+                .select('cup, usd, bonus_cup')
+                .eq('telegram_id', newReferrerId)
+                .single();
+            const newReferrer = fetched || { cup: 0, usd: 0, bonus_cup: 0 };
 
             const usdRate = await getExchangeRateUSD();
             let effectiveRate = await getReferralCommissionRate();
@@ -2104,7 +2122,9 @@ app.post('/api/bets', async (req, res) => {
             }
         }
 
-        // ========== PERSISTIR CAMBIOS DE COMISIÓN (SOLO SI LA VALIDACIÓN FUE EXITOSA) ==========
+        // ========== PERSISTIR COMISIÓN NUEVA (SOLO SI LA VALIDACIÓN FUE EXITOSA) ==========
+        // La reversión de la comisión anterior ya quedó persistida más arriba,
+        // de modo que aquí solo se acredita la comisión nueva sobre ese saldo.
         if (newCommissionData && newCommissionData.referrer_id) {
             await supabase
                 .from('users')
@@ -2114,21 +2134,10 @@ app.post('/api/bets', async (req, res) => {
                     updated_at: new Date()
                 })
                 .eq('telegram_id', newCommissionData.referrer_id);
-        } else if (oldReferrerId) {
-            // No hay nueva comisión, pero sí se revirtió una anterior: persistir la reversión
-            await supabase
-                .from('users')
-                .update({
-                    cup: referrerStateAfterRevert.cup,
-                    usd: referrerStateAfterRevert.usd,
-                    bonus_cup: referrerStateAfterRevert.bonus_cup,
-                    updated_at: new Date()
-                })
-                .eq('telegram_id', oldReferrerId);
         }
 
         // Revertir bono restante si el referidor quedó por debajo del umbral
-        if (oldReferrerId && oldReferrerId !== (newCommissionData?.referrer_id || null)) {
+        if (oldReferrerId && String(oldReferrerId) !== String(newCommissionData?.referrer_id || '')) {
             await revertBonusIfBelowThreshold(oldReferrerId);
         }
         if (newCommissionData?.referrer_id) {
