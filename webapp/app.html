@@ -608,6 +608,18 @@
     </div>
 </div>
 
+<!-- MODAL para confirmar recorte al máximo permitido (números repetidos) -->
+<div id="limitOverrideModal" class="modal hidden" onclick="if(event.target===this) this.classList.add('hidden')">
+    <div class="modal-content" style="padding-top:22px;">
+        <h3 class="text-lg font-bold text-white mb-4">4pu3$t4$ Qva®</h3>
+        <p id="limitOverrideText" class="text-sm text-gray-300 mt-4 mb-6" style="line-height:1.4"></p>
+        <div class="flex gap-3">
+            <button onclick="rejectLimitOverride()" class="flex-1 bg-red-600 py-2 rounded-lg">❌ No, cancelar</button>
+            <button onclick="acceptLimitOverride()" class="flex-1 bg-green-600 py-2 rounded-lg">✅ Sí, apostar</button>
+        </div>
+    </div>
+</div>
+
 <script>
     (function() {
         const TG = window.Telegram.WebApp;
@@ -1111,6 +1123,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             return [match[1], match[2]].sort().join('x');
         }
 
+        // Une una lista de números con "y" antes del último
+        function joinListWithY(list) {
+            const items = list.map(String);
+            if (items.length <= 1) return items.join('');
+            const allButLast = items.slice(0, -1).join(', ');
+            return `${allButLast} y ${items[items.length - 1]}`;
+        }
+
         // ========== VALIDACIÓN DE LÍMITES ACUMULADOS POR NÚMERO ==========
         function validateBetLimits(items, betType, priceData) {
             const maxCup = priceData?.max_cup;
@@ -1121,6 +1141,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const article = betType === 'centena' ? 'La' : 'El';
 
             const grouped = {};
+            const repeated = {};
             for (const item of items) {
                 const num = betType === 'parle'
                     ? (normalizeParleValue(item.numero) || item.numero)
@@ -1130,6 +1151,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (!grouped[num]) grouped[num] = { cup: 0, usd: 0 };
                 grouped[num].cup += cup;
                 grouped[num].usd += usd;
+                repeated[num] = (repeated[num] || 0) + 1;
             }
 
             const cupExceeders = [];
@@ -1162,7 +1184,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const maxParts = [];
                 if (cupExceeders.length > 0) maxParts.push(`${parseFloat(maxCup).toFixed(2)} CUP`);
                 if (usdExceeders.length > 0) maxParts.push(`${parseFloat(maxUsd).toFixed(2)} USD`);
-                return { ok: false, error: `❌ ${label} ${allNums.join(', ')} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.` };
+                // Solo se ofrece "apostar hasta el máximo" cuando todos los números
+                // excedidos se mencionaron 2+ veces en la propia jugada.
+                const confirmable = allNums.length > 0 && allNums.every(n => (repeated[n] || 0) >= 2);
+                return { ok: false, error: `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`, confirmable };
             }
             return { ok: true };
         }
@@ -1306,7 +1331,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             // Validar máximos acumulados por número único
             const limitCheck = validateBetLimits(parsed.items, selectedBetType, price);
-            if (!limitCheck.ok) {
+            if (!limitCheck.ok && !limitCheck.confirmable) {
                 iziToast.error({ message: limitCheck.error });
                 return;
             }
@@ -1327,24 +1352,71 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
             }
 
+            const payload = {
+                userId: currentUser.telegram_id,
+                lottery: selectedLottery,
+                betType: selectedBetType,
+                bet_type: selectedBetType,
+                rawText,
+                sessionId: activeSession.id
+            };
+            if (window.editingBetId) {
+                payload.betId = window.editingBetId;
+            }
+            sendBetRequest(payload);
+        });
+
+        let pendingBetPayload = null;
+
+        function limitOverrideAdmissible(exceedData) {
+            const parts = [];
+            let isSingleOne = false;
+            if (exceedData && exceedData.admissibleCup > 0) {
+                parts.push(`${exceedData.admissibleCup.toFixed(2)} CUP`);
+                isSingleOne = !(exceedData.admissibleUsd > 0) && exceedData.admissibleCup === 1;
+            }
+            if (exceedData && exceedData.admissibleUsd > 0) {
+                parts.push(`${exceedData.admissibleUsd.toFixed(2)} USD`);
+                isSingleOne = isSingleOne || (!(exceedData.admissibleCup > 0) && exceedData.admissibleUsd === 1);
+            }
+            return { text: parts.join(' y '), isSingleOne };
+        }
+
+        function showLimitOverrideModal(errorText, exceedData) {
+            const textEl = document.getElementById('limitOverrideText');
+            if (textEl) {
+                const { text, isSingleOne } = limitOverrideAdmissible(exceedData);
+                const question = isSingleOne ? '¿Desea apostárselo?' : '¿Deseas apostárselos?';
+                const admissibleLine = text ? `<br><br>Monto admisible: ${text}.` : '';
+                textEl.innerHTML = `${errorText}${admissibleLine}<br>${question}`;
+            }
+            document.getElementById('limitOverrideModal').classList.remove('hidden');
+        }
+
+        function acceptLimitOverride() {
+            document.getElementById('limitOverrideModal').classList.add('hidden');
+            const payload = pendingBetPayload;
+            pendingBetPayload = null;
+            if (!payload) return;
+            payload.confirmLimitOverride = true;
+            sendBetRequest(payload);
+        }
+
+        function rejectLimitOverride() {
+            document.getElementById('limitOverrideModal').classList.add('hidden');
+            pendingBetPayload = null;
+            iziToast.info({ message: '❌ La apuesta fue cancelada.' });
+        }
+        window.acceptLimitOverride = acceptLimitOverride;
+        window.rejectLimitOverride = rejectLimitOverride;
+
+        async function sendBetRequest(payload) {
             // Bloquear botón para evitar doble envío
             submitBetBtn.disabled = true;
             const isEditing = !!window.editingBetId;
             submitBetBtn.innerHTML = isEditing ? '<i class="fas fa-save mr-2"></i>Guardando...' : '<i class="fas fa-check-circle mr-2"></i>Registrando...';
 
             try {
-                const payload = {
-                    userId: currentUser.telegram_id,
-                    lottery: selectedLottery,
-                    betType: selectedBetType,
-                    bet_type: selectedBetType,
-                    rawText,
-                    sessionId: activeSession.id
-                };
-                if (window.editingBetId) {
-                    payload.betId = window.editingBetId;
-                }
-
                 const res = await fetch('/api/bets', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1360,7 +1432,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     resetBetEditMode(true, true);
                     showSection('home');
                 } else {
-                    iziToast.error({ message: data.error || 'No se pudo registrar' });
+                    if (data.code === 'LIMIT_EXCEED_CONFIRMABLE' && data.exceedData) {
+                        pendingBetPayload = payload;
+                        showLimitOverrideModal(data.error, data.exceedData);
+                    } else {
+                        iziToast.error({ message: data.error || 'No se pudo registrar' });
+                    }
                 }
             } catch (e) {
                 console.error(e);
@@ -1375,7 +1452,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     submitBetBtn.innerHTML = '<i class="fas fa-save mr-2"></i>Guardar cambios';
                 }
             }
-        });
+        }
 
         async function updateReferralRateText() {
             try {
