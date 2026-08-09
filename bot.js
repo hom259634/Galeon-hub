@@ -311,7 +311,7 @@ async function safeEdit(ctx, text, keyboard = null) {
 function clearPendingFlow(session) {
     const pendingKeys = [
         'supportReplyTo', 'supportReplyMessageId',
-        'awaitingBet', 'betType', 'lottery', 'sessionId',
+        'awaitingBet', 'betType', 'lottery', 'sessionId', 'pendingBetOverride',
         'awaitingDepositPhoto', 'awaitingDepositAmount', 'depositMethod', 'depositPhotoBuffer',
         'awaitingWithdrawAmount', 'withdrawMethod', 'withdrawAmount', 'withdrawCurrency',
         'awaitingWithdrawWallet', 'withdrawWallet',
@@ -1271,6 +1271,18 @@ async function getUser(telegramId, firstName = '', username = null, ctx = null) 
 
         if (ctx?.session) {
             ctx.session.isNewUser = true;
+            // Si el usuario fue eliminado previamente por un admin, queda bloqueado
+            // hasta que toque /start (solo entonces recibe bienvenida + bono).
+            try {
+                const { data: deletedRec } = await supabase
+                    .from('deleted_users')
+                    .select('telegram_id')
+                    .eq('telegram_id', telegramId)
+                    .maybeSingle();
+                if (deletedRec) ctx.session.isDeletedUser = true;
+            } catch (e) {
+                console.error('Error consultando deleted_users:', e);
+            }
         }
 
         return newUser;
@@ -1441,6 +1453,15 @@ function expandDTNumbers(token, betType) {
     return [];
 }
 
+// Une una lista separando por comas y añade "y" antes del último elemento.
+// Ej: [1] → "1" · [1, 2] → "1 y 2" · [1, 2, 3] → "1, 2 y 3"
+function joinListWithY(arr) {
+    if (arr.length === 0) return '';
+    if (arr.length === 1) return String(arr[0]);
+    if (arr.length === 2) return `${arr[0]} y ${arr[1]}`;
+    return `${arr.slice(0, -1).join(', ')} y ${arr[arr.length - 1]}`;
+}
+
 // ========== VALIDACIÓN DE LÍMITES ACUMULADOS POR NÚMERO ==========
 async function validateBetLimits(items, betType, priceData, { userId, sessionId, excludeBetId } = {}) {
     const maxCup = priceData?.max_cup;
@@ -1450,18 +1471,25 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
     const typeLabel = betType === 'fijo' ? 'número' : formatBetTypeLabel(betType).toLowerCase();
     const article = betType === 'centena' ? 'La' : 'El';
 
+    const numOf = (item) => betType === 'parle'
+        ? (normalizeParleValue(item.numero) || item.numero)
+        : item.numero;
+    const cupOf = (item) => item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+    const usdOf = (item) => item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+
     const grouped = {};
+    const repeated = {};
     for (const item of items) {
-        const num = betType === 'parle'
-            ? (normalizeParleValue(item.numero) || item.numero)
-            : item.numero;
-        const cup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
-        const usd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+        const num = numOf(item);
+        const cup = cupOf(item);
+        const usd = usdOf(item);
         if (!grouped[num]) grouped[num] = { cup: 0, usd: 0 };
         grouped[num].cup += cup;
         grouped[num].usd += usd;
+        repeated[num] = (repeated[num] || 0) + 1;
     }
 
+    const existingTotals = {};
     // Acumular apuestas existentes del mismo usuario/sesión/tipo
     if (userId && sessionId) {
         try {
@@ -1475,11 +1503,12 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
             const { data: existingBets } = await query;
             for (const bet of (existingBets || [])) {
                 for (const item of (bet.items || [])) {
-                    const num = betType === 'parle'
-                        ? (normalizeParleValue(item.numero) || item.numero)
-                        : item.numero;
-                    const cup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
-                    const usd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+                    const num = numOf(item);
+                    const cup = cupOf(item);
+                    const usd = usdOf(item);
+                    if (!existingTotals[num]) existingTotals[num] = { cup: 0, usd: 0 };
+                    existingTotals[num].cup += cup;
+                    existingTotals[num].usd += usd;
                     if (!grouped[num]) grouped[num] = { cup: 0, usd: 0 };
                     grouped[num].cup += cup;
                     grouped[num].usd += usd;
@@ -1520,9 +1549,258 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
         const maxParts = [];
         if (cupExceeders.length > 0) maxParts.push(`${parseFloat(maxCup).toFixed(2)} CUP`);
         if (usdExceeders.length > 0) maxParts.push(`${parseFloat(maxUsd).toFixed(2)} USD`);
-        return { ok: false, error: `❌ ${label} ${allNums.join(', ')} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.` };
+        // La confirmación de "apostar hasta el máximo" solo aplica si TODOS los
+        // números excedidos se mencionaron 2+ veces en la propia jugada y no hay
+        // ningún otro error (el caller ya validó formato, mínimos y saldo antes).
+        const confirmable = allNums.length > 0 && allNums.every(n => (repeated[n] || 0) >= 2);
+        return {
+            ok: false,
+            error: `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`,
+            confirmable,
+            exceedData: {
+                cupExceeders,
+                usdExceeders,
+                maxCup: maxCup !== null && maxCup !== undefined ? parseFloat(maxCup) : null,
+                maxUsd: maxUsd !== null && maxUsd !== undefined ? parseFloat(maxUsd) : null,
+                existingTotals
+            }
+        };
     }
     return { ok: true };
+}
+
+// Recorta los montos de los números excedidos hasta el máximo permitido, teniendo
+// en cuenta apuestas previas (existingTotals). Devuelve los items y totales nuevos.
+function clampItemsToMax(items, betType, exceedData) {
+    if (!exceedData) return { items, totalCUP: 0, totalUSD: 0 };
+    const maxCup = exceedData.maxCup;
+    const maxUsd = exceedData.maxUsd;
+    const existingTotals = exceedData.existingTotals || {};
+    const usedCup = {};
+    const usedUsd = {};
+    const newItems = items.map(item => {
+        const num = betType === 'parle'
+            ? (normalizeParleValue(item.numero) || item.numero)
+            : item.numero;
+        let cup = parseFloat(item.cup) || 0;
+        let usd = parseFloat(item.usd) || 0;
+        if (maxCup !== null && cup > 0) {
+            const base = (existingTotals[num]?.cup) || 0;
+            const used = usedCup[num] || 0;
+            const allowed = Math.max(0, Math.round((maxCup - base - used) * 100) / 100);
+            if (cup > allowed) cup = allowed;
+            usedCup[num] = Math.round((used + cup) * 100) / 100;
+        }
+        if (maxUsd !== null && usd > 0) {
+            const base = (existingTotals[num]?.usd) || 0;
+            const used = usedUsd[num] || 0;
+            const allowed = Math.max(0, Math.round((maxUsd - base - used) * 100) / 100);
+            if (usd > allowed) usd = allowed;
+            usedUsd[num] = Math.round((used + usd) * 100) / 100;
+        }
+        return { ...item, cup, usd };
+    });
+    let totalCUP = 0, totalUSD = 0;
+    for (const it of newItems) { totalCUP += it.cup; totalUSD += it.usd; }
+    return { items: newItems, totalCUP, totalUSD };
+}
+
+// ========== COLOCAR LA JUGADA Y CONFIRMAR ==========
+// Debita saldos, registra la apuesta, procesa la comisión de referido y confirma.
+// Se usa tanto en el flujo normal como al confirmar el recorte al máximo permitido.
+async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawText, items, totalCUP, totalUSD, session }) {
+    const cupBalance = parseFloat(user.cup) || 0;
+    const usdBalance = parseFloat(user.usd) || 0;
+    const bonusBalance = parseFloat(user.bonus_cup) || 0;
+
+    if (totalCUP <= 0 && totalUSD <= 0) {
+        await ctx.reply('❌ No se detectó monto en CUP ni USD en la jugada.', getMainKeyboard(ctx));
+        if (session) delete session.pendingBetOverride;
+        return false;
+    }
+
+    // Para CUP permitimos combinar saldo principal + bono
+    if (totalCUP > 0) {
+        const totalAvailableCUP = cupBalance + bonusBalance;
+        if (totalAvailableCUP < totalCUP) {
+            await ctx.reply('❌ Saldo CUP insuficiente. Por favor, recarga.', getMainKeyboard(ctx));
+            if (session) delete session.pendingBetOverride;
+            return false;
+        }
+    }
+    if (totalUSD > 0 && usdBalance < totalUSD) {
+        await ctx.reply('❌ Saldo USD insuficiente. Por favor, recarga.', getMainKeyboard(ctx));
+        if (session) delete session.pendingBetOverride;
+        return false;
+    }
+
+    // Preparar objeto de actualización sólo con las monedas que cambian
+    const updates = { updated_at: new Date() };
+    let bonusUsed = 0;
+    let cupDebit = 0;
+    if (totalCUP > 0) {
+        // Preferir debitar del saldo principal CUP y luego del bono
+        cupDebit = Math.min(cupBalance, totalCUP);
+        const remaining = totalCUP - cupDebit;
+        bonusUsed = remaining > 0 ? remaining : 0;
+        updates.cup = Math.max(0, cupBalance - cupDebit);
+        if (bonusUsed > 0) {
+            updates.bonus_cup = Math.max(0, bonusBalance - bonusUsed);
+        }
+    }
+    if (totalUSD > 0) updates.usd = Math.max(0, usdBalance - totalUSD);
+
+    await supabase.from('users').update(updates).eq('telegram_id', uid);
+
+    // Guardar la jugada
+    const { data: betInserted, error: betError } = await supabase
+        .from('bets')
+        .insert({
+            user_id: uid,
+            session_id: playSessionId,
+            bet_type: betType,
+            items: items,
+            cost_cup: totalCUP,
+            cost_usd: totalUSD,
+            raw_text: rawText,
+            lottery: session?.lottery || null,
+            bonus_used_cup: bonusUsed,
+            placed_at: new Date()
+        })
+        .select()
+        .single();
+
+    if (betError) {
+        console.error('Error guardando jugada:', betError);
+        await ctx.reply('❌ Error al registrar la jugada. Por favor, intenta de nuevo más tarde.', getMainKeyboard(ctx));
+        if (session) delete session.pendingBetOverride;
+        return false;
+    }
+
+    //---------- Cambios hechos por Luis David -----------//
+    // ========== COMISIÓN POR REFERIDO (CON RAMA USD) ==========
+    if (betInserted) {
+        const { data: userWithRef } = await supabase
+            .from('users')
+            .select('ref_by')
+            .eq('telegram_id', uid)
+            .single();
+
+        if (userWithRef && userWithRef.ref_by) {
+            const referrerId = userWithRef.ref_by;
+            const referrerName = user.first_name || user.username || 'Usuario';
+            const referralRate = await getReferralCommissionRate();
+
+            const { data: referrer } = await supabase
+                .from('users')
+                .select('cup, usd, bonus_cup')
+                .eq('telegram_id', referrerId)
+                .single();
+
+            if (referrer) {
+                // Lógica unificada a CUP
+                const usdRate = await getExchangeRateUSD();
+                const totalCostCUP = (totalCUP || 0) + ((totalUSD || 0) * usdRate);
+                const commissionCUP = totalCostCUP * referralRate;
+
+                if (commissionCUP > 0) {
+                    let newCup = parseFloat(referrer.cup) || 0;
+                    let newUsd = parseFloat(referrer.usd) || 0;
+                    let newBonus = parseFloat(referrer.bonus_cup) || 0;
+
+                    const hasMainBalance = (newCup > 0) || (newUsd > 0);
+                    const hasOnlyBonus = (!hasMainBalance && newBonus > 0);
+
+                    let destination = 'cup';
+                    let bonusMovedCup = 0;
+
+                    if (hasMainBalance) {
+                        newCup += commissionCUP;
+                    } else if (hasOnlyBonus) {
+                        const minDepositCUP = await getMinDepositCUP();
+                        if ((newBonus + commissionCUP) >= minDepositCUP - 0.001) {
+                            newCup += newBonus + commissionCUP;
+                            bonusMovedCup = newBonus;
+                            newBonus = 0;
+                        } else {
+                            newBonus += commissionCUP;
+                            destination = 'bonus_cup';
+                        }
+                    } else {
+                        newCup += commissionCUP;
+                    }
+
+                    const updatePayload = { updated_at: new Date() };
+                    if (newCup !== (parseFloat(referrer.cup) || 0)) updatePayload.cup = newCup;
+                    if (newBonus !== (parseFloat(referrer.bonus_cup) || 0)) updatePayload.bonus_cup = newBonus;
+                    if (newCup > (parseFloat(referrer.cup) || 0)) updatePayload.bonus_updated_by_admin = null;
+
+                    await supabase
+                        .from('users')
+                        .update(updatePayload)
+                        .eq('telegram_id', referrerId);
+
+                    let msg = `🔄 Has recibido una referencia\n\n` +
+                        `👤 De: ${escapeHTML(referrerName)}\n` +
+                        `💰 Monto: ${commissionCUP.toFixed(2)} CUP\n`;
+                    if (bonusMovedCup > 0) {
+                        msg += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
+                    } else if (destination === 'bonus_cup') {
+                        msg += `🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n`;
+                    } else {
+                        msg += `🎁 La referencia ha sido añadida a tu saldo principal.\n`;
+                    }
+                    msg += `📊 Saldo actualizado.`;
+
+                    try {
+                        await bot.telegram.sendMessage(referrerId, msg, { parse_mode: 'HTML' });
+                    } catch (e) {
+                        console.warn('No se pudo notificar al referidor:', e.message);
+                    }
+
+                    await supabase
+                        .from('bets')
+                        .update({
+                            referrer_id: referrerId,
+                            commission_amount: commissionCUP,
+                            commission_currency: 'CUP',
+                            commission_destination: destination,
+                            referrer_bonus_before: bonusMovedCup
+                        })
+                        .eq('id', betInserted.id);
+                }
+            }
+        }
+    }
+
+    // Confirmación al usuario
+    let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
+        `🎰 Lotería: ${escapeHTML(session?.lottery || 'N/D')}\n` +
+        `🔢 Tipo: ${escapeHTML(formatBetTypeLabel(betType))}\n` +
+        `📋 Jugadas:\n<code>${escapeHTML(rawText)}</code>\n` +
+        `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
+        `¡Buena suerte! 🍀`;
+    if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
+        const remainingBonus = bonusBalance - bonusUsed;
+        if (remainingBonus === 0) {
+            confirmMsg += `\n\n🎁 Se usaron los ${bonusUsed.toFixed(2)} CUP de tu bono.`;
+        } else {
+            confirmMsg += `\n\n🎁 Se usaron ${bonusUsed.toFixed(2)} CUP de tu bono.`;
+        }
+    }
+    if (arguments[1] && arguments[1].clamped) {
+        confirmMsg += `\n\n✂️ Los números que excedían el máximo se recortaron al monto permitido.`;
+    }
+    await ctx.reply(confirmMsg, { parse_mode: 'HTML' });
+
+    // Limpiar estado de apuesta
+    if (session) {
+        delete session.awaitingBet;
+        delete session.betType;
+        delete session.sessionId;
+        delete session.pendingBetOverride;
+    }
+    return true;
 }
 
 function parseBetLine(line, betType) {
@@ -1909,6 +2187,37 @@ bot.use(async (ctx, next) => {
                 }
                 return;
             }
+
+            // Usuario nuevo o re-registrado tras ser eliminado: solo se activa con
+            // /start (bienvenida + bono). Si fue eliminado por un admin, cualquier
+            // otro comando, botón o mensaje recibe un aviso y NO se procesa hasta
+            // que toque /start. Si es un usuario completamente nuevo, se le da la
+            // bienvenida con cualquier interacción.
+            if (ctx.session?.isNewUser) {
+                const msgText = ctx.message?.text || '';
+                if (!/^\/start(?:\s|$)/.test(msgText)) {
+                    if (ctx.session?.isDeletedUser) {
+                        try {
+                            await ctx.reply(
+                                `👋 ¡Hola de nuevo, ${escapeHTML(firstName)}! ¿En qué podemos ayudarte hoy?\n\n` +
+                                `Por favor, selecciona el botón Inicio en el menú lateral si deseas continuar interactuando con nuestro asistente.`,
+                                { parse_mode: 'HTML' }
+                            );
+                        } catch (blockErr) {
+                            console.error('Error enviando aviso a usuario re-registrado:', blockErr);
+                        }
+                        if (ctx.updateType === 'callback_query') {
+                            await ctx.answerCbQuery().catch(() => {});
+                        }
+                        return;
+                    }
+                    try {
+                        await sendNewUserWelcome(ctx);
+                    } catch (welcomeErr) {
+                        console.error('Error enviando bienvenida a usuario nuevo:', welcomeErr);
+                    }
+                }
+            }
         } catch (e) {
             console.error('Error cargando usuario en middleware:', e);
             ctx.dbUser = { cup: 0, usd: 0 };
@@ -1918,13 +2227,42 @@ bot.use(async (ctx, next) => {
 });
 
 // ========== COMANDOS ==========
-bot.command('start', async (ctx) => {
-    const uid = ctx.from.id;
-    const firstName = ctx.from.first_name || '';
-    const refParam = ctx.payload;
-
+// ========== BIENVENIDA PARA USUARIOS NUEVOS / RE-REGISTRADOS ==========
+// Envía el mensaje de bienvenida y el bono. Solo se ejecuta con /start; cualquier
+// otra interacción queda bloqueada en el middleware hasta que el usuario lo toque.
+async function sendNewUserWelcome(ctx) {
+    const firstName = ctx.from?.first_name || '';
     const me = await ctx.telegram.getMe().catch(() => ({}));
     const botName = me.first_name || 'el Bot';
+
+    await ctx.reply(
+        `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(formatBotDisplayName(botName))}, tu asistente de la suerte 🍀\n\n` +
+        `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
+        `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`,
+        getMainKeyboard(ctx)
+    );
+
+    const bonusAmount = parseFloat(ctx.dbUser?.bonus_cup);
+    const normalizedBonus = Number.isFinite(bonusAmount) ? bonusAmount : BONUS_CUP_DEFAULT;
+    if (normalizedBonus > 0) {
+        const bonusDisplay = Number.isInteger(normalizedBonus) ? normalizedBonus.toFixed(0) : normalizedBonus.toFixed(2);
+        await ctx.reply(
+            `🎁 <b>¡Bono de bienvenida!</b>\n\n` +
+            `Has recibido <b>${bonusDisplay} CUP</b> como bono no transferible ni retirable.\n` +
+            `Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`,
+            { parse_mode: 'HTML' }
+        );
+    }
+
+    if (ctx.session) {
+        ctx.session.isNewUser = false;
+        delete ctx.session.isDeletedUser;
+    }
+}
+
+bot.command('start', async (ctx) => {
+    const uid = ctx.from.id;
+    const refParam = ctx.payload;
 
     if (refParam && ctx.session?.isNewUser) {
         const refId = parseInt(refParam);
@@ -1939,34 +2277,13 @@ bot.command('start', async (ctx) => {
     }
 
     if (ctx.session?.isNewUser) {
-        await safeEdit(ctx,
-            `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(formatBotDisplayName(botName))}, tu asistente de la suerte 🍀\n\n` +
-            `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
-            `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`,
-            getMainKeyboard(ctx)
-        );
+        await sendNewUserWelcome(ctx);
     } else {
         await safeEdit(ctx,
-            `👋 ¡Hola de nuevo, ${escapeHTML(firstName)}! ¿En qué podemos ayudarte hoy?\n\n` +
+            `👋 ¡Hola de nuevo, ${escapeHTML(ctx.from.first_name || '')}! ¿En qué podemos ayudarte hoy?\n\n` +
             `Selecciona una opción del menú para continuar.`,
             getMainKeyboard(ctx)
         );
-    }
-
-    if (ctx.session?.isNewUser) {
-        const bonusAmount = parseFloat(ctx.dbUser?.bonus_cup);
-        const normalizedBonus = Number.isFinite(bonusAmount) ? bonusAmount : BONUS_CUP_DEFAULT;
-        if (normalizedBonus > 0)
-        {
-            const bonusDisplay = Number.isInteger(normalizedBonus) ? normalizedBonus.toFixed(0) : normalizedBonus.toFixed(2);
-            await ctx.reply(
-                `🎁 <b>¡Bono de bienvenida!</b>\n\n` +
-                `Has recibido <b>${bonusDisplay} CUP</b> como bono no transferible ni retirable.\n` +
-                `Puedes usar este bono para jugar y ganar premios reales. ¡Buena suerte! 🍀`,
-                { parse_mode: 'HTML' }
-            );
-        }
-        ctx.session.isNewUser = false;
     }
 });
 
@@ -2264,6 +2581,72 @@ bot.action(/type_(.+)/, async (ctx) => {
             break;
     }
     await safeEdit(ctx, instructions, null);
+});
+
+// --- Confirmación de recorte al máximo permitido (números repetidos) ---
+bot.action('bet_override_accept', async (ctx) => {
+    try {
+        await ctx.answerCbQuery().catch(() => {});
+        const override = ctx.session?.pendingBetOverride;
+        if (!override) {
+            await safeEdit(ctx, '⏳ Esta confirmación ya no está disponible. Por favor, envía tu jugada de nuevo.', null);
+            return;
+        }
+        const { betType, rawText, items, sessionId, lottery, exceedData } = override;
+        if (!sessionId) {
+            await safeEdit(ctx, '❌ No se encontró la sesión de juego activa. Por favor inicia de nuevo con 🎲 Jugar.', getMainKeyboard(ctx));
+            if (ctx.session) delete ctx.session.pendingBetOverride;
+            return;
+        }
+
+        const clamped = clampItemsToMax(items, betType, exceedData);
+        if (clamped.totalCUP <= 0 && clamped.totalUSD <= 0) {
+            await safeEdit(ctx, '❌ Después del recorte no queda monto válido en la jugada. La apuesta fue cancelada.', getMainKeyboard(ctx));
+            if (ctx.session) delete ctx.session.pendingBetOverride;
+            return;
+        }
+
+        const uid = ctx.from.id;
+        const user = ctx.dbUser || { cup: 0, usd: 0, bonus_cup: 0 };
+        ctx.session.pendingBetOverride = null;
+
+        const ok = await placeBetAndConfirm(ctx, {
+            uid,
+            user,
+            betType,
+            playSessionId: sessionId,
+            rawText,
+            items: clamped.items,
+            totalCUP: clamped.totalCUP,
+            totalUSD: clamped.totalUSD,
+            session: ctx.session,
+            clamped: true
+        });
+        // Quitar los botones del mensaje de confirmación
+        await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+        if (ok) {
+            await ctx.editMessageText(`✅ <b>Recorte aceptado</b>\n\nLa apuesta se registró con el monto máximo permitido.`).catch(() => {});
+        }
+    } catch (e) {
+        console.error('Error en bet_override_accept:', e);
+        await ctx.reply('❌ Ocurrió un error al procesar la apuesta. Intenta de nuevo.', getMainKeyboard(ctx)).catch(() => {});
+    }
+});
+
+bot.action('bet_override_reject', async (ctx) => {
+    try {
+        await ctx.answerCbQuery().catch(() => {});
+        if (ctx.session) {
+            delete ctx.session.pendingBetOverride;
+            delete ctx.session.awaitingBet;
+            delete ctx.session.betType;
+            delete ctx.session.sessionId;
+        }
+        await safeEdit(ctx, '❌ La apuesta fue cancelada. Puedes escribir una nueva jugada o volver al menú.', getMainKeyboard(ctx));
+    } catch (e) {
+        console.error('Error en bet_override_reject:', e);
+        await ctx.reply('❌ La apuesta fue cancelada.', getMainKeyboard(ctx)).catch(() => {});
+    }
 });
 
 bot.action('my_money', async (ctx) => {
@@ -5480,18 +5863,9 @@ bot.on(message('text'), async (ctx) => {
                 }
             }
 
-            // Validar máximos acumulados por número único
-            const limitCheck = await validateBetLimits(parsed.items, betType, price, {
-                userId: uid,
-                sessionId: playSessionId,
-                excludeBetId: null
-            });
-            if (!limitCheck.ok) {
-                await ctx.reply(limitCheck.error, getMainKeyboard(ctx));
-                return;
-            }
-
             // Validar saldos y permitir usar bono_cup junto con cup para pagar jugadas en CUP
+            // (se valida ANTES de los límites para que el recorte al máximo solo aplique
+            // cuando sea el ÚNICO error de la jugada)
             const cupBalance = parseFloat(user.cup) || 0;
             const usdBalance = parseFloat(user.usd) || 0;
             const bonusBalance = parseFloat(user.bonus_cup) || 0;
@@ -5515,167 +5889,56 @@ bot.on(message('text'), async (ctx) => {
                 return;
             }
 
-            // Preparar objeto de actualización sólo con las monedas que cambian
-            const updates = { updated_at: new Date() };
-            let bonusUsed = 0;
-            let cupDebit = 0;
-            if (totalCUP > 0) {
-                // Preferir debitar del saldo principal CUP y luego del bono
-                cupDebit = Math.min(cupBalance, totalCUP);
-                const remaining = totalCUP - cupDebit;
-                bonusUsed = remaining > 0 ? remaining : 0;
-                updates.cup = Math.max(0, cupBalance - cupDebit);
-                if (bonusUsed > 0) {
-                    updates.bonus_cup = Math.max(0, bonusBalance - bonusUsed);
+            // Validar máximos acumulados por número único
+            const limitCheck = await validateBetLimits(parsed.items, betType, price, {
+                userId: uid,
+                sessionId: playSessionId,
+                excludeBetId: null
+            });
+            if (!limitCheck.ok) {
+                if (limitCheck.confirmable) {
+                    // Único error: números repetidos que exceden el máximo → preguntar
+                    // si se apuesta hasta el máximo permitido (recorte) o se cancela.
+                    session.pendingBetOverride = {
+                        betType,
+                        rawText,
+                        items: parsed.items,
+                        sessionId: playSessionId,
+                        lottery: session.lottery || null,
+                        exceedData: limitCheck.exceedData
+                    };
+                    const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
+                    const admissibleParts = [];
+                    if (clamped.totalCUP > 0) admissibleParts.push(`${clamped.totalCUP.toFixed(2)} CUP`);
+                    if (clamped.totalUSD > 0) admissibleParts.push(`${clamped.totalUSD.toFixed(2)} USD`);
+                    const isSingleOne = (clamped.totalCUP > 0 && clamped.totalUSD === 0 && clamped.totalCUP === 1)
+                        || (clamped.totalUSD > 0 && clamped.totalCUP === 0 && clamped.totalUSD === 1);
+                    const question = isSingleOne ? '¿Desea apostárselo?' : '¿Deseas apostárselos?';
+                    const admissibleLine = admissibleParts.length > 0 ? `\n\nMonto admisible: ${admissibleParts.join(' y ')}.` : '';
+                    await ctx.reply(`${limitCheck.error}${admissibleLine}\n${question}`, {
+                        reply_markup: Markup.inlineKeyboard([
+                            [Markup.button.callback('✅ Sí, apostar', 'bet_override_accept'),
+                             Markup.button.callback('❌ No, cancelar', 'bet_override_reject')]
+                        ]).reply_markup
+                    });
+                    return;
                 }
-            }
-            if (totalUSD > 0) updates.usd = Math.max(0, usdBalance - totalUSD);
-
-            await supabase.from('users').update(updates).eq('telegram_id', uid);
-
-            // Guardar la jugada
-            // Anadidas las nuevas variables de la apuesta
-            const { data: betInserted, error: betError } = await supabase
-                .from('bets')
-                .insert({
-                    user_id: uid,
-                    session_id: playSessionId,
-                    bet_type: betType,
-                    items: parsed.items,
-                    cost_cup: totalCUP,
-                    cost_usd: totalUSD,
-                    raw_text: rawText,
-                    lottery: session.lottery || null,
-                    bonus_used_cup: bonusUsed,
-                    placed_at: new Date()
-                })
-                .select()
-                .single();
-
-            if (betError) {
-                console.error('Error guardando jugada:', betError);
-                await ctx.reply('❌ Error al registrar la jugada. Por favor, intenta de nuevo más tarde.', getMainKeyboard(ctx));
+                await ctx.reply(limitCheck.error, getMainKeyboard(ctx));
                 return;
             }
-            
-            //---------- Cambios hechos por Luis David -----------//
-            // ========== COMISIÓN POR REFERIDO (CON RAMA USD) ==========
-            if (betInserted) {
-                const { data: userWithRef } = await supabase
-                    .from('users')
-                    .select('ref_by')
-                    .eq('telegram_id', uid)
-                    .single();
 
-                if (userWithRef && userWithRef.ref_by) {
-                    const referrerId = userWithRef.ref_by;
-                    const referrerName = user.first_name || user.username || 'Usuario';
-                    const referralRate = await getReferralCommissionRate();
-
-                    const { data: referrer } = await supabase
-                        .from('users')
-                        .select('cup, usd, bonus_cup')
-                        .eq('telegram_id', referrerId)
-                        .single();
-
-                    if (referrer) {
-                        // Lógica unificada a CUP
-                        const usdRate = await getExchangeRateUSD();
-                        const totalCostCUP = (totalCUP || 0) + ((totalUSD || 0) * usdRate);
-                        const commissionCUP = totalCostCUP * referralRate;
-
-                        if (commissionCUP > 0) {
-                            let newCup = parseFloat(referrer.cup) || 0;
-                            let newUsd = parseFloat(referrer.usd) || 0;
-                            let newBonus = parseFloat(referrer.bonus_cup) || 0;
-
-                            const hasMainBalance = (newCup > 0) || (newUsd > 0);
-                            const hasOnlyBonus = (!hasMainBalance && newBonus > 0);
-
-                            let destination = 'cup';
-                            let bonusMovedCup = 0;
-
-                            if (hasMainBalance) {
-                                newCup += commissionCUP;
-                            } else if (hasOnlyBonus) {
-                                const minDepositCUP = await getMinDepositCUP();
-                                if ((newBonus + commissionCUP) >= minDepositCUP - 0.001) {
-                                    newCup += newBonus + commissionCUP;
-                                    bonusMovedCup = newBonus;
-                                    newBonus = 0;
-                                } else {
-                                    newBonus += commissionCUP;
-                                    destination = 'bonus_cup';
-                                }
-                            } else {
-                                newCup += commissionCUP;
-                            }
-
-                            const updatePayload = { updated_at: new Date() };
-                            if (newCup !== (parseFloat(referrer.cup) || 0)) updatePayload.cup = newCup;
-                            if (newBonus !== (parseFloat(referrer.bonus_cup) || 0)) updatePayload.bonus_cup = newBonus;
-                            if (newCup > (parseFloat(referrer.cup) || 0)) updatePayload.bonus_updated_by_admin = null;
-
-                            await supabase
-                                .from('users')
-                                .update(updatePayload)
-                                .eq('telegram_id', referrerId);
-
-                            let msg = `🔄 Has recibido una referencia\n\n` +
-                                `👤 De: ${escapeHTML(referrerName)}\n` +
-                                `💰 Monto: ${commissionCUP.toFixed(2)} CUP\n`;
-                            if (bonusMovedCup > 0) {
-                                msg += `🎁 Tu bono de bienvenida de ${bonusMovedCup.toFixed(2)} CUP se ha movido a tu saldo principal.\n`;
-                            } else if (destination === 'bonus_cup') {
-                                msg += `🎁 La referencia ha sido añadida a tu bono de bienvenida actual.\n`;
-                            } else {
-                                msg += `🎁 La referencia ha sido añadida a tu saldo principal.\n`;
-                            }
-                            msg += `📊 Saldo actualizado.`;
-
-                            try {
-                                await bot.telegram.sendMessage(referrerId, msg, { parse_mode: 'HTML' });
-                            } catch (e) {
-                                console.warn('No se pudo notificar al referidor:', e.message);
-                            }
-
-                            await supabase
-                                .from('bets')
-                                .update({
-                                    referrer_id: referrerId,
-                                    commission_amount: commissionCUP,
-                                    commission_currency: 'CUP',
-                                    commission_destination: destination,
-                                    referrer_bonus_before: bonusMovedCup
-                                })
-                                .eq('id', betInserted.id);
-                        }
-                    }
-                }
-            }
-
-            // Confirmación al usuario
-            let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
-                `🎰 Lotería: ${escapeHTML(session.lottery || 'N/D')}\n` +
-                `🔢 Tipo: ${escapeHTML(formatBetTypeLabel(betType))}\n` +
-                `📋 Jugadas:\n<code>${escapeHTML(rawText)}</code>\n` +
-                `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
-                `¡Buena suerte! 🍀`;
-            if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
-                // bonusBalance es el saldo de bono antes de la apuesta (definido más arriba)
-                const remainingBonus = bonusBalance - bonusUsed;
-                if (remainingBonus === 0) {
-                    confirmMsg += `\n\n🎁 Se usaron los ${bonusUsed.toFixed(2)} CUP de tu bono.`;
-                } else {
-                    confirmMsg += `\n\n🎁 Se usaron ${bonusUsed.toFixed(2)} CUP de tu bono.`;
-                }
-            }
-            await ctx.reply(confirmMsg, { parse_mode: 'HTML' });
-
-            // Limpiar estado de apuesta
-            delete session.awaitingBet;
-            delete session.betType;
-            delete session.sessionId;
+            // Flujo normal: colocar la jugada
+            await placeBetAndConfirm(ctx, {
+                uid,
+                user,
+                betType,
+                playSessionId,
+                rawText,
+                items: parsed.items,
+                totalCUP,
+                totalUSD,
+                session
+            });
             return;
         } catch (e) {
             console.error('Error procesando jugada:', e);
@@ -6300,7 +6563,7 @@ cron.schedule('31 7 * * *', async () => {
             if (rates.mlc != null) { await setExchangeRateMLC(rates.mlc); collected.mlc = true; }
             console.log(`[Tasas 7:31] Tasas de Telegram guardadas: USD=${rates.usd}, MLC=${rates.mlc}`);
         } else {
-            console.warn('[Tasas 7:31] Telegram no devolvio tasas. Se intentara obtener todo de ElToque a las 8:30.');
+            console.warn('[Tasas 7:31] Telegram no devolvio tasas. Se intentara obtener todo de ElToque a las 8:00.');
         }
         try {
             const ocrRates = await fetchOCRRatesFromImage();
@@ -6309,12 +6572,12 @@ cron.schedule('31 7 * * *', async () => {
                 if (ocrRates.trx != null) { await setExchangeRateTRX(ocrRates.trx); collected.trx = true; }
                 console.log(`[Tasas 7:31] OCR guardado: USDT=${ocrRates.usdt}, TRX=${ocrRates.trx}`);
             } else {
-                console.warn('[Tasas 7:31] OCR no devolvio USDT/TRX. Se intentaran obtener de ElToque a las 8:30.');
+                console.warn('[Tasas 7:31] OCR no devolvio USDT/TRX. Se intentaran obtener de ElToque a las 8:00.');
             }
         } catch (ocrErr) {
             console.error('[Tasas 7:31] Error en OCR:', ocrErr.message);
         }
-        // Guardar qué monedas se colectaron (para que el cron de 8:30 lo lea por moneda)
+        // Guardar qué monedas se colectaron (para que el cron de 8:00 lo lea por moneda)
         await supabase
             .from('app_config')
             .upsert({ key: 'telegram_731', value: JSON.stringify({ ...collected, timestamp: new Date().toISOString() }) }, { onConflict: 'key' });
@@ -6323,10 +6586,10 @@ cron.schedule('31 7 * * *', async () => {
     }
 }, { timezone: TIMEZONE });
 
-// Cron diario 8:30 AM - Completar tasas desde ElToque (USDT, TRX) y broadcast
-cron.schedule('30 8 * * *', async () => {
+// Cron diario 8:00 AM - Completar tasas desde ElToque (USDT, TRX) y broadcast
+cron.schedule('0 8 * * *', async () => {
     try {
-        console.log('[Tasas 8:30] Ejecutando actualización diaria de tasas...');
+        console.log('[Tasas 8:00] Ejecutando actualización diaria de tasas...');
 
         const now = moment().tz(TIMEZONE);
         const dateStr = now.format('DD/MM/YYYY');
@@ -6340,7 +6603,7 @@ cron.schedule('30 8 * * *', async () => {
         try {
             elToqueRates = await fetchElToqueRates();
         } catch (e) {
-            console.error('[Tasas 8:30] ElToque fetch error:', e.message);
+            console.error('[Tasas 8:00] ElToque fetch error:', e.message);
         }
 
         // 3) Determinar qué monedas colectó el cron de 7:31 (solo si el flag es de HOY, no de ayer)
@@ -6353,7 +6616,7 @@ cron.schedule('30 8 * * *', async () => {
                 .single();
             if (tgFlag) tgCollected = JSON.parse(tgFlag.value);
         } catch (e) {
-            console.error('[Tasas 8:30] No se pudo leer flag telegram_731:', e.message);
+            console.error('[Tasas 8:00] No se pudo leer flag telegram_731:', e.message);
         }
         const flagIsToday = !!tgCollected.timestamp &&
             moment(tgCollected.timestamp).tz(TIMEZONE).format('YYYY-MM-DD') === now.format('YYYY-MM-DD');
@@ -6362,7 +6625,7 @@ cron.schedule('30 8 * * *', async () => {
         const tgUsdtOk = flagIsToday && !!tgCollected.usdt;
         const tgTrxOk = flagIsToday && !!tgCollected.trx;
         if (!flagIsToday) {
-            console.warn('[Tasas 8:30] El flag de 7:31 no es de hoy. Todas las tasas se toman de ElToque/DB.');
+            console.warn('[Tasas 8:00] El flag de 7:31 no es de hoy. Todas las tasas se toman de ElToque/DB.');
         }
 
         // 4) Combinar: Telegram 7:31 (si es de hoy), si no ElToque, si no DB
@@ -6371,9 +6634,9 @@ cron.schedule('30 8 * * *', async () => {
         rates.mlc = tgMlcOk ? dbRates.rate_mlc : (elToqueRates?.mlc != null ? elToqueRates.mlc : dbRates.rate_mlc);
         rates.usdt = tgUsdtOk ? dbRates.rate_usdt : (elToqueRates?.usdt != null ? elToqueRates.usdt : dbRates.rate_usdt);
         rates.trx = tgTrxOk ? dbRates.rate_trx : (elToqueRates?.trx != null ? elToqueRates.trx : dbRates.rate_trx);
-        console.log(`[Tasas 8:30] Fuentes → USD: ${tgUsdOk ? 'Telegram 7:31' : (elToqueRates?.usd != null ? 'ElToque' : 'DB')}, MLC: ${tgMlcOk ? 'Telegram 7:31' : (elToqueRates?.mlc != null ? 'ElToque' : 'DB')}, USDT: ${tgUsdtOk ? 'Telegram 7:31' : (elToqueRates?.usdt != null ? 'ElToque' : 'DB')}, TRX: ${tgTrxOk ? 'Telegram 7:31' : (elToqueRates?.trx != null ? 'ElToque' : 'DB')}`);
+        console.log(`[Tasas 8:00] Fuentes → USD: ${tgUsdOk ? 'Telegram 7:31' : (elToqueRates?.usd != null ? 'ElToque' : 'DB')}, MLC: ${tgMlcOk ? 'Telegram 7:31' : (elToqueRates?.mlc != null ? 'ElToque' : 'DB')}, USDT: ${tgUsdtOk ? 'Telegram 7:31' : (elToqueRates?.usdt != null ? 'ElToque' : 'DB')}, TRX: ${tgTrxOk ? 'Telegram 7:31' : (elToqueRates?.trx != null ? 'ElToque' : 'DB')}`);
 
-        console.log(`[Tasas 8:30] Tasas finales → USD: ${rates.usd}, MLC: ${rates.mlc}, USDT: ${rates.usdt}, TRX: ${rates.trx}`);
+        console.log(`[Tasas 8:00] Tasas finales → USD: ${rates.usd}, MLC: ${rates.mlc}, USDT: ${rates.usdt}, TRX: ${rates.trx}`);
         const fetchOk = rates.usd != null || rates.mlc != null || rates.usdt != null || rates.trx != null;
 
         if (fetchOk) {
@@ -6382,11 +6645,11 @@ cron.schedule('30 8 * * *', async () => {
             if (rates.usdt != null) await setExchangeRateUSDT(rates.usdt);
             if (rates.trx != null) await setExchangeRateTRX(rates.trx);
 
-            console.log(`[Tasas 8:30] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
+            console.log(`[Tasas 8:00] Tasas actualizadas: USD=${rates.usd}, MLC=${rates.mlc}, USDT=${rates.usdt}, TRX=${rates.trx}`);
 
             await updateDepositMinimums();
         } else {
-            console.error('[Tasas 8:30] No se pudieron obtener tasas nuevas. Usando tasas actuales de la BD.');
+            console.error('[Tasas 8:00] No se pudieron obtener tasas nuevas. Usando tasas actuales de la BD.');
         }
 
         // 5) Broadcast con tasas de la DB (ya actualizadas)
@@ -6413,7 +6676,7 @@ cron.schedule('30 8 * * *', async () => {
 
         const message = lines.join('\n');
         await broadcastToAllUsers(message);
-        console.log(`[Tasas 8:30] Broadcast enviado correctamente (${fetchOk ? 'tasas nuevas' : 'tasas vigentes'}).`);
+        console.log(`[Tasas 8:00] Broadcast enviado correctamente (${fetchOk ? 'tasas nuevas' : 'tasas vigentes'}).`);
 
         bot.lastBroadcastRates = {
             rate: currentRates.rate,
@@ -6422,7 +6685,7 @@ cron.schedule('30 8 * * *', async () => {
             rate_mlc: currentRates.rate_mlc
         };
     } catch (e) {
-        console.error('[Tasas 8:30] Error en cron 8:30 AM:', e.message);
+        console.error('[Tasas 8:00] Error en cron 8:00 AM:', e.message);
     }
 }, { timezone: TIMEZONE });
 
