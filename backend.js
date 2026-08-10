@@ -839,7 +839,7 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
     const maxUsd = priceData?.max_usd;
     if (maxCup === null && maxUsd === null) return { ok: true };
 
-    const typeLabel = betType === 'fijo' ? 'número' : formatBetTypeLabel(betType).toLowerCase();
+    const typeLabel = (betType === 'fijo' || betType === 'corridos') ? 'número' : formatBetTypeLabel(betType).toLowerCase();
     const article = betType === 'centena' ? 'La' : 'El';
 
     const numOf = (item) => betType === 'parle'
@@ -972,6 +972,30 @@ function clampItemsToMax(items, betType, exceedData) {
     });
     let totalCUP = 0, totalUSD = 0;
     for (const it of newItems) { totalCUP += it.cup; totalUSD += it.usd; }
+    return { items: newItems, totalCUP, totalUSD };
+}
+
+// Omite las porciones (por moneda) que exceden el máximo permitido. Devuelve los
+// items restantes y sus totales. Si no queda nada, totalCUP/totalUSD serán 0.
+function omitExceededNumbers(items, betType, exceedData) {
+    if (!exceedData) return { items, totalCUP: 0, totalUSD: 0 };
+    const cupExceeded = new Set((exceedData.cupExceeders || []).map(String));
+    const usdExceeded = new Set((exceedData.usdExceeders || []).map(String));
+    const newItems = items.filter(item => {
+        const num = betType === 'parle'
+            ? (normalizeParleValue(item.numero) || item.numero)
+            : item.numero;
+        const cup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+        const usd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+        if (cup > 0 && cupExceeded.has(String(num))) return false;
+        if (usd > 0 && usdExceeded.has(String(num))) return false;
+        return true;
+    });
+    let totalCUP = 0, totalUSD = 0;
+    for (const it of newItems) {
+        totalCUP += it.cup !== undefined ? parseFloat(it.cup) : (it.currency === 'CUP' ? parseFloat(it.amount) : 0);
+        totalUSD += it.usd !== undefined ? parseFloat(it.usd) : (it.currency === 'USD' ? parseFloat(it.amount) : 0);
+    }
     return { items: newItems, totalCUP, totalUSD };
 }
 
@@ -1949,7 +1973,8 @@ app.post('/api/bets', async (req, res) => {
     if (!limitCheck.ok) {
         if (limitCheck.confirmable) {
             // Único error: números repetidos que exceden el máximo. La web pregunta
-            // si se apuesta hasta el máximo permitido (recorte) o se cancela.
+            // si se apuesta hasta el máximo permitido (recorte), se omiten los
+            // números excedidos o se cancela.
             if (req.body.confirmLimitOverride === true) {
                 const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
                 if (clamped.totalCUP <= 0 && clamped.totalUSD <= 0) {
@@ -1958,6 +1983,14 @@ app.post('/api/bets', async (req, res) => {
                 parsed.items = clamped.items;
                 totalCUP = clamped.totalCUP;
                 totalUSD = clamped.totalUSD;
+            } else if (req.body.omitLimitOverride === true) {
+                const omitted = omitExceededNumbers(parsed.items, betType, limitCheck.exceedData);
+                if (omitted.totalCUP <= 0 && omitted.totalUSD <= 0) {
+                    return res.status(400).json({ error: limitCheck.error });
+                }
+                parsed.items = omitted.items;
+                totalCUP = omitted.totalCUP;
+                totalUSD = omitted.totalUSD;
             } else {
                 const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
                 return res.status(400).json({
@@ -2087,14 +2120,18 @@ app.post('/api/bets', async (req, res) => {
         // Se persiste SIEMPRE (independiente de comparaciones de IDs), para que el
         // saldo del referidor quede sin la comisión vieja antes de acreditar la nueva.
         if (oldReferrerId && revertReady) {
+            const revertUpdatePayload = {
+                cup: referrerStateAfterRevert.cup,
+                usd: referrerStateAfterRevert.usd,
+                bonus_cup: referrerStateAfterRevert.bonus_cup,
+                updated_at: new Date()
+            };
+            if (referrerStateAfterRevert.cup > 0 || referrerStateAfterRevert.usd > 0) {
+                revertUpdatePayload.bonus_updated_by_admin = null;
+            }
             const { error: revertPersistError } = await supabase
                 .from('users')
-                .update({
-                    cup: referrerStateAfterRevert.cup,
-                    usd: referrerStateAfterRevert.usd,
-                    bonus_cup: referrerStateAfterRevert.bonus_cup,
-                    updated_at: new Date()
-                })
+                .update(revertUpdatePayload)
                 .eq('telegram_id', oldReferrerId);
             if (revertPersistError) {
                 console.error('Error revirtiendo comisión anterior en edición:', revertPersistError);
@@ -2216,13 +2253,17 @@ app.post('/api/bets', async (req, res) => {
         // La reversión de la comisión anterior ya quedó persistida más arriba,
         // de modo que aquí solo se acredita la comisión nueva sobre ese saldo.
         if (newCommissionData && newCommissionData.referrer_id) {
+            const commissionUpdatePayload = {
+                cup: newCommissionData.referrer_cup,
+                bonus_cup: newCommissionData.referrer_bonus_cup,
+                updated_at: new Date()
+            };
+            if (newCommissionData.referrer_cup > 0) {
+                commissionUpdatePayload.bonus_updated_by_admin = null;
+            }
             await supabase
                 .from('users')
-                .update({
-                    cup: newCommissionData.referrer_cup,
-                    bonus_cup: newCommissionData.referrer_bonus_cup,
-                    updated_at: new Date()
-                })
+                .update(commissionUpdatePayload)
                 .eq('telegram_id', newCommissionData.referrer_id);
         }
 

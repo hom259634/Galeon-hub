@@ -1468,7 +1468,7 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
     const maxUsd = priceData?.max_usd;
     if (maxCup === null && maxUsd === null) return { ok: true };
 
-    const typeLabel = betType === 'fijo' ? 'número' : formatBetTypeLabel(betType).toLowerCase();
+    const typeLabel = (betType === 'fijo' || betType === 'corridos') ? 'número' : formatBetTypeLabel(betType).toLowerCase();
     const article = betType === 'centena' ? 'La' : 'El';
 
     const numOf = (item) => betType === 'parle'
@@ -1602,6 +1602,30 @@ function clampItemsToMax(items, betType, exceedData) {
     });
     let totalCUP = 0, totalUSD = 0;
     for (const it of newItems) { totalCUP += it.cup; totalUSD += it.usd; }
+    return { items: newItems, totalCUP, totalUSD };
+}
+
+// Omite las porciones (por moneda) que exceden el máximo permitido. Devuelve los
+// items restantes y sus totales. Si no queda nada, totalCUP/totalUSD serán 0.
+function omitExceededNumbers(items, betType, exceedData) {
+    if (!exceedData) return { items, totalCUP: 0, totalUSD: 0 };
+    const cupExceeded = new Set((exceedData.cupExceeders || []).map(String));
+    const usdExceeded = new Set((exceedData.usdExceeders || []).map(String));
+    const newItems = items.filter(item => {
+        const num = betType === 'parle'
+            ? (normalizeParleValue(item.numero) || item.numero)
+            : item.numero;
+        const cup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+        const usd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+        if (cup > 0 && cupExceeded.has(String(num))) return false;
+        if (usd > 0 && usdExceeded.has(String(num))) return false;
+        return true;
+    });
+    let totalCUP = 0, totalUSD = 0;
+    for (const it of newItems) {
+        totalCUP += it.cup !== undefined ? parseFloat(it.cup) : (it.currency === 'CUP' ? parseFloat(it.amount) : 0);
+        totalUSD += it.usd !== undefined ? parseFloat(it.usd) : (it.currency === 'USD' ? parseFloat(it.amount) : 0);
+    }
     return { items: newItems, totalCUP, totalUSD };
 }
 
@@ -1790,6 +1814,9 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
     }
     if (arguments[1] && arguments[1].clamped) {
         confirmMsg += `\n\n✂️ Los números que excedían el máximo se recortaron al monto permitido.`;
+    }
+    if (arguments[1] && arguments[1].omitted) {
+        confirmMsg += `\n\n🚫 Los números que excedían el máximo fueron omitidos.`;
     }
     await ctx.reply(confirmMsg, { parse_mode: 'HTML' });
 
@@ -2636,13 +2663,58 @@ bot.action('bet_override_accept', async (ctx) => {
 bot.action('bet_override_reject', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
-        if (ctx.session) {
-            delete ctx.session.pendingBetOverride;
-            delete ctx.session.awaitingBet;
-            delete ctx.session.betType;
-            delete ctx.session.sessionId;
+        const override = ctx.session?.pendingBetOverride;
+        if (!override) {
+            await safeEdit(ctx, '⏳ Esta confirmación ya no está disponible. Por favor, envía tu jugada de nuevo.', null);
+            return;
         }
-        await safeEdit(ctx, '❌ La apuesta fue cancelada. Puedes escribir una nueva jugada o volver al menú.', getMainKeyboard(ctx));
+
+        const { betType, rawText, items, sessionId, exceedData, error } = override;
+        const uid = ctx.from.id;
+        const user = ctx.dbUser || { cup: 0, usd: 0, bonus_cup: 0 };
+
+        if (!sessionId) {
+            await safeEdit(ctx, '❌ No se encontró la sesión de juego activa. Por favor inicia de nuevo con 🎲 Jugar.', getMainKeyboard(ctx));
+            if (ctx.session) delete ctx.session.pendingBetOverride;
+            return;
+        }
+
+        const omitted = omitExceededNumbers(items, betType, exceedData);
+        if (omitted.totalCUP <= 0 && omitted.totalUSD <= 0) {
+            // Toda la jugada excedía el máximo → error clásico, sin botones
+            if (ctx.session) {
+                delete ctx.session.pendingBetOverride;
+                delete ctx.session.awaitingBet;
+                delete ctx.session.betType;
+                delete ctx.session.sessionId;
+            }
+            try {
+                await ctx.editMessageText(error, { parse_mode: 'HTML', reply_markup: undefined });
+            } catch (e) {
+                await ctx.reply(error, getMainKeyboard(ctx)).catch(() => {});
+            }
+            return;
+        }
+
+        if (ctx.session) ctx.session.pendingBetOverride = null;
+
+        const ok = await placeBetAndConfirm(ctx, {
+            uid,
+            user,
+            betType,
+            playSessionId: sessionId,
+            rawText,
+            items: omitted.items,
+            totalCUP: omitted.totalCUP,
+            totalUSD: omitted.totalUSD,
+            session: ctx.session,
+            omitted: true
+        });
+        // Quitar los botones del mensaje de confirmación
+        await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+        if (ok) {
+            await ctx.editMessageText(`✅ <b>Omisión aceptada</b>\n\nLa apuesta se registró sin los números que excedían el máximo permitido.`, { parse_mode: 'HTML', reply_markup: undefined }).catch(() => {});
+        }
     } catch (e) {
         console.error('Error en bet_override_reject:', e);
         await ctx.reply('❌ La apuesta fue cancelada.', getMainKeyboard(ctx)).catch(() => {});
@@ -5905,7 +5977,8 @@ bot.on(message('text'), async (ctx) => {
                         items: parsed.items,
                         sessionId: playSessionId,
                         lottery: session.lottery || null,
-                        exceedData: limitCheck.exceedData
+                        exceedData: limitCheck.exceedData,
+                        error: limitCheck.error
                     };
                     const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
                     const admissibleParts = [];
@@ -5918,7 +5991,7 @@ bot.on(message('text'), async (ctx) => {
                     await ctx.reply(`${limitCheck.error}${admissibleLine}\n${question}`, {
                         reply_markup: Markup.inlineKeyboard([
                             [Markup.button.callback('✅ Sí, apostar', 'bet_override_accept'),
-                             Markup.button.callback('❌ No, cancelar', 'bet_override_reject')]
+                             Markup.button.callback('❌ No, omitir', 'bet_override_reject')]
                         ]).reply_markup
                     });
                     return;
