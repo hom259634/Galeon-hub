@@ -614,7 +614,7 @@
         <h3 class="text-lg font-bold text-white mb-4">4pu3$t4$ Qva®</h3>
         <p id="limitOverrideText" class="text-sm text-gray-300 mt-4 mb-6" style="line-height:1.4"></p>
         <div class="flex gap-3">
-            <button onclick="rejectLimitOverride()" class="flex-1 bg-red-600 py-2 rounded-lg">❌ No, cancelar</button>
+            <button onclick="rejectLimitOverride()" class="flex-1 bg-red-600 py-2 rounded-lg">❌ No, omitir</button>
             <button onclick="acceptLimitOverride()" class="flex-1 bg-green-600 py-2 rounded-lg">✅ Sí, apostar</button>
         </div>
     </div>
@@ -1137,7 +1137,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const maxUsd = priceData?.max_usd;
             if (maxCup === null && maxUsd === null) return { ok: true };
 
-            const typeLabel = betType === 'fijo' ? 'número' : formatBetTypeLabel(betType).toLowerCase();
+            const typeLabel = (betType === 'fijo' || betType === 'corridos') ? 'número' : formatBetTypeLabel(betType).toLowerCase();
             const article = betType === 'centena' ? 'La' : 'El';
 
             const grouped = {};
@@ -1404,8 +1404,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         function rejectLimitOverride() {
             document.getElementById('limitOverrideModal').classList.add('hidden');
+            const payload = pendingBetPayload;
             pendingBetPayload = null;
-            iziToast.info({ message: '❌ La apuesta fue cancelada.' });
+            if (!payload) return;
+            payload.omitLimitOverride = true;
+            delete payload.confirmLimitOverride;
+            sendBetRequest(payload);
         }
         window.acceptLimitOverride = acceptLimitOverride;
         window.rejectLimitOverride = rejectLimitOverride;
@@ -1424,7 +1428,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 const data = await res.json();
                 if (res.ok) {
-                    iziToast.success({ title: '✅ Jugada registrada', message: '¡Buena suerte!' });
+                    const wasOmitted = payload.omitLimitOverride === true;
+                    iziToast.success({ title: '✅ Jugada registrada', message: wasOmitted ? 'Se omitieron los números que excedían el máximo permitido.' : '¡Buena suerte!' });
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
@@ -5214,7 +5219,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <button onclick="adjustBalance(${telegramId}, 'usd', 5)" class="bg-green-600 px-3 rounded-lg">+5</button>
                         </div>
                     </div>
-                    ${((bonus > 0 || (bonus === 0 && bonusUpdatedByAdmin))) ? `
+                    ${((bonus > 0 || (bonus === 0 && bonusUpdatedByAdmin && cup === 0 && usd === 0))) ? `
                     <div>
                         <label class="block text-sm mb-1">🎁 Bono (CUP)</label>
                         <div class="flex gap-2">
