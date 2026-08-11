@@ -1154,6 +1154,29 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 repeated[num] = (repeated[num] || 0) + 1;
             }
 
+            // Totales ya apostados por el mismo usuario en la misma sesión/tipo,
+            // excluyendo la jugada que se está editando (igual criterio que el servidor).
+            const existingTotals = {};
+            const activeSessionId = activeSession?.id;
+            for (const bet of (userBets || [])) {
+                if (bet.id === window.editingBetId) continue;
+                if (activeSessionId && String(bet.session_id) !== String(activeSessionId)) continue;
+                if (bet.bet_type !== betType) continue;
+                for (const item of (bet.items || [])) {
+                    const num = betType === 'parle'
+                        ? (normalizeParleValue(item.numero) || item.numero)
+                        : item.numero;
+                    const cup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+                    const usd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+                    if (!existingTotals[num]) existingTotals[num] = { cup: 0, usd: 0 };
+                    existingTotals[num].cup += cup;
+                    existingTotals[num].usd += usd;
+                    if (!grouped[num]) grouped[num] = { cup: 0, usd: 0 };
+                    grouped[num].cup += cup;
+                    grouped[num].usd += usd;
+                }
+            }
+
             const cupExceeders = [];
             const usdExceeders = [];
             for (const [num, totals] of Object.entries(grouped)) {
@@ -1184,9 +1207,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const maxParts = [];
                 if (cupExceeders.length > 0) maxParts.push(`${parseFloat(maxCup).toFixed(2)} CUP`);
                 if (usdExceeders.length > 0) maxParts.push(`${parseFloat(maxUsd).toFixed(2)} USD`);
-                // Solo se ofrece "apostar hasta el máximo" cuando todos los números
-                // excedidos se mencionaron 2+ veces en la propia jugada.
-                const confirmable = allNums.length > 0 && allNums.every(n => (repeated[n] || 0) >= 2);
+                // Se ofrece "apostar hasta el máximo" si al menos un número excedido
+                // se mencionó 2+ veces en la propia jugada y aún no está al máximo
+                // por jugadas anteriores (igual criterio que el servidor).
+                const alreadyMaxed = (num) => {
+                    const ex = existingTotals[num] || { cup: 0, usd: 0 };
+                    return (cupExceeders.includes(num) && maxCup !== null && (ex.cup || 0) >= parseFloat(maxCup))
+                        || (usdExceeders.includes(num) && maxUsd !== null && (ex.usd || 0) >= parseFloat(maxUsd));
+                };
+                const confirmable = allNums.length > 0 && allNums.some(n => (repeated[n] || 0) >= 2 && !alreadyMaxed(n));
                 return { ok: false, error: `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`, confirmable };
             }
             return { ok: true };
@@ -1280,6 +1309,92 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 totalCUP,
                 ok: items.length > 0
             };
+        }
+
+        // Convierte los items finales de una jugada (tras omitir/recortar) de vuelta
+        // a texto jugada, para que el raw_text refleje exactamente lo jugado.
+        function serializeItemsToText(items, betType) {
+            const cupOf = (item) => item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+            const usdOf = (item) => item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+            const fmtAmount = (v) => {
+                const x = Math.round(v * 100) / 100;
+                return Number.isInteger(x) ? String(x) : x.toFixed(2);
+            };
+
+            const lines = [];
+            const cupItems = items.filter(it => cupOf(it) > 0);
+            const usdItems = items.filter(it => usdOf(it) > 0);
+            if (cupItems.length > 0) {
+                const byAmount = {};
+                for (const it of cupItems) {
+                    const a = Math.round(cupOf(it) * 100) / 100;
+                    if (!byAmount[a]) byAmount[a] = [];
+                    byAmount[a].push(String(it.numero));
+                }
+                for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
+                    lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} cup`);
+                }
+            }
+            if (usdItems.length > 0) {
+                const byAmount = {};
+                for (const it of usdItems) {
+                    const a = Math.round(usdOf(it) * 100) / 100;
+                    if (!byAmount[a]) byAmount[a] = [];
+                    byAmount[a].push(String(it.numero));
+                }
+                for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
+                    lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} usd`);
+                }
+            }
+            return lines.join('\n');
+        }
+
+        function betNumOf(item, betType) {
+            return betType === 'parle' ? (normalizeParleValue(item.numero) || item.numero) : item.numero;
+        }
+        function betCupOf(item) {
+            return item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+        }
+        function betUsdOf(item) {
+            return item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+        }
+        function betTotalsByNum(items, betType) {
+            const totals = {};
+            for (const it of (items || [])) {
+                const num = betNumOf(it, betType);
+                if (!totals[num]) totals[num] = { cup: 0, usd: 0 };
+                totals[num].cup += betCupOf(it);
+                totals[num].usd += betUsdOf(it);
+            }
+            return totals;
+        }
+        function betTotalsEqual(a, b) {
+            const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+            for (const k of keys) {
+                const ca = Math.round((a[k]?.cup || 0) * 100);
+                const ua = Math.round((a[k]?.usd || 0) * 100);
+                const cb = Math.round((b[k]?.cup || 0) * 100);
+                const ub = Math.round((b[k]?.usd || 0) * 100);
+                if (ca !== cb || ua !== ub) return false;
+            }
+            return true;
+        }
+        // Texto para el editor al editar: usa el raw_text si representa fielmente
+        // lo jugado; si no (números omitidos/recortados en guardados antiguos),
+        // regenera desde los items reales para que no reaparezcan descartados.
+        function buildEditPrefill(bet) {
+            try {
+                const parsed = parseBetMessage(String(bet.raw_text || ''), bet.bet_type);
+                const parsedTotals = betTotalsByNum(parsed.ok ? parsed.items : [], bet.bet_type);
+                const itemsTotals = betTotalsByNum(bet.items, bet.bet_type);
+                if (betTotalsEqual(parsedTotals, itemsTotals)) {
+                    return String(bet.raw_text || '');
+                }
+                return serializeItemsToText(bet.items, bet.bet_type);
+            } catch (e) {
+                console.error(e);
+                return String(bet.raw_text || '');
+            }
         }
 
         betInput.addEventListener('input', function() {
@@ -2014,7 +2129,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         setTimeout(() => {
                             // Solo activar modo edición si la sesión está activa y el tipo se seleccionó
                             if (!activeSession || selectedBetType !== bet.bet_type) return;
-                            betInput.value = bet.raw_text;
+                            betInput.value = buildEditPrefill(bet);
                             betInput.dispatchEvent(new Event('input'));
                             // marcar que estamos editando para que el submit incluya betId
                             window.editingBetId = bet.id;
