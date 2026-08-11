@@ -1210,6 +1210,46 @@ function parseBetMessage(text, betType) {
     };
 }
 
+// Convierte los items finales de una jugada (tras omitir/recortar números) de
+// vuelta a texto jugada, para que el raw_text almacenado refleje exactamente lo
+// jugado. Agrupa por moneda y monto: "90 91 92 con 900 cup". Acepta items en
+// forma {currency, amount} o {cup, usd}.
+function serializeItemsToText(items, betType) {
+    const cupOf = (item) => item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+    const usdOf = (item) => item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+    const fmtAmount = (v) => {
+        const x = Math.round(v * 100) / 100;
+        return Number.isInteger(x) ? String(x) : x.toFixed(2);
+    };
+
+    const lines = [];
+    const cupItems = items.filter(it => cupOf(it) > 0);
+    const usdItems = items.filter(it => usdOf(it) > 0);
+    if (cupItems.length > 0) {
+        const byAmount = {};
+        for (const it of cupItems) {
+            const a = Math.round(cupOf(it) * 100) / 100;
+            if (!byAmount[a]) byAmount[a] = [];
+            byAmount[a].push(String(it.numero));
+        }
+        for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
+            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} cup`);
+        }
+    }
+    if (usdItems.length > 0) {
+        const byAmount = {};
+        for (const it of usdItems) {
+            const a = Math.round(usdOf(it) * 100) / 100;
+            if (!byAmount[a]) byAmount[a] = [];
+            byAmount[a].push(String(it.numero));
+        }
+        for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
+            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} usd`);
+        }
+    }
+    return lines.join('\n');
+}
+
 function getEndTimeFromSlot(lottery, timeSlot) {
     const region = regionMap[lottery];
     if (!region) return null;
@@ -2058,6 +2098,7 @@ app.post('/api/bets', async (req, res) => {
 
     let totalUSD = parsed.totalUSD;
     let totalCUP = parsed.totalCUP;
+    let effectiveRawText = rawText;
     if (totalUSD === 0 && totalCUP === 0) {
         return res.status(400).json({ error: 'Debes especificar un monto válido' });
     }
@@ -2101,6 +2142,7 @@ app.post('/api/bets', async (req, res) => {
                 parsed.items = clamped.items;
                 totalCUP = clamped.totalCUP;
                 totalUSD = clamped.totalUSD;
+                effectiveRawText = serializeItemsToText(parsed.items, betType);
             } else if (req.body.omitLimitOverride === true) {
                 const omitted = omitExceededNumbers(parsed.items, betType, limitCheck.exceedData);
                 if (omitted.totalCUP <= 0 && omitted.totalUSD <= 0) {
@@ -2109,6 +2151,7 @@ app.post('/api/bets', async (req, res) => {
                 parsed.items = omitted.items;
                 totalCUP = omitted.totalCUP;
                 totalUSD = omitted.totalUSD;
+                effectiveRawText = serializeItemsToText(parsed.items, betType);
             } else {
                 const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
                 return res.status(400).json({
@@ -2424,7 +2467,7 @@ app.post('/api/bets', async (req, res) => {
 
         // Construir el objeto de actualización de la apuesta
         const updateBetPayload = {
-            raw_text: rawText,
+            raw_text: effectiveRawText,
             items: parsed.items,
             cost_usd: totalUSD,
             cost_cup: totalCUP,
@@ -2499,7 +2542,7 @@ app.post('/api/bets', async (req, res) => {
 
     // Anadida la nueva variable (usdUsed)
 
-    const { data: bet, error: betError } = await supabase.from('bets').insert({ user_id: parseInt(userId), lottery, session_id: sessionId || null, bet_type: betType, raw_text: rawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, bonus_used_cup: bonusUsed, placed_at: new Date() }).select().single();
+    const { data: bet, error: betError } = await supabase.from('bets').insert({ user_id: parseInt(userId), lottery, session_id: sessionId || null, bet_type: betType, raw_text: effectiveRawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, bonus_used_cup: bonusUsed, placed_at: new Date() }).select().single();
     if (betError) {
         console.error('Error insertando apuesta:', betError);
         return res.status(500).json({ error: 'Error al registrar la apuesta' });

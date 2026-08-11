@@ -1754,6 +1754,13 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
     const usdBalance = parseFloat(user.usd) || 0;
     const bonusBalance = parseFloat(user.bonus_cup) || 0;
 
+    // Si la jugada fue recortada u omitida, el texto almacenado y mostrado debe
+    // reflejar exactamente lo jugado, para que los números descartados no
+    // reaparezcan al editar o en el historial.
+    if ((arguments[1] && (arguments[1].clamped || arguments[1].omitted))) {
+        rawText = serializeItemsToText(items, betType);
+    }
+
     if (totalCUP <= 0 && totalUSD <= 0) {
         await ctx.reply('❌ No se detectó monto en CUP ni USD en la jugada.', getMainKeyboard(ctx));
         if (session) delete session.pendingBetOverride;
@@ -1915,19 +1922,9 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
     }
 
     // Confirmación al usuario
-    // Al omitir números excedidos se muestran solo las jugadas que quedaron,
-    // para que la confirmación coincida con lo realmente registrado.
+    // Al omitir/recortar números excedidos se muestran solo las jugadas que
+    // quedaron, para que la confirmación coincida con lo realmente registrado.
     let shownJugadas = rawText;
-    if (arguments[1] && arguments[1].omitted) {
-        shownJugadas = items.map(it => {
-            const c = parseFloat(it.cup || 0);
-            const u = parseFloat(it.usd || 0);
-            if (c > 0 && u > 0) return `${it.numero} con ${c.toFixed(2)} cup / ${u.toFixed(2)} usd`;
-            if (c > 0) return `${it.numero} con ${c.toFixed(2)} cup`;
-            if (u > 0) return `${it.numero} con ${u.toFixed(2)} usd`;
-            return null;
-        }).filter(Boolean).join('\n');
-    }
     let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
         `🎰 Lotería: ${escapeHTML(session?.lottery || 'N/D')}\n` +
         `🔢 Tipo: ${escapeHTML(formatBetTypeLabel(betType))}\n` +
@@ -2034,6 +2031,45 @@ function parseBetMessage(text, betType) {
         totalCUP,
         ok: items.length > 0
     };
+}
+
+// Convierte los items finales de una jugada (tras omitir/recortar números) de
+// vuelta a texto jugada, para que el raw_text almacenado refleje exactamente lo
+// jugado. Agrupa por moneda y monto: "90 91 92 con 900 cup".
+function serializeItemsToText(items, betType) {
+    const cupOf = (item) => item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+    const usdOf = (item) => item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+    const fmtAmount = (v) => {
+        const x = Math.round(v * 100) / 100;
+        return Number.isInteger(x) ? String(x) : x.toFixed(2);
+    };
+
+    const lines = [];
+    const cupItems = items.filter(it => cupOf(it) > 0);
+    const usdItems = items.filter(it => usdOf(it) > 0);
+    if (cupItems.length > 0) {
+        const byAmount = {};
+        for (const it of cupItems) {
+            const a = Math.round(cupOf(it) * 100) / 100;
+            if (!byAmount[a]) byAmount[a] = [];
+            byAmount[a].push(String(it.numero));
+        }
+        for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
+            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} cup`);
+        }
+    }
+    if (usdItems.length > 0) {
+        const byAmount = {};
+        for (const it of usdItems) {
+            const a = Math.round(usdOf(it) * 100) / 100;
+            if (!byAmount[a]) byAmount[a] = [];
+            byAmount[a].push(String(it.numero));
+        }
+        for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
+            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} usd`);
+        }
+    }
+    return lines.join('\n');
 }
 
 const regionMap = {
