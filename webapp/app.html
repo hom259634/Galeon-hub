@@ -614,7 +614,7 @@
         <h3 class="text-lg font-bold text-white mb-4">4pu3$t4$ Qva®</h3>
         <p id="limitOverrideText" class="text-sm text-gray-300 mt-4 mb-6" style="line-height:1.4"></p>
         <div class="flex gap-3">
-            <button onclick="rejectLimitOverride()" class="flex-1 bg-red-600 py-2 rounded-lg">❌ No, omitir</button>
+            <button onclick="rejectLimitOverride()" class="flex-1 bg-red-600 py-2 rounded-lg">❌ No, omitirlo(s)</button>
             <button onclick="acceptLimitOverride()" class="flex-1 bg-green-600 py-2 rounded-lg">✅ Sí, apostar</button>
         </div>
     </div>
@@ -1385,9 +1385,19 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         function showLimitOverrideModal(errorText, exceedData) {
             const textEl = document.getElementById('limitOverrideText');
             if (textEl) {
-                const { text, isSingleOne } = limitOverrideAdmissible(exceedData);
+                let admissibleHtml = '';
+                let isSingleOne = false;
+                if (exceedData && Array.isArray(exceedData.admissibleLines) && exceedData.admissibleLines.length > 0) {
+                    admissibleHtml = exceedData.admissibleLines.join('<br>');
+                    isSingleOne = ((exceedData.admissibleCup || 0) > 0 && !(exceedData.admissibleUsd > 0) && exceedData.admissibleCup === 1)
+                        || ((exceedData.admissibleUsd || 0) > 0 && !(exceedData.admissibleCup > 0) && exceedData.admissibleUsd === 1);
+                } else {
+                    const { text, isSingleOne: iso } = limitOverrideAdmissible(exceedData);
+                    admissibleHtml = text;
+                    isSingleOne = iso;
+                }
                 const question = isSingleOne ? '¿Desea apostárselo?' : '¿Deseas apostárselos?';
-                const admissibleLine = text ? `<br><br>Monto admisible: ${text}.` : '';
+                const admissibleLine = admissibleHtml ? `<br><br>${admissibleHtml}` : '';
                 textEl.innerHTML = `${errorText}${admissibleLine}<br>${question}`;
             }
             document.getElementById('limitOverrideModal').classList.remove('hidden');
