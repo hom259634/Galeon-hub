@@ -1549,10 +1549,15 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
         const maxParts = [];
         if (cupExceeders.length > 0) maxParts.push(`${parseFloat(maxCup).toFixed(2)} CUP`);
         if (usdExceeders.length > 0) maxParts.push(`${parseFloat(maxUsd).toFixed(2)} USD`);
-        // La confirmación de "apostar hasta el máximo" solo aplica si TODOS los
-        // números excedidos se mencionaron 2+ veces en la propia jugada y no hay
-        // ningún otro error (el caller ya validó formato, mínimos y saldo antes).
-        const confirmable = allNums.length > 0 && allNums.every(n => (repeated[n] || 0) >= 2);
+        // La confirmación de "apostar hasta el máximo" aplica si al menos uno de
+        // los números excedidos se mencionó 2+ veces en la propia jugada y aún no
+        // está al máximo por jugadas anteriores (esos sí pueden recortarse/omitirse).
+        const alreadyMaxed = (num) => {
+            const ex = existingTotals[num] || { cup: 0, usd: 0 };
+            return (cupExceeders.includes(num) && maxCup !== null && (ex.cup || 0) >= maxCup)
+                || (usdExceeders.includes(num) && maxUsd !== null && (ex.usd || 0) >= maxUsd);
+        };
+        const confirmable = allNums.length > 0 && allNums.some(n => (repeated[n] || 0) >= 2 && !alreadyMaxed(n));
         return {
             ok: false,
             error: `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`,
@@ -1570,39 +1575,88 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
 }
 
 // Recorta los montos de los números excedidos hasta el máximo permitido, teniendo
-// en cuenta apuestas previas (existingTotals). Devuelve los items y totales nuevos.
+// en cuenta apuestas previas (existingTotals). El monto admisible por número
+// (máximo − base) se reparte de forma EQUITATIVA entre las repeticiones de la
+// jugada actual, sin que ninguna repetición exceda su monto original.
+// Devuelve los items y totales nuevos.
 function clampItemsToMax(items, betType, exceedData) {
     if (!exceedData) return { items, totalCUP: 0, totalUSD: 0 };
     const maxCup = exceedData.maxCup;
     const maxUsd = exceedData.maxUsd;
     const existingTotals = exceedData.existingTotals || {};
-    const usedCup = {};
-    const usedUsd = {};
-    const newItems = items.map(item => {
-        const num = betType === 'parle'
-            ? (normalizeParleValue(item.numero) || item.numero)
-            : item.numero;
-        let cup = parseFloat(item.cup) || 0;
-        let usd = parseFloat(item.usd) || 0;
-        if (maxCup !== null && cup > 0) {
-            const base = (existingTotals[num]?.cup) || 0;
-            const used = usedCup[num] || 0;
-            const allowed = Math.max(0, Math.round((maxCup - base - used) * 100) / 100);
-            if (cup > allowed) cup = allowed;
-            usedCup[num] = Math.round((used + cup) * 100) / 100;
+
+    const numOf = (item) => betType === 'parle'
+        ? (normalizeParleValue(item.numero) || item.numero)
+        : item.numero;
+    const cupOf = (item) => item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+    const usdOf = (item) => item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+
+    // Reparte `allowed` (en unidades) de forma equitativa entre `amounts`,
+    // respetando cada monto original y sin dejar centavos sin asignar.
+    function distributeEven(amounts, allowed) {
+        const orig = amounts.map(a => Math.round((parseFloat(a) || 0) * 100));
+        let remaining = Math.round((parseFloat(allowed) || 0) * 100);
+        const result = orig.map(() => 0);
+        let active = orig.map((_, i) => i);
+        while (active.length > 0 && remaining > 0) {
+            const share = Math.floor(remaining / active.length);
+            if (share <= 0) {
+                // Centavos sobrantes: asignarlos a las últimas repeticiones
+                for (let k = active.length - 1; k >= 0; k--) {
+                    const i = active[k];
+                    if (remaining <= 0) break;
+                    if (result[i] < orig[i]) { result[i] += 1; remaining -= 1; }
+                }
+                break;
+            }
+            const next = [];
+            for (const i of active) {
+                const give = Math.min(orig[i] - result[i], share);
+                if (give > 0) {
+                    result[i] += give;
+                    remaining -= give;
+                }
+                if (result[i] < orig[i]) next.push(i);
+            }
+            active = next;
         }
-        if (maxUsd !== null && usd > 0) {
-            const base = (existingTotals[num]?.usd) || 0;
-            const used = usedUsd[num] || 0;
-            const allowed = Math.max(0, Math.round((maxUsd - base - used) * 100) / 100);
-            if (usd > allowed) usd = allowed;
-            usedUsd[num] = Math.round((used + usd) * 100) / 100;
+        return result.map(c => c / 100);
+    }
+
+    const groups = new Map();
+    for (const item of items) {
+        const num = numOf(item);
+        if (!groups.has(num)) groups.set(num, { entries: [], cups: [], usds: [] });
+        const g = groups.get(num);
+        g.entries.push(item);
+        g.cups.push(cupOf(item));
+        g.usds.push(usdOf(item));
+    }
+
+    const newItems = [];
+    for (const [num, g] of groups) {
+        const base = existingTotals[num] || { cup: 0, usd: 0 };
+        let cups = g.cups;
+        let usds = g.usds;
+        if (maxCup !== null) {
+            const allowed = Math.max(0, Math.round((maxCup - (base.cup || 0)) * 100) / 100);
+            cups = distributeEven(g.cups, allowed);
         }
-        return { ...item, cup, usd };
-    });
+        if (maxUsd !== null) {
+            const allowed = Math.max(0, Math.round((maxUsd - (base.usd || 0)) * 100) / 100);
+            usds = distributeEven(g.usds, allowed);
+        }
+        for (let i = 0; i < g.entries.length; i++) {
+            const it = g.entries[i];
+            const newItem = { ...it, cup: cups[i], usd: usds[i] };
+            newItems.push(newItem);
+        }
+    }
+    // Descartar ítems que quedaron en cero (p.ej. números ya al máximo recortados a 0)
+    const keptItems = newItems.filter(it => (parseFloat(it.cup) || 0) > 0 || (parseFloat(it.usd) || 0) > 0);
     let totalCUP = 0, totalUSD = 0;
-    for (const it of newItems) { totalCUP += it.cup; totalUSD += it.usd; }
-    return { items: newItems, totalCUP, totalUSD };
+    for (const it of keptItems) { totalCUP += it.cup; totalUSD += it.usd; }
+    return { items: keptItems, totalCUP, totalUSD };
 }
 
 // Omite las porciones (por moneda) que exceden el máximo permitido. Devuelve los
@@ -1627,6 +1681,69 @@ function omitExceededNumbers(items, betType, exceedData) {
         totalUSD += it.usd !== undefined ? parseFloat(it.usd) : (it.currency === 'USD' ? parseFloat(it.amount) : 0);
     }
     return { items: newItems, totalCUP, totalUSD };
+}
+
+// Devuelve una línea de "Monto admisible" por cada número excedido que aún se
+// pueda jugar (excluye los que ya están al máximo por jugadas anteriores).
+// El monto mostrado es el admisible por repetición dentro de la jugada actual:
+// (máximo - monto ya apostado) / repeticiones en esta jugada, por moneda.
+function admissibleLinesForNumbers(items, betType, exceedData) {
+    if (!exceedData) return [];
+    const maxCup = exceedData.maxCup;
+    const maxUsd = exceedData.maxUsd;
+    const existingTotals = exceedData.existingTotals || {};
+    const cupExceeded = new Set((exceedData.cupExceeders || []).map(String));
+    const usdExceeded = new Set((exceedData.usdExceeders || []).map(String));
+
+    const numOf = (item) => betType === 'parle'
+        ? (normalizeParleValue(item.numero) || item.numero)
+        : item.numero;
+    const cupOf = (item) => item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+    const usdOf = (item) => item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+
+    const repCup = {};
+    const repUsd = {};
+    for (const item of items) {
+        const num = numOf(item);
+        if (cupOf(item) > 0) repCup[num] = (repCup[num] || 0) + 1;
+        if (usdOf(item) > 0) repUsd[num] = (repUsd[num] || 0) + 1;
+    }
+
+    const allNums = [...new Set([...(exceedData.cupExceeders || []), ...(exceedData.usdExceeders || [])])].sort((a, b) => {
+        const na = parseInt(a, 10);
+        const nb = parseInt(b, 10);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return String(a).localeCompare(String(b));
+    });
+
+    const alreadyMaxed = (num) => {
+        const ex = existingTotals[num] || { cup: 0, usd: 0 };
+        return (cupExceeded.has(String(num)) && maxCup !== null && (ex.cup || 0) >= maxCup)
+            || (usdExceeded.has(String(num)) && maxUsd !== null && (ex.usd || 0) >= maxUsd);
+    };
+
+    const typeLabel = (betType === 'fijo' || betType === 'corridos') ? 'número' : formatBetTypeLabel(betType).toLowerCase();
+    const article = (betType === 'centena' ? 'La' : 'El').toLowerCase();
+
+    const lines = [];
+    for (const num of allNums) {
+        if (alreadyMaxed(num)) continue;
+        const parts = [];
+        if (cupExceeded.has(String(num)) && maxCup !== null) {
+            const reps = repCup[num] || 0;
+            const base = existingTotals[num]?.cup || 0;
+            const perRep = reps > 0 ? Math.max(0, Math.round((maxCup - base) / reps * 100) / 100) : 0;
+            parts.push(`${perRep.toFixed(2)} CUP`);
+        }
+        if (usdExceeded.has(String(num)) && maxUsd !== null) {
+            const reps = repUsd[num] || 0;
+            const base = existingTotals[num]?.usd || 0;
+            const perRep = reps > 0 ? Math.max(0, Math.round((maxUsd - base) / reps * 100) / 100) : 0;
+            parts.push(`${perRep.toFixed(2)} USD`);
+        }
+        if (parts.length > 0) lines.push(`Monto admisible para ${article} ${typeLabel} ${num}: ${parts.join(' y ')}.`);
+    }
+    return lines;
 }
 
 // ========== COLOCAR LA JUGADA Y CONFIRMAR ==========
@@ -1798,10 +1915,23 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
     }
 
     // Confirmación al usuario
+    // Al omitir números excedidos se muestran solo las jugadas que quedaron,
+    // para que la confirmación coincida con lo realmente registrado.
+    let shownJugadas = rawText;
+    if (arguments[1] && arguments[1].omitted) {
+        shownJugadas = items.map(it => {
+            const c = parseFloat(it.cup || 0);
+            const u = parseFloat(it.usd || 0);
+            if (c > 0 && u > 0) return `${it.numero} con ${c.toFixed(2)} cup / ${u.toFixed(2)} usd`;
+            if (c > 0) return `${it.numero} con ${c.toFixed(2)} cup`;
+            if (u > 0) return `${it.numero} con ${u.toFixed(2)} usd`;
+            return null;
+        }).filter(Boolean).join('\n');
+    }
     let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
         `🎰 Lotería: ${escapeHTML(session?.lottery || 'N/D')}\n` +
         `🔢 Tipo: ${escapeHTML(formatBetTypeLabel(betType))}\n` +
-        `📋 Jugadas:\n<code>${escapeHTML(rawText)}</code>\n` +
+        `📋 Jugadas:\n<code>${escapeHTML(shownJugadas)}</code>\n` +
         `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
         `¡Buena suerte! 🍀`;
     if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
@@ -5981,17 +6111,15 @@ bot.on(message('text'), async (ctx) => {
                         error: limitCheck.error
                     };
                     const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
-                    const admissibleParts = [];
-                    if (clamped.totalCUP > 0) admissibleParts.push(`${clamped.totalCUP.toFixed(2)} CUP`);
-                    if (clamped.totalUSD > 0) admissibleParts.push(`${clamped.totalUSD.toFixed(2)} USD`);
                     const isSingleOne = (clamped.totalCUP > 0 && clamped.totalUSD === 0 && clamped.totalCUP === 1)
                         || (clamped.totalUSD > 0 && clamped.totalCUP === 0 && clamped.totalUSD === 1);
                     const question = isSingleOne ? '¿Desea apostárselo?' : '¿Deseas apostárselos?';
-                    const admissibleLine = admissibleParts.length > 0 ? `\n\nMonto admisible: ${admissibleParts.join(' y ')}.` : '';
+                    const admissibleLines = admissibleLinesForNumbers(parsed.items, betType, limitCheck.exceedData);
+                    const admissibleLine = admissibleLines.length > 0 ? `\n\n${admissibleLines.join('\n')}` : '';
                     await ctx.reply(`${limitCheck.error}${admissibleLine}\n${question}`, {
                         reply_markup: Markup.inlineKeyboard([
                             [Markup.button.callback('✅ Sí, apostar', 'bet_override_accept'),
-                             Markup.button.callback('❌ No, omitir', 'bet_override_reject')]
+                             Markup.button.callback('❌ No, omitirlo(s)', 'bet_override_reject')]
                         ]).reply_markup
                     });
                     return;
