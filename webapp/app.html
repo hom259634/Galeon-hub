@@ -1208,14 +1208,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (cupExceeders.length > 0) maxParts.push(`${parseFloat(maxCup).toFixed(2)} CUP`);
                 if (usdExceeders.length > 0) maxParts.push(`${parseFloat(maxUsd).toFixed(2)} USD`);
                 // Se ofrece "apostar hasta el máximo" si al menos un número excedido
-                // se mencionó 2+ veces en la propia jugada y aún no está al máximo
-                // por jugadas anteriores (igual criterio que el servidor).
+                // aún no está al máximo por jugadas anteriores (igual criterio que el servidor).
                 const alreadyMaxed = (num) => {
                     const ex = existingTotals[num] || { cup: 0, usd: 0 };
-                    return (cupExceeders.includes(num) && maxCup !== null && (ex.cup || 0) >= parseFloat(maxCup))
-                        || (usdExceeders.includes(num) && maxUsd !== null && (ex.usd || 0) >= parseFloat(maxUsd));
+                    const cupRoom = cupExceeders.includes(num) && maxCup !== null && (ex.cup || 0) < parseFloat(maxCup);
+                    const usdRoom = usdExceeders.includes(num) && maxUsd !== null && (ex.usd || 0) < parseFloat(maxUsd);
+                    return !(cupRoom || usdRoom);
                 };
-                const confirmable = allNums.length > 0 && allNums.some(n => (repeated[n] || 0) >= 2 && !alreadyMaxed(n));
+                const confirmable = allNums.length > 0 && allNums.some(n => !alreadyMaxed(n));
                 return { ok: false, error: `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`, confirmable };
             }
             return { ok: true };
