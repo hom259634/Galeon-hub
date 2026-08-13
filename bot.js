@@ -1550,14 +1550,15 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
         if (cupExceeders.length > 0) maxParts.push(`${parseFloat(maxCup).toFixed(2)} CUP`);
         if (usdExceeders.length > 0) maxParts.push(`${parseFloat(maxUsd).toFixed(2)} USD`);
         // La confirmación de "apostar hasta el máximo" aplica si al menos uno de
-        // los números excedidos se mencionó 2+ veces en la propia jugada y aún no
-        // está al máximo por jugadas anteriores (esos sí pueden recortarse/omitirse).
+        // los números excedidos aún no está al máximo por jugadas anteriores
+        // (esos sí pueden recortarse/omitirse).
         const alreadyMaxed = (num) => {
             const ex = existingTotals[num] || { cup: 0, usd: 0 };
-            return (cupExceeders.includes(num) && maxCup !== null && (ex.cup || 0) >= maxCup)
-                || (usdExceeders.includes(num) && maxUsd !== null && (ex.usd || 0) >= maxUsd);
+            const cupRoom = cupExceeders.includes(num) && maxCup !== null && (ex.cup || 0) < maxCup;
+            const usdRoom = usdExceeders.includes(num) && maxUsd !== null && (ex.usd || 0) < maxUsd;
+            return !(cupRoom || usdRoom);
         };
-        const confirmable = allNums.length > 0 && allNums.some(n => (repeated[n] || 0) >= 2 && !alreadyMaxed(n));
+        const confirmable = allNums.length > 0 && allNums.some(n => !alreadyMaxed(n));
         return {
             ok: false,
             error: `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`,
@@ -1718,8 +1719,9 @@ function admissibleLinesForNumbers(items, betType, exceedData) {
 
     const alreadyMaxed = (num) => {
         const ex = existingTotals[num] || { cup: 0, usd: 0 };
-        return (cupExceeded.has(String(num)) && maxCup !== null && (ex.cup || 0) >= maxCup)
-            || (usdExceeded.has(String(num)) && maxUsd !== null && (ex.usd || 0) >= maxUsd);
+        const cupRoom = cupExceeded.has(String(num)) && maxCup !== null && (ex.cup || 0) < maxCup;
+        const usdRoom = usdExceeded.has(String(num)) && maxUsd !== null && (ex.usd || 0) < maxUsd;
+        return !(cupRoom || usdRoom);
     };
 
     const typeLabel = (betType === 'fijo' || betType === 'corridos') ? 'número' : formatBetTypeLabel(betType).toLowerCase();
@@ -1728,20 +1730,19 @@ function admissibleLinesForNumbers(items, betType, exceedData) {
     const lines = [];
     for (const num of allNums) {
         if (alreadyMaxed(num)) continue;
+        const base = existingTotals[num] || { cup: 0, usd: 0 };
         const parts = [];
-        if (cupExceeded.has(String(num)) && maxCup !== null) {
+        if (cupExceeded.has(String(num)) && maxCup !== null && (base.cup || 0) < maxCup) {
             const reps = repCup[num] || 0;
-            const base = existingTotals[num]?.cup || 0;
-            const perRep = reps > 0 ? Math.max(0, Math.round((maxCup - base) / reps * 100) / 100) : 0;
+            const perRep = reps > 0 ? Math.max(0, Math.round((maxCup - (base.cup || 0)) / reps * 100) / 100) : 0;
             parts.push(`${perRep.toFixed(2)} CUP`);
         }
-        if (usdExceeded.has(String(num)) && maxUsd !== null) {
+        if (usdExceeded.has(String(num)) && maxUsd !== null && (base.usd || 0) < maxUsd) {
             const reps = repUsd[num] || 0;
-            const base = existingTotals[num]?.usd || 0;
-            const perRep = reps > 0 ? Math.max(0, Math.round((maxUsd - base) / reps * 100) / 100) : 0;
+            const perRep = reps > 0 ? Math.max(0, Math.round((maxUsd - (base.usd || 0)) / reps * 100) / 100) : 0;
             parts.push(`${perRep.toFixed(2)} USD`);
         }
-        if (parts.length > 0) lines.push(`Monto admisible para ${article} ${typeLabel} ${num}: ${parts.join(' y ')}.`);
+        if (parts.length > 0) lines.push(`⚠️ Monto admisible para ${article} ${typeLabel} ${num}: ${parts.join(' y ')}.`);
     }
     return lines;
 }
@@ -2835,7 +2836,7 @@ bot.action('bet_override_reject', async (ctx) => {
             return;
         }
 
-        const { betType, rawText, items, sessionId, exceedData, error } = override;
+        const { betType, rawText, items, sessionId, exceedData } = override;
         const uid = ctx.from.id;
         const user = ctx.dbUser || { cup: 0, usd: 0, bonus_cup: 0 };
 
@@ -2847,17 +2848,18 @@ bot.action('bet_override_reject', async (ctx) => {
 
         const omitted = omitExceededNumbers(items, betType, exceedData);
         if (omitted.totalCUP <= 0 && omitted.totalUSD <= 0) {
-            // Toda la jugada excedía el máximo → error clásico, sin botones
+            // Toda la jugada excedía el máximo → se cancela sin botones
             if (ctx.session) {
                 delete ctx.session.pendingBetOverride;
                 delete ctx.session.awaitingBet;
                 delete ctx.session.betType;
                 delete ctx.session.sessionId;
             }
+            const cancelledMsg = '❌ Después de omitir los números excedidos no queda monto válido en la jugada. La apuesta fue cancelada.';
             try {
-                await ctx.editMessageText(error, { parse_mode: 'HTML', reply_markup: undefined });
+                await ctx.editMessageText(cancelledMsg, { parse_mode: 'HTML', reply_markup: undefined });
             } catch (e) {
-                await ctx.reply(error, getMainKeyboard(ctx)).catch(() => {});
+                await ctx.reply(cancelledMsg, getMainKeyboard(ctx)).catch(() => {});
             }
             return;
         }
