@@ -1941,7 +1941,7 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         }
     }
     if (arguments[1] && arguments[1].clamped) {
-        confirmMsg += `\n\nℹ️ Los números que excedían el máximo se recortaron al monto permitido.`;
+        confirmMsg += `\n\nℹ️ Los números que excedían el máximo se ajustaron al monto permitido.`;
     }
     if (arguments[1] && arguments[1].omitted) {
         confirmMsg += `\n\n🚫 Los números que excedían el máximo fueron omitidos.`;
@@ -2883,7 +2883,7 @@ bot.action('bet_override_reject', async (ctx) => {
         // Quitar los botones del mensaje de confirmación
         await ctx.editMessageReplyMarkup(undefined).catch(() => {});
         if (ok) {
-            await ctx.editMessageText(`✅ <b>Omisión aceptada</b>\n\nLa apuesta se registró sin los números que excedían el máximo permitido.`, { parse_mode: 'HTML', reply_markup: undefined }).catch(() => {});
+            // La confirmación de la jugada registrada ya llega con placeBetAndConfirm
         }
     } catch (e) {
         console.error('Error en bet_override_reject:', e);
