@@ -2804,7 +2804,7 @@ bot.action('bet_override_accept', async (ctx) => {
         const user = ctx.dbUser || { cup: 0, usd: 0, bonus_cup: 0 };
         ctx.session.pendingBetOverride = null;
 
-        const ok = await placeBetAndConfirm(ctx, {
+        await placeBetAndConfirm(ctx, {
             uid,
             user,
             betType,
@@ -2816,13 +2816,9 @@ bot.action('bet_override_accept', async (ctx) => {
             session: ctx.session,
             clamped: true
         });
-        if (ok) {
-            // Eliminar el mensaje de confirmación de recorte (la jugada ya se confirmó arriba)
-            try { await ctx.deleteMessage(); } catch (e) {}
-        } else {
-            // Quitar los botones del mensaje de confirmación
-            await ctx.editMessageReplyMarkup(undefined).catch(() => {});
-        }
+        // Eliminar el mensaje de confirmación de recorte (la jugada ya se confirmó
+        // arriba; si falló, placeBetAndConfirm ya notificó el error al usuario).
+        try { await ctx.deleteMessage(); } catch (e) {}
     } catch (e) {
         console.error('Error en bet_override_accept:', e);
         await ctx.reply('❌ Ocurrió un error al procesar la apuesta. Intenta de nuevo.', getMainKeyboard(ctx)).catch(() => {});
@@ -2868,7 +2864,7 @@ bot.action('bet_override_reject', async (ctx) => {
 
         if (ctx.session) ctx.session.pendingBetOverride = null;
 
-        const ok = await placeBetAndConfirm(ctx, {
+        await placeBetAndConfirm(ctx, {
             uid,
             user,
             betType,
@@ -2880,11 +2876,9 @@ bot.action('bet_override_reject', async (ctx) => {
             session: ctx.session,
             omitted: true
         });
-        // Quitar los botones del mensaje de confirmación
-        await ctx.editMessageReplyMarkup(undefined).catch(() => {});
-        if (ok) {
-            // La confirmación de la jugada registrada ya llega con placeBetAndConfirm
-        }
+        // Eliminar el mensaje de confirmación del recorte (la jugada ya se confirmó
+        // arriba; si falló, placeBetAndConfirm ya notificó el error al usuario).
+        try { await ctx.deleteMessage(); } catch (e) {}
     } catch (e) {
         console.error('Error en bet_override_reject:', e);
         await ctx.reply('❌ La apuesta fue cancelada.', getMainKeyboard(ctx)).catch(() => {});
