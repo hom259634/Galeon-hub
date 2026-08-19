@@ -319,6 +319,45 @@
             cursor: not-allowed !important;
             opacity: 0.7;
         }
+        /* Switch "Publicación automática" (barra con bolita deslizante) */
+        .auto-switch {
+            position: relative;
+            display: inline-block;
+            width: 52px;
+            height: 28px;
+            flex-shrink: 0;
+        }
+        .auto-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .auto-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: #4b5563;
+            border-radius: 9999px;
+            transition: background 0.3s;
+        }
+        .auto-slider::before {
+            content: '';
+            position: absolute;
+            height: 22px;
+            width: 22px;
+            left: 3px;
+            top: 3px;
+            background: #ffffff;
+            border-radius: 9999px;
+            transition: transform 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .auto-switch input:checked + .auto-slider {
+            background: #14b8a6;
+        }
+        .auto-switch input:checked + .auto-slider::before {
+            transform: translateX(24px);
+        }
     </style>
 </head>
 <body class="p-4 md:p-6">
@@ -614,7 +653,7 @@
         <h3 class="text-lg font-bold text-white mb-4">4pu3$t4$ Qva®</h3>
         <p id="limitOverrideText" class="text-sm text-gray-300 mt-4 mb-6" style="line-height:1.4"></p>
         <div class="flex gap-3">
-            <button onclick="rejectLimitOverride()" class="flex-1 bg-red-600 py-2 rounded-lg">❌ No, omitirlo(s)</button>
+            <button id="limitOverrideRejectBtn" onclick="rejectLimitOverride()" class="flex-1 bg-red-600 py-2 rounded-lg">❌ No, omitirlo(s)</button>
             <button onclick="acceptLimitOverride()" class="flex-1 bg-green-600 py-2 rounded-lg">✅ Sí, apostar</button>
         </div>
     </div>
@@ -1499,19 +1538,22 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         function showLimitOverrideModal(errorText, exceedData) {
             const textEl = document.getElementById('limitOverrideText');
+            const rejectBtn = document.getElementById('limitOverrideRejectBtn');
+            if (rejectBtn) {
+                rejectBtn.innerHTML = selectedBetType === 'centena' ? '❌ No, omitirla(s)' : '❌ No, omitirlo(s)';
+            }
             if (textEl) {
                 let admissibleHtml = '';
                 let isSingleOne = false;
                 if (exceedData && Array.isArray(exceedData.admissibleLines) && exceedData.admissibleLines.length > 0) {
                     admissibleHtml = exceedData.admissibleLines.join('<br>');
-                    isSingleOne = ((exceedData.admissibleCup || 0) > 0 && !(exceedData.admissibleUsd > 0) && exceedData.admissibleCup === 1)
-                        || ((exceedData.admissibleUsd || 0) > 0 && !(exceedData.admissibleCup > 0) && exceedData.admissibleUsd === 1);
+                    isSingleOne = exceedData.admissibleLines.length === 1 && /:\s*1\.00 (CUP|USD)\.$/.test(exceedData.admissibleLines[0]);
                 } else {
                     const { text, isSingleOne: iso } = limitOverrideAdmissible(exceedData);
                     admissibleHtml = text;
                     isSingleOne = iso;
                 }
-                const question = isSingleOne ? '¿Desea apostárselo?' : '¿Deseas apostárselos?';
+                const question = isSingleOne ? '¿Deseas apostárselo?' : '¿Deseas apostárselos?';
                 const admissibleLine = admissibleHtml ? `<br><br>${admissibleHtml}` : '';
                 textEl.innerHTML = `${errorText}${admissibleLine}<br>${question}`;
             }
@@ -1554,7 +1596,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const data = await res.json();
                 if (res.ok) {
                     const wasOmitted = payload.omitLimitOverride === true;
-                    iziToast.success({ title: '✅ Jugada registrada', message: wasOmitted ? 'Se omitieron los números que excedían el máximo permitido.' : '¡Buena suerte!' });
+                    const overLimitPhrase = overLimitTypePhrase([selectedBetType]);
+                    iziToast.success({ title: '✅ Jugada registrada', message: wasOmitted ? `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.` : '¡Buena suerte!' });
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
@@ -2683,12 +2726,28 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         async function renderPublishWinningView() {
             try {
-                const res = await fetch(`/api/admin/lottery-sessions/closed?userId=${currentUser.telegram_id}`);
-                const sessions = await res.json();
-                const pubRes = await fetch('/api/winning-numbers');
+                const [sessionsRes, pubRes, autoRes] = await Promise.all([
+                    fetch(`/api/admin/lottery-sessions/closed?userId=${currentUser.telegram_id}`),
+                    fetch('/api/admin/winning-numbers'),
+                    fetch('/api/admin/auto-publish')
+                ]);
+                const sessions = await sessionsRes.json();
                 const published = await pubRes.json();
+                let autoEnabled = false;
+                try { autoEnabled = !!(await autoRes.json()).enabled; } catch (e) {}
                 const publishedSet = new Set(published.map(p => `${p.lottery}|${p.date}|${p.time_slot}`));
-                let html = `<h4 class="text-xl font-semibold mb-4">🔢 Publicar números ganadores</h4><p class="mb-2 text-sm text-yellow-300">⚠️ 7 dígitos (centena+cuarteta). Puedes separar con espacio: 123 4567</p>`;
+                let html = `
+                    <div class="flex items-center justify-between bg-gray-800/70 p-4 rounded-xl mb-4">
+                        <div>
+                            <span class="font-semibold">🤖 Publicación automática</span>
+                            <p class="text-xs text-gray-400 mt-0.5">Extrae los números del canal de Telegram y publica los ganadores automáticamente.</p>
+                        </div>
+                        <label class="auto-switch">
+                            <input type="checkbox" id="autoPublishToggle" ${autoEnabled ? 'checked' : ''} onchange="toggleAutoPublish(this.checked, this)">
+                            <span class="auto-slider"></span>
+                        </label>
+                    </div>`;
+                html += `<h4 class="text-xl font-semibold mb-4">🔢 Publicar números ganadores</h4><p class="mb-2 text-sm text-yellow-300">⚠️ 7 dígitos (centena+cuarteta). Puedes separar con espacio: 123 4567</p>`;
                 if (sessions.length === 0) html += '<p class="text-gray-400">No hay sesiones cerradas.</p>';
                 else {
                     sessions.forEach(s => {
@@ -2702,6 +2761,26 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 adminViewContainer.innerHTML = html;
             } catch (e) { adminViewContainer.innerHTML = '<p class="text-red-400">Error al cargar sesiones.</p>'; }
         }
+
+        window.toggleAutoPublish = async (checked, input) => {
+            try {
+                const res = await fetch('/api/admin/auto-publish', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: checked })
+                });
+                if (res.ok) {
+                    iziToast.success({ message: checked ? '🤖 Publicación automática ACTIVADA' : '🤖 Publicación automática DESACTIVADA' });
+                } else {
+                    const err = await res.json();
+                    iziToast.error({ message: err.error || 'Error al cambiar el estado' });
+                    if (input) input.checked = !checked;
+                }
+            } catch (e) {
+                iziToast.error({ message: 'Error de conexión' });
+                if (input) input.checked = !checked;
+            }
+        };
 
         window.publishWinning = async (sessionId, btn) => {
             if (btn && btn.disabled) return;
@@ -4961,6 +5040,23 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const key = String(betType || '').toLowerCase();
             if (!key) return 'N/D';
             return labels[key] || (key.charAt(0).toUpperCase() + key.slice(1));
+        }
+
+        function overLimitTypePhrase(betTypes) {
+            const unique = [...new Set((betTypes || []).map(t => String(t || '').toLowerCase()))];
+            const withArticles = [];
+            if (unique.includes('fijo') || unique.includes('corridos')) withArticles.push('números');
+            if (unique.includes('centena')) withArticles.push('centenas');
+            if (unique.includes('parle')) withArticles.push('parlets');
+            if (withArticles.length === 0) return 'números';
+            if (withArticles.length === 1) {
+                return withArticles[0] === 'centenas' ? 'Las centenas' : `Los ${withArticles[0]}`;
+            }
+            if (withArticles.length === 2) {
+                const first = withArticles[0] === 'centenas' ? 'Las centenas' : `Los ${withArticles[0]}`;
+                return `${first} y ${withArticles[1]}`;
+            }
+            return 'Los números, centenas y parlets';
         }
 
         // Añadir las funciones renderManageUsersView, searchUserByNameOrId y openBalanceModal
