@@ -3774,6 +3774,30 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
     res.json({ success: true, message: 'Números publicados y premios calculados' });
 });
 
+// --- Estado de publicación automática ---
+app.get('/api/admin/auto-publish', requireAdmin, async (req, res) => {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'auto_publish_enabled')
+        .maybeSingle();
+
+    res.json({ enabled: data?.value === 'true' });
+});
+
+app.put('/api/admin/auto-publish', requireAdmin, async (req, res) => {
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'Falta el campo enabled (boolean)' });
+
+    const { error } = await supabase
+        .from('app_config')
+        .upsert({ key: 'auto_publish_enabled', value: enabled ? 'true' : 'false' }, { onConflict: 'key' });
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ enabled });
+});
+
 // ========== NUEVOS ENDPOINTS PARA SOLICITUDES PENDIENTES ==========
 
 // --- Listar solicitudes de depósito pendientes ---

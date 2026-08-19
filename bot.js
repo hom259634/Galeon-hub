@@ -1750,6 +1750,26 @@ function admissibleLinesForNumbers(items, betType, exceedData) {
 // ========== COLOCAR LA JUGADA Y CONFIRMAR ==========
 // Debita saldos, registra la apuesta, procesa la comisión de referido y confirma.
 // Se usa tanto en el flujo normal como al confirmar el recorte al máximo permitido.
+
+// Devuelve el sustantivo correcto para referirse a los tipos de apuesta
+// excedidos: números (fijo/corridos), centenas y/o parlets.
+function overLimitTypePhrase(betTypes) {
+    const unique = [...new Set((betTypes || []).map(t => String(t || '').toLowerCase()))];
+    const withArticles = [];
+    if (unique.includes('fijo') || unique.includes('corridos')) withArticles.push('números');
+    if (unique.includes('centena')) withArticles.push('centenas');
+    if (unique.includes('parle')) withArticles.push('parlets');
+    if (withArticles.length === 0) return 'números';
+    if (withArticles.length === 1) {
+        return withArticles[0] === 'centenas' ? 'Las centenas' : `Los ${withArticles[0]}`;
+    }
+    if (withArticles.length === 2) {
+        const first = withArticles[0] === 'centenas' ? 'Las centenas' : `Los ${withArticles[0]}`;
+        return `${first} y ${withArticles[1]}`;
+    }
+    return 'Los números, centenas y parlets';
+}
+
 async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawText, items, totalCUP, totalUSD, session }) {
     const cupBalance = parseFloat(user.cup) || 0;
     const usdBalance = parseFloat(user.usd) || 0;
@@ -1941,10 +1961,10 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         }
     }
     if (arguments[1] && arguments[1].clamped) {
-        confirmMsg += `\n\nℹ️ Los números que excedían el máximo se ajustaron al monto permitido.`;
+        confirmMsg += `\n\nℹ️ ${overLimitTypePhrase([betType])} que excedían el máximo se ajustaron al monto permitido.`;
     }
     if (arguments[1] && arguments[1].omitted) {
-        confirmMsg += `\n\n🚫 Los números que excedían el máximo fueron omitidos.`;
+        confirmMsg += `\n\n🚫 ${overLimitTypePhrase([betType])} que excedían el máximo fueron omitidos.`;
     }
     await ctx.reply(confirmMsg, { parse_mode: 'HTML' });
 
@@ -3919,9 +3939,15 @@ function formatWinningNumber(num) {
 }
 
 async function processWinningNumber(sessionId, winningStr, ctx) {
+    const logReply = (msg, opts) => {
+        if (ctx && typeof ctx.reply === 'function') return ctx.reply(msg, opts);
+        console.log(`[Publicación automática] ${String(msg).replace(/<[^>]*>/g, '')}`);
+        return Promise.resolve();
+    };
+
     winningStr = winningStr.replace(/\s+/g, '');
     if (!/^\d{7}$/.test(winningStr)) {
-        await ctx.reply('❌ El número debe tener EXACTAMENTE 7 dígitos. Por favor, inténtalo de nuevo.');
+        await logReply('❌ El número debe tener EXACTAMENTE 7 dígitos. Por favor, inténtalo de nuevo.');
         return false;
     }
 
@@ -3932,7 +3958,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         .single();
 
     if (!session) {
-        await ctx.reply('❌ Sesión no encontrada. Verifica el ID.');
+        await logReply('❌ Sesión no encontrada. Verifica el ID.');
         return false;
     }
 
@@ -3945,7 +3971,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         .maybeSingle();
 
     if (existingWin) {
-        await ctx.reply('❌ Esta sesión ya tiene un número ganador publicado. No se puede sobrescribir.');
+        await logReply('❌ Esta sesión ya tiene un número ganador publicado. No se puede sobrescribir.');
         return false;
     }
 
@@ -3975,7 +4001,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         });
 
     if (insertError) {
-        await ctx.reply(`❌ Error al guardar: ${insertError.message}`);
+        await logReply(`❌ Error al guardar: ${insertError.message}`);
         return false;
     }
 
@@ -4166,7 +4192,7 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         .select('telegram_id');
 
     const publicWinningMessage =
-        `📢 <b>NÚMERO GANADOR PUBLICADO</b>\n\n` +
+        `📢 <b>NÚMERO GANADOR PUBLICADO - La Bolita Cubana 🇨🇺</b>\n\n` +
         `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> - Turno <b>${escapeHTML(session.time_slot)}</b>\n` +
         `📅 Fecha: ${session.date}\n` +
         `🔢 Número: <code>${formattedWinning}</code>\n\n` +
@@ -4182,9 +4208,180 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         }
     }
 
-    await ctx.reply(`✅ Números ganadores publicados y premios calculados correctamente.`);
+    await logReply(`✅ Números ganadores publicados y premios calculados correctamente.`);
     return true;
 }
+
+// ========== SCRAPING NÚMEROS GANADORES DESDE CANAL DE TELEGRAM ==========
+function stripHtmlTags(html) {
+    return String(html)
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .trim();
+}
+
+function parseChannelResultBlocks(html) {
+    const blocks = String(html).split('tgme_widget_message_wrap js-widget_message_wrap');
+    const results = [];
+    for (const block of blocks) {
+        const textMatch = block.match(/tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/);
+        if (!textMatch) continue;
+        const timeMatch = block.match(/<time datetime="([^"]+)"/);
+        const text = stripHtmlTags(textMatch[1]);
+        const lotteryMatch = text.match(/(FLORIDA|GEORGIA|NEW\s?YORK)/i);
+        if (!lotteryMatch) continue;
+        const numMatch = text.match(/🎰\s*(\d{3})\s*(\d{4})\s*🎰/);
+        if (!numMatch) continue;
+        const number = (numMatch[1] + numMatch[2]).replace(/\s+/g, '');
+        if (!/^\d{7}$/.test(number)) continue;
+        results.push({
+            lottery: String(lotteryMatch[1]).toUpperCase().replace(/\s+/g, ''),
+            number,
+            time: timeMatch ? new Date(timeMatch[1]) : null
+        });
+    }
+    return results;
+}
+
+async function fetchChannelWinningNumber(lotteryKey, channel, minTime, maxTime, retries = 2, baseDelay = 2000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            const resp = await axios.get(`https://t.me/s/${channel}`, {
+                timeout: 15000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'es-CU,es;q=0.9,en;q=0.8'
+                }
+            });
+
+            if (resp.status !== 200) {
+                console.warn(`[AutoPublish] HTTP ${resp.status} al consultar @${channel}`);
+                if (attempt < retries) await new Promise(r => setTimeout(r, baseDelay * attempt));
+                continue;
+            }
+
+            const results = parseChannelResultBlocks(resp.data);
+            const match = results.find(r =>
+                r.lottery === lotteryKey &&
+                r.time &&
+                r.time >= minTime &&
+                r.time <= maxTime
+            );
+            if (match) return match;
+            return null;
+        } catch (e) {
+            console.warn(`[AutoPublish] Error scraping @${channel} (intento ${attempt}/${retries}):`, e.message);
+            if (attempt < retries) await new Promise(r => setTimeout(r, baseDelay * attempt));
+        }
+    }
+    return null;
+}
+// ========== END SCRAPING NÚMEROS GANADORES ==========
+
+// ========== PUBLICACIÓN AUTOMÁTICA DE NÚMEROS GANADORES ==========
+async function autoPublishWinningResults() {
+    try {
+        const { data: configRows } = await supabase
+            .from('app_config')
+            .select('key, value')
+            .in('key', ['auto_publish_enabled', 'auto_publish_channel', 'auto_publish_window', 'auto_publish_failures']);
+
+        const configMap = {};
+        (configRows || []).forEach(c => { configMap[c.key] = c.value; });
+
+        if ((configMap.auto_publish_enabled || 'false') !== 'true') return;
+
+        const channel = configMap.auto_publish_channel || 'resultados_de_la_bolita';
+
+        let windowCfg = { min: 10, max: 30 };
+        try {
+            if (configMap.auto_publish_window) windowCfg = { ...windowCfg, ...JSON.parse(configMap.auto_publish_window) };
+        } catch (e) { console.warn('[AutoPublish] auto_publish_window inválido, usando defaults:', e.message); }
+        windowCfg.min = parseInt(windowCfg.min) || 10;
+        windowCfg.max = parseInt(windowCfg.max) || 30;
+
+        const today = moment.tz(TIMEZONE).format('YYYY-MM-DD');
+
+        const { data: sessions } = await supabase
+            .from('lottery_sessions')
+            .select('*')
+            .eq('status', 'closed')
+            .eq('date', today);
+
+        const { data: published } = await supabase
+            .from('winning_numbers')
+            .select('lottery, date, time_slot');
+
+        const publishedSet = new Set((published || []).map(p => `${p.lottery}|${p.time_slot}`));
+
+        const now = Date.now();
+
+        for (const session of sessions || []) {
+            if (publishedSet.has(`${session.lottery}|${session.time_slot}`)) continue;
+            if (!session.end_time) continue;
+
+            const endTime = new Date(session.end_time).getTime();
+            const windowStart = endTime + (windowCfg.min * 60000);
+            const windowEnd = endTime + ((windowCfg.max + 10) * 60000);
+
+            if (now < windowStart) continue;
+
+            const channelLotteryKey = {
+                'Florida': 'FLORIDA',
+                'Georgia': 'GEORGIA',
+                'Nueva York': 'NEWYORK'
+            }[session.lottery];
+            if (!channelLotteryKey) continue;
+
+            if (now <= windowEnd) {
+                const winner = await fetchChannelWinningNumber(channelLotteryKey, channel, new Date(windowStart), new Date(windowEnd));
+                if (winner) {
+                    const ok = await processWinningNumber(session.id, winner.number, null);
+                    console.log(`[AutoPublish] ${ok ? '✅ Publicado' : '❌ Falló publicación'}: ${session.lottery} ${session.time_slot} (${session.date}) número ${winner.number}`);
+                }
+                continue;
+            }
+
+            let failures = {};
+            try {
+                if (configMap.auto_publish_failures) failures = JSON.parse(configMap.auto_publish_failures);
+            } catch (e) { console.warn('[AutoPublish] auto_publish_failures inválido:', e.message); }
+
+            const failureKey = `${session.lottery}|${session.time_slot}|${session.date}`;
+            if (failures[failureKey]) continue;
+
+            failures[failureKey] = true;
+            const { error: upsertError } = await supabase
+                .from('app_config')
+                .upsert({ key: 'auto_publish_failures', value: JSON.stringify(failures) }, { onConflict: 'key' });
+            if (upsertError) console.warn('[AutoPublish] Error guardando auto_publish_failures:', upsertError.message);
+
+            for (const adminId of ADMIN_IDS) {
+                try {
+                    await bot.telegram.sendMessage(adminId,
+                        `⚠️ <b>Publicación automática fallida</b>\n\n` +
+                        `🎰 <b>${session.lottery}</b> - ${session.time_slot}\n` +
+                        `📅 Fecha: ${session.date}\n\n` +
+                        `No se encontró el número ganador en @${channel} durante la ventana de ${windowCfg.min}-${windowCfg.max} min tras el cierre.\n` +
+                        `Publícalo manualmente desde el panel del superadmin.`,
+                        { parse_mode: 'HTML' }
+                    );
+                } catch (e) {
+                    console.warn(`[AutoPublish] Error notificando al admin ${adminId}:`, e.message);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[AutoPublish] Error en el motor:', e?.message || e);
+    }
+}
+// ========== END PUBLICACIÓN AUTOMÁTICA ==========
 
 // ========== SISTEMA DE SOPORTE ==========
 // Acción para que un admin responda a un usuario
@@ -6145,15 +6342,15 @@ bot.on(message('text'), async (ctx) => {
                         error: limitCheck.error
                     };
                     const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
-                    const isSingleOne = (clamped.totalCUP > 0 && clamped.totalUSD === 0 && clamped.totalCUP === 1)
-                        || (clamped.totalUSD > 0 && clamped.totalCUP === 0 && clamped.totalUSD === 1);
-                    const question = isSingleOne ? '¿Desea apostárselo?' : '¿Deseas apostárselos?';
                     const admissibleLines = admissibleLinesForNumbers(parsed.items, betType, limitCheck.exceedData);
+                    const isSingleOne = admissibleLines.length === 1 && /:\s*1\.00 (CUP|USD)\.$/.test(admissibleLines[0]);
+                    const question = isSingleOne ? '¿Deseas apostárselo?' : '¿Deseas apostárselos?';
                     const admissibleLine = admissibleLines.length > 0 ? `\n\n${admissibleLines.join('\n')}` : '';
+                    const omitLabel = betType === 'centena' ? '❌ No, omitirla(s)' : '❌ No, omitirlo(s)';
                     await ctx.reply(`${limitCheck.error}${admissibleLine}\n${question}`, {
                         reply_markup: Markup.inlineKeyboard([
                             [Markup.button.callback('✅ Sí, apostar', 'bet_override_accept'),
-                             Markup.button.callback('❌ No, omitirlo(s)', 'bet_override_reject')]
+                             Markup.button.callback(omitLabel, 'bet_override_reject')]
                         ]).reply_markup
                     });
                     return;
@@ -6781,6 +6978,7 @@ cron.schedule('* * * * *', async () => {
     try {
         await closeExpiredSessions();
         await openScheduledSessions();
+        await autoPublishWinningResults();
         await withdrawNotifications();
     } catch (e) {
         console.error('Error en cron job:', e);
