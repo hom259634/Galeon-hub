@@ -2874,7 +2874,11 @@ bot.action('bet_override_reject', async (ctx) => {
                 delete ctx.session.betType;
                 delete ctx.session.sessionId;
             }
-            const cancelledMsg = '❌ Después de omitir los números excedidos no queda monto válido en la jugada. La apuesta fue cancelada.';
+            const isCentena = betType === 'centena';
+            const pluralArticle = isCentena ? 'todas las' : 'todos los';
+            const pluralType = (betType === 'fijo' || betType === 'corridos') ? 'números' : isCentena ? 'centenas' : betType === 'parle' ? 'parlets' : betType;
+            const adjective = isCentena ? 'apostadas' : 'apostados';
+            const cancelledMsg = `❌ Has omitido ${pluralArticle} ${pluralType} ${adjective}. Por lo cual la jugada queda cancelada.`;
             try {
                 await ctx.editMessageText(cancelledMsg, { parse_mode: 'HTML', reply_markup: undefined });
             } catch (e) {

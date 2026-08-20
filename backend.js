@@ -2147,7 +2147,11 @@ app.post('/api/bets', async (req, res) => {
             } else if (req.body.omitLimitOverride === true) {
                 const omitted = omitExceededNumbers(parsed.items, betType, limitCheck.exceedData);
                 if (omitted.totalCUP <= 0 && omitted.totalUSD <= 0) {
-                    return res.status(400).json({ error: '❌ Después de omitir los números excedidos no queda monto válido en la jugada. La apuesta fue cancelada.' });
+                    const isCentena = betType === 'centena';
+                    const pluralArticle = isCentena ? 'todas las' : 'todos los';
+                    const pluralType = (betType === 'fijo' || betType === 'corridos') ? 'números' : isCentena ? 'centenas' : betType === 'parle' ? 'parlets' : betType;
+                    const adjective = isCentena ? 'apostadas' : 'apostados';
+                    return res.status(400).json({ error: `❌ Has omitido ${pluralArticle} ${pluralType} ${adjective}. Por lo cual la jugada queda cancelada.` });
                 }
                 parsed.items = omitted.items;
                 totalCUP = omitted.totalCUP;
