@@ -1596,7 +1596,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const data = await res.json();
                 if (res.ok) {
                     const wasOmitted = payload.omitLimitOverride === true;
-                    const overLimitPhrase = overLimitTypePhrase([selectedBetType]);
+                    const overLimitPhrase = overLimitTypePhrase([selectedBetType]).replace(/^./, c => c.toLowerCase());
                     iziToast.success({ title: '✅ Jugada registrada', message: wasOmitted ? `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.` : '¡Buena suerte!' });
                     currentUser = data.updatedUser;
                     updateBalanceUI();
