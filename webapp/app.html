@@ -2747,13 +2747,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <span class="auto-slider"></span>
                         </label>
                     </div>`;
-                html += `<h4 class="text-xl font-semibold mb-4">🔢 Publicar números ganadores</h4><p class="mb-2 text-sm text-yellow-300">⚠️ 7 dígitos (centena+cuarteta). Puedes separar con espacio: 123 4567</p>`;
+                html += `<h4 class="text-xl font-semibold mb-4">🔢 Publicar números ganadores</h4>`;
+                if (autoEnabled) html += `<p class="mb-2 text-sm text-yellow-300">⚠️ La publicación automática está activada. Los botones de publicación manual están deshabilitados.</p>`;
+                else html += `<p class="mb-2 text-sm text-yellow-300">⚠️ 7 dígitos (centena+cuarteta). Puedes separar con espacio: 123 4567</p>`;
                 if (sessions.length === 0) html += '<p class="text-gray-400">No hay sesiones cerradas.</p>';
                 else {
                     sessions.forEach(s => {
                         const isPublished = publishedSet.has(`${s.lottery}|${s.date}|${s.time_slot}`);
                         html += `<div class="bg-gray-800/70 p-4 rounded-xl flex justify-between items-center mb-2"><div><span class="font-bold">${s.lottery} ${s.time_slot}</span><span class="text-sm ml-2">${s.date}</span>${isPublished?'<span class="ml-2 text-green-400">✅ publicado</span>':''}</div>`;
-                        if (!isPublished) html += `<button onclick="publishWinning(${s.id}, this)" class="bg-teal-600 px-4 py-2 rounded-lg">📢 Publicar</button>`;
+                        if (!isPublished) {
+                            if (autoEnabled) html += `<button disabled title="Desactiva la publicación automática para publicar manualmente" class="bg-gray-600 px-4 py-2 rounded-lg cursor-not-allowed opacity-50">📢 Publicar</button>`;
+                            else html += `<button onclick="publishWinning(${s.id}, this)" class="bg-teal-600 px-4 py-2 rounded-lg">📢 Publicar</button>`;
+                        }
                         else html += `<button onclick="showWinners(${s.id})" class="bg-blue-600 px-4 py-2 rounded-lg">👁️ Ver ganadores</button>`;
                         html += `</div>`;
                     });
