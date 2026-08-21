@@ -2140,7 +2140,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 <p class="text-xs text-gray-400 mb-3">${new Date(bet.placed_at).toLocaleString()}</p>
                 
                 <div class="mb-3">
-                    <p class="font-semibold mb-1">📝 ${bet.bet_type === 'centena' ? 'Centenas:' : bet.bet_type === 'parle' ? 'Parlets:' : 'Números jugados:'}</p>
+                    <p class="font-semibold mb-1">${bet.bet_type === 'centena' ? '💯 Centenas jugadas:' : bet.bet_type === 'parle' ? '🔗 Parlets jugados:' : '📝 Números jugados:'}</p>
                     ${itemsHtml}
                 </div>
                 
