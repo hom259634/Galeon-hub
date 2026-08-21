@@ -2100,6 +2100,12 @@ const regionMap = {
     'Nueva York': { key: 'newyork', emoji: '🗽' }
 };
 
+const lotteryVideoMap = {
+    florida:  'Assets/FLO.mp4',
+    georgia:  'Assets/GA.mp4',
+    newyork:  'Assets/NY.mp4'
+};
+
 function getEndTimeFromSlot(lottery, timeSlot) {
     const region = regionMap[lottery];
     if (!region) return null;
@@ -2727,10 +2733,23 @@ bot.action(/lot_(.+)/, async (ctx) => {
 
         ctx.session.lottery = lotteryName;
         ctx.session.sessionId = activeSession.id;
-        await safeEdit(ctx,
+
+        await ctx.answerCbQuery().catch(() => {});
+        try { await ctx.deleteMessage(); } catch (e) {}
+
+        const videoPath = lotteryVideoMap[lotteryKey];
+        if (videoPath) {
+            try {
+                await ctx.replyWithAnimation({ source: videoPath }, { protect_content: true });
+            } catch (e) {
+                console.warn('Error enviando video de lotería:', e.message);
+            }
+        }
+
+        await ctx.reply(
             `✅ Has seleccionado <b>${escapeHTML(lotteryName)}</b> - Turno <b>${escapeHTML(activeSession.time_slot)}</b>.\n` +
             `Ahora elige el tipo de jugada que deseas realizar:`,
-            playTypeKbd()
+            { parse_mode: 'HTML', reply_markup: playTypeKbd().reply_markup }
         );
     } catch (e) {
         console.error('Error en lot_ handler:', e);
