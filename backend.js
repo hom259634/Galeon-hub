@@ -1119,12 +1119,14 @@ function admissibleLinesForNumbers(items, betType, exceedData) {
 }
 
 // ========== FUNCIONES DE PARSEO DE APUESTAS ==========
+// Devuelve {items, ok}. ok=false si algún token de la línea no corresponde al
+// tipo de apuesta seleccionado (no se descarta en silencio).
 function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
-    if (!line) return [];
+    if (!line) return { items: [], ok: false };
 
     const match = line.match(/^([\d\s,xtd]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup|usdt|trx|mlc)$/i);
-    if (!match) return [];
+    if (!match) return { items: [], ok: false };
 
     let numerosStr = match[1].trim();
     const montoStr = match[2];
@@ -1135,10 +1137,11 @@ function parseBetLine(line, betType) {
     if (betType === 'parle') {
         const pairs = Array.from(numerosStr.matchAll(/(\d{2})\s*x\s*(\d{2})/gi));
         if (pairs.length) {
-            // Rechazar si los pares están concatenados sin espacio/coma entre ellos
+            // Rechazar si queda contenido fuera de los pares detectados
+            // (aplica también con un solo par: '17x32 45' se rechaza)
             const reconstructed = pairs.map(p => `${p[1]}x${p[2]}`).join('');
-            if (pairs.length > 1 && reconstructed !== numerosStr.replace(/\s/g, '')) {
-                return [];
+            if (reconstructed !== numerosStr.replace(/[\s,]/g, '')) {
+                return { items: [], ok: false };
             }
             numeros = pairs.map(p => `${p[1]}x${p[2]}`);
         } else {
@@ -1148,7 +1151,7 @@ function parseBetLine(line, betType) {
         numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
     }
     const montoBase = parseFloat(montoStr);
-    if (isNaN(montoBase) || montoBase <= 0) return [];
+    if (isNaN(montoBase) || montoBase <= 0) return { items: [], ok: false };
 
     const resultados = [];
 
@@ -1165,18 +1168,16 @@ function parseBetLine(line, betType) {
             continue;
         }
 
-        if (betType === 'fijo') {
-            if (!/^\d{2}$/.test(numero)) {
-                continue;
-            }
-        } else if (betType === 'corridos') {
-            if (!/^\d{2}$/.test(numero)) continue;
+        let formatoValido = false;
+        if (betType === 'fijo' || betType === 'corridos') {
+            formatoValido = /^\d{2}$/.test(numero);
         } else if (betType === 'centena') {
-            if (!/^\d{3}$/.test(numero)) continue;
+            formatoValido = /^\d{3}$/.test(numero);
         } else if (betType === 'parle') {
-            if (!/^\d{2}x\d{2}$/.test(numero)) continue;
-        } else {
-            continue;
+            formatoValido = /^\d{2}x\d{2}$/.test(numero);
+        }
+        if (!formatoValido) {
+            return { items: [], ok: false };
         }
 
         resultados.push({
@@ -1186,17 +1187,24 @@ function parseBetLine(line, betType) {
         });
     }
 
-    return resultados;
+    return { items: resultados, ok: true };
 }
 
+// ok=true solo si TODAS las líneas son válidas y hay al menos 1 item.
+// Si ok=false, igual devuelve los items parciales parseados.
 function parseBetMessage(text, betType) {
     const lines = text.split('\n').map(l => l.trim()).filter(l => l);
     const items = [];
     let totalCUP = 0, totalUSD = 0;
+    let todasLasLineasOk = true;
 
     for (const line of lines) {
-        const parsedItems = parseBetLine(line, betType);
-        for (const item of parsedItems) {
+        const parsedLine = parseBetLine(line, betType);
+        if (!parsedLine.ok) {
+            todasLasLineasOk = false;
+            continue;
+        }
+        for (const item of parsedLine.items) {
             items.push(item);
             if (item.currency === 'CUP') totalCUP += item.amount;
             else if (item.currency === 'USD') totalUSD += item.amount;
@@ -1207,7 +1215,7 @@ function parseBetMessage(text, betType) {
         items,
         totalCUP,
         totalUSD,
-        ok: items.length > 0
+        ok: todasLasLineasOk && items.length > 0
     };
 }
 
@@ -1361,9 +1369,24 @@ app.use(async (req, res, next) => {
                 .from('users')
                 .select('is_banned')
                 .eq('telegram_id', tgUser.id)
-                .single();
+                .maybeSingle();
             if (banCheck && banCheck.is_banned) {
                 return res.status(403).json({ error: 'Tu cuenta ha sido baneada.' });
+            }
+            // Usuario sin fila en `users`: si figura en deleted_users fue eliminado
+            // por un admin → bloquear toda la webapp hasta que se registre vía bot (/start)
+            if (!banCheck) {
+                const { data: deletedCheck } = await supabase
+                    .from('deleted_users')
+                    .select('telegram_id')
+                    .eq('telegram_id', tgUser.id)
+                    .maybeSingle();
+                if (deletedCheck) {
+                    return res.status(403).json({
+                        deleted: true,
+                        error: 'Tu cuenta fue eliminada. Para volver, abre el bot y presiona Inicio.'
+                    });
+                }
             }
         } catch (e) {}
     }
@@ -1479,8 +1502,10 @@ app.get('/api/user/balance', async (req, res) => {
         .from('users')
         .select('cup, usd, bonus_cup')
         .eq('telegram_id', telegram_id)
-        .single();
+        .maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
+    // Sin fila = usuario eliminado por admin mientras tenía la web abierta
+    if (!data) return res.status(404).json({ deleted: true });
     res.json({ cup: data.cup, usd: data.usd, bonus_cup: data.bonus_cup });
 });
 
@@ -2094,7 +2119,7 @@ app.post('/api/bets', async (req, res) => {
     const user = await getOrCreateUser(parseInt(userId));
     const parsed = parseBetMessage(rawText, betType);
     if (!parsed.ok) {
-        return res.status(400).json({ error: 'No se pudo interpretar la apuesta.' });
+        return res.status(400).json({ error: '❌ Formato inválido. Por favor, formula correctamente tu apuesta.' });
     }
 
     let totalUSD = parsed.totalUSD;
@@ -3512,7 +3537,7 @@ app.get('/api/admin/winning-numbers/:sessionId/winners', requireAdmin, async (re
         if (premioTotalUSD > 0 || premioTotalCUP > 0) {
             const { data: user } = await supabase
                 .from('users')
-                .select('first_name')
+                .select('first_name, username')
                 .eq('telegram_id', bet.user_id)
                 .single();
 
@@ -3520,6 +3545,7 @@ app.get('/api/admin/winning-numbers/:sessionId/winners', requireAdmin, async (re
             winners.push({
                 user_id: bet.user_id,
                 first_name: user?.first_name || 'Usuario',
+                username: user?.username || null,
                 prize_usd: premioTotalUSD,
                 prize_cup: premioTotalCUP,
                 bonus_moved: bonusMoved,
@@ -3790,7 +3816,7 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
         `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} <b>${session.lottery}</b> - Turno <b>${session.time_slot}</b>\n` +
         `📅 Fecha: ${session.date}\n` +
         `🔢 Número: <code>${formattedBroadcast}</code>\n\n` +
-        `💬 Revisa tu historial para ver si has ganado. ¡Suerte en la próxima!`
+        `💬 Revisa tu historial para ver si has ganado. ¡Suerte en la próxima! 🍀`
     );
 
     res.json({ success: true, message: 'Números publicados y premios calculados' });
