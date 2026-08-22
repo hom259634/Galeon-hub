@@ -47,6 +47,9 @@
         }
         .hidden-section { display: none; }
         .active-section { display: block; }
+        /* Fallback local: ocultar no debe depender del CDN de Tailwind */
+        .modal.hidden { display: none; }
+        .hidden { display: none !important; }
         .loader {
             border: 4px solid rgba(255,255,255,0.3);
             border-top: 4px solid #00ffff;
@@ -672,7 +675,17 @@
             if (typeof url === 'string' && url.startsWith('/api')) {
                 const headers = new Headers(options.headers || {});
                 headers.set('X-Telegram-Init-Data', TG.initData);
-                return originalFetch.call(this, url, { ...options, headers });
+                return originalFetch.call(this, url, { ...options, headers }).then(res => {
+                    // Usuario eliminado por admin: cualquier acción lo detecta al instante
+                    if (res.status === 403 || res.status === 404) {
+                        try {
+                            res.clone().json().then(body => {
+                                if (body && body.deleted) showAccountRemovedOverlay();
+                            }).catch(() => {});
+                        } catch (e) { /* silent */ }
+                    }
+                    return res;
+                });
             }
             return originalFetch.call(this, url, options);
         };
@@ -1260,12 +1273,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             return { ok: true };
         }
 
+        // Devuelve {items, ok}. ok=false si algún token de la línea no corresponde al
+        // tipo de apuesta seleccionado (no se descarta en silencio).
         function parseBetLine(line, betType) {
             line = line.trim().toLowerCase();
-            if (!line) return [];
+            if (!line) return { items: [], ok: false };
 
             const match = line.match(/^([\d\s,xtd]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup|usdt|trx|mlc)$/i);
-            if (!match) return [];
+            if (!match) return { items: [], ok: false };
 
             let numerosStr = match[1].trim();
             const montoStr = match[2];
@@ -1276,10 +1291,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             if (betType === 'parle') {
                 const pairs = Array.from(numerosStr.matchAll(/(\d{2})\s*x\s*(\d{2})/gi));
                 if (pairs.length) {
-                    // Rechazar si los pares están concatenados sin espacio/coma entre ellos
+                    // Rechazar si queda contenido fuera de los pares detectados
+                    // (aplica también con un solo par: '17x32 45' se rechaza)
                     const reconstructed = pairs.map(p => `${p[1]}x${p[2]}`).join('');
-                    if (pairs.length > 1 && reconstructed !== numerosStr.replace(/\s/g, '')) {
-                        return [];
+                    if (reconstructed !== numerosStr.replace(/[\s,]/g, '')) {
+                        return { items: [], ok: false };
                     }
                     numeros = pairs.map(p => `${p[1]}x${p[2]}`);
                 } else {
@@ -1289,7 +1305,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
             }
             const montoBase = parseFloat(montoStr);
-            if (isNaN(montoBase) || montoBase <= 0) return [];
+            if (isNaN(montoBase) || montoBase <= 0) return { items: [], ok: false };
 
             const resultados = [];
 
@@ -1306,16 +1322,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     continue;
                 }
 
-                if (betType === 'fijo') {
-                    if (!/^\d{2}$/.test(numero)) continue;
-                } else if (betType === 'corridos') {
-                    if (!/^\d{2}$/.test(numero)) continue;
+                let formatoValido = false;
+                if (betType === 'fijo' || betType === 'corridos') {
+                    formatoValido = /^\d{2}$/.test(numero);
                 } else if (betType === 'centena') {
-                    if (!/^\d{3}$/.test(numero)) continue;
+                    formatoValido = /^\d{3}$/.test(numero);
                 } else if (betType === 'parle') {
-                    if (!/^\d{2}x\d{2}$/.test(numero)) continue;
-                } else {
-                    continue;
+                    formatoValido = /^\d{2}x\d{2}$/.test(numero);
+                }
+                if (!formatoValido) {
+                    return { items: [], ok: false };
                 }
 
                 resultados.push({
@@ -1325,17 +1341,24 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
             }
 
-            return resultados;
+            return { items: resultados, ok: true };
         }
 
+        // ok=true solo si TODAS las líneas son válidas y hay al menos 1 item.
+        // Si ok=false, igual devuelve los items parciales parseados.
         function parseBetMessage(text, betType) {
             const lines = text.split('\n').map(l => l.trim()).filter(l => l);
             const items = [];
             let totalUSD = 0, totalCUP = 0;
+            let todasLasLineasOk = true;
 
             for (const line of lines) {
-                const parsedItems = parseBetLine(line, betType);
-                for (const item of parsedItems) {
+                const parsedLine = parseBetLine(line, betType);
+                if (!parsedLine.ok) {
+                    todasLasLineasOk = false;
+                    continue;
+                }
+                for (const item of parsedLine.items) {
                     items.push(item);
                     totalUSD += item.usd;
                     totalCUP += item.cup;
@@ -1346,7 +1369,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 items,
                 totalUSD,
                 totalCUP,
-                ok: items.length > 0
+                ok: todasLasLineasOk && items.length > 0
             };
         }
 
@@ -1746,7 +1769,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     loadReferralStats()
                 ]);
 
-                setInterval(fetchBalance, 15000);
+                setInterval(fetchBalance, 5000);
 
                 globalLoader.classList.add('hidden');
                 mainContent.classList.remove('hidden');
@@ -1757,6 +1780,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             } catch (e) {
                 console.error('Error en initAuth:', e);
+                // Usuario eliminado por admin intentando entrar desde cero:
+                // mostrar el mensaje del bot y esperar que cierre la webapp
+                if (/eliminada/i.test(e.message || '')) {
+                    showAccountRemovedOverlay();
+                    return;
+                }
                 globalLoader.innerHTML = `
                     <div class="error-box">
                         <i class="fas fa-exclamation-triangle text-5xl mb-4"></i>
@@ -1820,10 +1849,54 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         }
 
+        let accountRemovedHandled = false;
+
+        // Cuenta eliminada por admin: mostrar el MISMO mensaje que envía el bot al
+        // eliminado-re registrado que toca un botón sin haber tocado /start (bot.js),
+        // con botón Cerrar para salir de la webapp.
+        function showAccountRemovedOverlay() {
+            if (accountRemovedHandled) return;
+            accountRemovedHandled = true;
+            let firstName = '';
+            try {
+                const params = new URLSearchParams(decodeURIComponent(TG.initData || ''));
+                firstName = JSON.parse(params.get('user') || '{}').first_name || '';
+            } catch (e) { /* silent */ }
+            if (!firstName && currentUser) firstName = currentUser.first_name || '';
+            try {
+                const box = document.createElement('div');
+                box.className = 'error-box';
+                box.style.margin = '0';
+                box.innerHTML =
+                    '<h3 style="font-size:1.15rem;margin-bottom:10px;">👋 ¡Hola de nuevo, ' + escapeHTML(firstName) + '!</h3>' +
+                    '<p style="font-size:.9rem;line-height:1.5;">¿En qué podemos ayudarte hoy?<br><br>' +
+                    '⚠️ Por favor, selecciona el botón <b>Inicio</b> en el menú lateral si deseas continuar interactuando con nuestro asistente.</p>';
+                const closeBtn = document.createElement('button');
+                closeBtn.innerText = 'Cerrar';
+                closeBtn.addEventListener('click', () => {
+                    try { window.Telegram.WebApp.close(); } catch (e) { /* silent */ }
+                });
+                box.appendChild(closeBtn);
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:10000;background:rgba(0,0,0,0.94);display:flex;align-items:center;justify-content:center;padding:20px;';
+                overlay.appendChild(box);
+                document.body.appendChild(overlay);
+            } catch (e) { /* silent */ }
+        }
+
         async function fetchBalance() {
-            if (!currentUser?.telegram_id) return;
+            if (!currentUser?.telegram_id || accountRemovedHandled) return;
             try {
                 const res = await fetch(`/api/user/balance?telegram_id=${currentUser.telegram_id}`);
+                if (res.status === 404) {
+                    showAccountRemovedOverlay();
+                    return;
+                }
+                if (res.status === 403) {
+                    const body = await res.json().catch(() => ({}));
+                    if (body.deleted) showAccountRemovedOverlay();
+                    return;
+                }
                 if (!res.ok) return;
                 const data = await res.json();
                 currentUser.cup = data.cup;
@@ -2140,7 +2213,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 <p class="text-xs text-gray-400 mb-3">${new Date(bet.placed_at).toLocaleString()}</p>
                 
                 <div class="mb-3">
-                    <p class="font-semibold mb-1">${bet.bet_type === 'centena' ? '💯 Centenas jugadas:' : bet.bet_type === 'parle' ? '🔗 Parlets jugados:' : '📝 Números jugados:'}</p>
+                    <p class="font-semibold mb-1">${bet.bet_type === 'centena' ? '💯 Centenas jugadas:' : bet.bet_type === 'parle' ? '🔗 Parlets jugados:' : bet.bet_type === 'fijo' ? '🎯 Números jugados:' : bet.bet_type === 'corridos' ? '🏃 Números jugados:' : '📝 Números jugados:'}</p>
                     ${itemsHtml}
                 </div>
                 
@@ -2869,11 +2942,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             // Mostrar tipo de jugada si viene en la respuesta
                             const betTypeRaw = w.bet_type || w.betType || w.type || w.play_type || '';
                             const betTypeLabel = escapeHTML(formatBetTypeLabel(betTypeRaw));
+                            // Debajo del nombre: @username de Telegram; si no tiene, el ID de Telegram
+                            const userHandle = (w.username && String(w.username).trim())
+                                ? `@${escapeHTML(String(w.username).trim())}`
+                                : `ID ${escapeHTML(String(w.user_id ?? w.telegram_id ?? '—'))}`;
                             modalContent += `<div class="bg-gray-700/50 p-3 rounded-lg">
                                 <div class="flex justify-between items-center">
                                     <div>
                                         <span class="font-bold">${escapeHTML(w.first_name || 'Ganador')}</span>
                                         <span class="ml-2 text-xs bg-gray-800 text-gray-200 px-2 py-0.5 rounded">${betTypeLabel}</span>
+                                        <p class="text-xs text-cyan-300 mt-0.5">${userHandle}</p>
                                     </div>
                                     <span class="text-cyan-300">${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</span>
                                 </div>
