@@ -4257,25 +4257,57 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
         `📅 Fecha: ${session.date} - Turno ${escapeHTML(session.time_slot)}` +
         `${publicFooter}`;
 
+    // Descargar la foto UNA sola vez antes del bucle y enviarla como archivo
+    // subido. Si falla la descarga, intentar con la URL directa (comportamiento
+    // anterior) y, como último recurso, mensaje solo-texto.
+    let photoBuffer = null;
+    if (photoUrl) {
+        photoBuffer = await downloadChannelPhoto(photoUrl);
+        if (photoBuffer) {
+            console.log(`[AutoPublish] Foto del canal descargada (${photoBuffer.length} bytes), se enviará como archivo subido.`);
+        } else {
+            console.warn('[AutoPublish] No se pudo descargar la foto; se intentará enviar por URL directa.');
+        }
+    }
+
+    let photoOk = 0;
+    let photoUrlFallback = 0;
+    let textFallback = 0;
+
     for (const u of allUsers || []) {
         if (winnerIds.has(String(u.telegram_id))) continue;
         try {
             let sent = false;
-            if (photoUrl) {
+            if (photoBuffer) {
+                try {
+                    await bot.telegram.sendPhoto(u.telegram_id, { filename: 'resultado.jpg', source: photoBuffer }, { caption: publicWinningMessagePhoto, parse_mode: 'HTML' });
+                    sent = true;
+                    photoOk++;
+                } catch (photoErr) {
+                    console.warn(`sendPhoto(buffer) falló para ${u.telegram_id}, probando URL directa:`, photoErr.message);
+                }
+            }
+            if (!sent && photoUrl) {
                 try {
                     await bot.telegram.sendPhoto(u.telegram_id, photoUrl, { caption: publicWinningMessagePhoto, parse_mode: 'HTML' });
                     sent = true;
+                    photoUrlFallback++;
                 } catch (photoErr) {
-                    console.warn(`sendPhoto falló para ${u.telegram_id}, enviando texto:`, photoErr.message);
+                    console.warn(`sendPhoto(URL) falló para ${u.telegram_id}, enviando texto:`, photoErr.message);
                 }
             }
             if (!sent) {
                 await bot.telegram.sendMessage(u.telegram_id, publicWinningMessage, { parse_mode: 'HTML' });
+                textFallback++;
             }
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
             console.warn(`Error enviando broadcast de ganador a ${u.telegram_id}:`, e.message);
         }
+    }
+
+    if (photoUrl) {
+        console.log(`[AutoPublish] Resumen broadcast: foto(buffer)=${photoOk}, foto(url)=${photoUrlFallback}, solo-texto=${textFallback}`);
     }
 
     await logReply(`✅ Números ganadores publicados y premios calculados correctamente.`);
@@ -4313,8 +4345,8 @@ function parseChannelResultBlocks(html) {
         let photo = null;
         const photoTagMatch = block.match(/tgme_widget_message_photo_wrap[^>]*>/);
         if (photoTagMatch) {
-            const urlMatch = photoTagMatch[0].match(/background-image:\s*url\('([^']+)'\)/);
-            if (urlMatch) photo = urlMatch[1].replace(/&amp;/g, '&');
+            const urlMatch = photoTagMatch[0].match(/background-image:\s*url\((['"])([^'"]+)\1\)/i);
+            if (urlMatch) photo = urlMatch[2].replace(/&amp;/g, '&');
         }
         results.push({
             lottery: String(lotteryMatch[1]).toUpperCase().replace(/\s+/g, ''),
@@ -4323,7 +4355,8 @@ function parseChannelResultBlocks(html) {
             photo
         });
     }
-    console.log(`[AutoPublish] parseChannelResultBlocks: ${blocks.length} bloques HTML, ${results.length} resultados válidos extraídos`);
+    const withPhoto = results.filter(r => r.photo).length;
+    console.log(`[AutoPublish] parseChannelResultBlocks: ${blocks.length} bloques HTML, ${results.length} resultados válidos extraídos (${withPhoto} con foto, ${results.length - withPhoto} sin foto)`);
     return results;
 }
 
@@ -4355,7 +4388,7 @@ async function fetchChannelWinningNumber(lotteryKey, channel, minTime, maxTime, 
                 r.time <= maxTime
             );
             if (match) {
-                console.log(`[AutoPublish] Match encontrado: ${match.lottery} ${match.number} @ ${match.time}`);
+                console.log(`[AutoPublish] Match encontrado: ${match.lottery} ${match.number} @ ${match.time} | foto=${match.photo ? 'sí' : 'no'}`);
                 return match;
             }
             console.log(`[AutoPublish] Sin match para ${lotteryKey} en ventana ${minTime.toISOString()} - ${maxTime.toISOString()}`);
@@ -4366,6 +4399,24 @@ async function fetchChannelWinningNumber(lotteryKey, channel, minTime, maxTime, 
         }
     }
     return null;
+}
+
+// Descarga la foto del canal nosotros mismos para enviarla como archivo subido
+// (evita que los servidores de Telegram tengan que descargar la URL firmada,
+// cosa que a veces falla con "failed to get HTTP URL content").
+async function downloadChannelPhoto(url) {
+    try {
+        const resp = await axios.get(url, {
+            timeout: 15000,
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36' }
+        });
+        if (resp.status !== 200 || !resp.data || !resp.data.length) return null;
+        return Buffer.from(resp.data);
+    } catch (e) {
+        console.warn(`[AutoPublish] Error descargando foto del canal:`, e.message);
+        return null;
+    }
 }
 // ========== END SCRAPING NÚMEROS GANADORES ==========
 
