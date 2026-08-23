@@ -1297,7 +1297,7 @@ function getEndTimeFromSlot(lottery, timeSlot) {
     return endTime.toDate();
 }
 
-async function broadcastToAllUsers(message, parseMode = 'HTML') {
+async function broadcastToAllUsers(message, parseMode = 'HTML', protectContent = false) {
     const { data: users } = await supabase
         .from('users')
         .select('telegram_id');
@@ -1315,7 +1315,7 @@ async function broadcastToAllUsers(message, parseMode = 'HTML') {
 
     for (const u of users || []) {
         try {
-            await bot.telegram.sendMessage(u.telegram_id, message, { parse_mode: parseMode });
+            await bot.telegram.sendMessage(u.telegram_id, message, { parse_mode: parseMode, protect_content: protectContent });
             sentCount += 1;
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
@@ -3816,7 +3816,9 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
         `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} <b>${session.lottery}</b> - Turno <b>${session.time_slot}</b>\n` +
         `📅 Fecha: ${session.date}\n` +
         `🔢 Número: <code>${formattedBroadcast}</code>\n\n` +
-        `💬 Revisa tu historial para ver si has ganado. ¡Suerte en la próxima! 🍀`
+        `💬 Revisa tu historial para ver si has ganado. ¡Suerte en la próxima! 🍀`,
+        'HTML',
+        true
     );
 
     res.json({ success: true, message: 'Números publicados y premios calculados' });

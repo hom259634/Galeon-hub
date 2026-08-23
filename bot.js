@@ -4280,7 +4280,7 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
             let sent = false;
             if (photoBuffer) {
                 try {
-                    await bot.telegram.sendPhoto(u.telegram_id, { filename: 'resultado.jpg', source: photoBuffer }, { caption: publicWinningMessagePhoto, parse_mode: 'HTML' });
+                    await bot.telegram.sendPhoto(u.telegram_id, { filename: 'resultado.jpg', source: photoBuffer }, { caption: publicWinningMessagePhoto, parse_mode: 'HTML', protect_content: true });
                     sent = true;
                     photoOk++;
                 } catch (photoErr) {
@@ -4289,7 +4289,7 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
             }
             if (!sent && photoUrl) {
                 try {
-                    await bot.telegram.sendPhoto(u.telegram_id, photoUrl, { caption: publicWinningMessagePhoto, parse_mode: 'HTML' });
+                    await bot.telegram.sendPhoto(u.telegram_id, photoUrl, { caption: publicWinningMessagePhoto, parse_mode: 'HTML', protect_content: true });
                     sent = true;
                     photoUrlFallback++;
                 } catch (photoErr) {
@@ -4297,7 +4297,7 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
                 }
             }
             if (!sent) {
-                await bot.telegram.sendMessage(u.telegram_id, publicWinningMessage, { parse_mode: 'HTML' });
+                await bot.telegram.sendMessage(u.telegram_id, publicWinningMessage, { parse_mode: 'HTML', protect_content: true });
                 textFallback++;
             }
             await new Promise(resolve => setTimeout(resolve, 30));
