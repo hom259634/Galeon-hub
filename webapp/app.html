@@ -1520,11 +1520,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 let availableCup = (parseFloat(currentUser?.cup) || 0) + (parseFloat(currentUser?.bonus_cup) || 0);
                 let availableUsd = parseFloat(currentUser?.usd) || 0;
                 if (newTotalCUP > 0 && availableCup < newTotalCUP) {
-                    iziToast.error({ message: `❌ Saldo insuficiente. Disponible: ${availableCup.toFixed(2)} CUP.` });
+                    iziToast.error({ message: '❌ Saldo CUP insuficiente. Por favor, recarga.' });
                     return;
                 }
                 if (newTotalUSD > 0 && availableUsd < newTotalUSD) {
-                    iziToast.error({ message: `❌ Saldo insuficiente. Disponible: ${availableUsd.toFixed(2)} USD.` });
+                    iziToast.error({ message: '❌ Saldo USD insuficiente. Por favor, recarga.' });
                     return;
                 }
             }
