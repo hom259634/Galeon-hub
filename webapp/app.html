@@ -2947,14 +2947,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 ? `@${escapeHTML(String(w.username).trim())}`
                                 : `ID ${escapeHTML(String(w.user_id ?? w.telegram_id ?? '—'))}`;
                             modalContent += `<div class="bg-gray-700/50 p-3 rounded-lg">
-                                <div class="flex justify-between items-center">
-                                    <div>
-                                        <span class="font-bold">${escapeHTML(w.first_name || 'Ganador')}</span>
-                                        <span class="ml-2 text-xs bg-gray-800 text-gray-200 px-2 py-0.5 rounded">${betTypeLabel}</span>
+                                <div class="flex justify-between items-start gap-2">
+                                    <div class="min-w-0">
+                                        <p class="font-bold break-words">${escapeHTML(w.first_name || 'Ganador')}</p>
                                         <p class="text-xs text-cyan-300 mt-0.5">${userHandle}</p>
                                     </div>
-                                    <span class="text-cyan-300">${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</span>
+                                    <span class="text-cyan-300 whitespace-nowrap shrink-0">${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</span>
                                 </div>
+                                <span class="inline-block mt-1 text-xs bg-gray-800 text-gray-200 px-2 py-0.5 rounded">${betTypeLabel}</span>
                                 <p class="text-xs text-gray-400 mt-1">${escapeHTML(w.bet_text)}</p>
                             </div>`;
                         });
