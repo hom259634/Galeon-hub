@@ -14,7 +14,14 @@
     <style>
         body {
             font-family: 'Poppins', sans-serif;
-            background: linear-gradient(145deg, #1a1e2c 0%, #2d3349 100%);
+            background-color: #1a1e2c; /* respaldo si la imagen no carga */
+            background-image:
+                linear-gradient(145deg, rgba(26,30,44,0.88) 0%, rgba(45,51,73,0.88) 100%),
+                url('/Assets/back.jpg');
+            background-size: cover;
+            background-position: center center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
             color: #fff;
             min-height: 100vh;
             padding-bottom: 30px;
@@ -5224,7 +5231,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-default hover:bg-gray-700/60 transition user-card ${deletedClass}" data-userid="${u.telegram_id}" title="${titleAttr}">
                                 <div class="flex justify-between items-start">
                                     <div>
-                                        <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''}</p><p class="${isRestored ? 'text-emerald-400' : 'text-red-400'} text-xs font-bold mt-1">${isRestored ? '♻️ REINGRESÓ' : '🗑 ELIMINADO'}</p>
+                                        <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''}</p>
                                         <p class="text-xs text-gray-400">ID: ${u.telegram_id}</p>
                                         <p class="text-xs text-white mt-1">🗓 Eliminado: ${deletedAt}</p>
                                         ${isRestored ? `<p class="text-xs text-emerald-300">♻️ Reingresó: ${restoredAt}</p>` : ''}
