@@ -15,6 +15,7 @@
 // ==============================
 
 require('dotenv').config();
+const fs = require('fs');
 const { Telegraf, Markup } = require('telegraf');
 const { message } = require('telegraf/filters');
 const LocalSession = require('telegraf-session-local');
@@ -2463,12 +2464,29 @@ async function sendNewUserWelcome(ctx) {
     const me = await ctx.telegram.getMe().catch(() => ({}));
     const botName = me.first_name || 'el Bot';
 
-    await ctx.reply(
+    const welcomeText =
         `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(formatBotDisplayName(botName))}, tu asistente de la suerte 🍀\n\n` +
         `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
-        `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`,
-        getMainKeyboard(ctx)
-    );
+        `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`;
+
+    // Bienvenida con foto (Assets/inicio.webp). Si el archivo no existe o el
+    // envío falla, se cae al mensaje de texto para no romper el /start.
+    const welcomePhotoPath = 'Assets/inicio.webp';
+    let photoSent = false;
+    if (fs.existsSync(welcomePhotoPath)) {
+        try {
+            await ctx.replyWithPhoto(
+                { source: welcomePhotoPath },
+                { caption: welcomeText, reply_markup: getMainKeyboard(ctx).reply_markup, protect_content: true }
+            );
+            photoSent = true;
+        } catch (photoErr) {
+            console.error('Error enviando foto de bienvenida, usando texto:', photoErr.message);
+        }
+    }
+    if (!photoSent) {
+        await ctx.reply(welcomeText, getMainKeyboard(ctx));
+    }
 
     const bonusAmount = parseFloat(ctx.dbUser?.bonus_cup);
     const normalizedBonus = Number.isFinite(bonusAmount) ? bonusAmount : BONUS_CUP_DEFAULT;

@@ -42,6 +42,8 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'webapp')));
+// Fotos de la web (fondo, etc.) servidas desde la carpeta Assets del proyecto
+app.use('/Assets', express.static(path.join(__dirname, 'Assets')));
 
 // ========== CONFIGURACIÓN DE MULTER ==========
 const upload = multer({
