@@ -1365,30 +1365,28 @@ app.use(async (req, res, next) => {
             const tgUser = JSON.parse(userStr);
             req.verifiedTelegramId = tgUser.id;
 
-            const { data: banCheck } = await supabase
-                .from('users')
-                .select('is_banned')
-                .eq('telegram_id', tgUser.id)
-                .maybeSingle();
+            // Usuario eliminado por un admin → bloquear toda la webapp hasta que
+            // se registre de nuevo vía bot (/start). Se consulta SIEMPRE: aunque la
+            // fila en `users` vuelva a existir (el bot la recrea al primer toque),
+            // el registro en deleted_users permanece hasta que complete /start.
+            const [{ data: deletedCheck }, { data: banCheck }] = await Promise.all([
+                supabase.from('deleted_users').select('telegram_id, restored_at').eq('telegram_id', tgUser.id).maybeSingle(),
+                supabase.from('users').select('is_banned').eq('telegram_id', tgUser.id).maybeSingle()
+            ]);
+            // Eliminación VIGENTE: existe registro y el usuario aún no ha
+            // reingresado vía /start (restored_at nulo).
+            if (deletedCheck && !deletedCheck.restored_at) {
+                return res.status(403).json({
+                    deleted: true,
+                    error: 'Tu cuenta fue eliminada. Para volver, abre el bot y presiona Inicio.'
+                });
+            }
             if (banCheck && banCheck.is_banned) {
                 return res.status(403).json({ error: 'Tu cuenta ha sido baneada.' });
             }
-            // Usuario sin fila en `users`: si figura en deleted_users fue eliminado
-            // por un admin → bloquear toda la webapp hasta que se registre vía bot (/start)
-            if (!banCheck) {
-                const { data: deletedCheck } = await supabase
-                    .from('deleted_users')
-                    .select('telegram_id')
-                    .eq('telegram_id', tgUser.id)
-                    .maybeSingle();
-                if (deletedCheck) {
-                    return res.status(403).json({
-                        deleted: true,
-                        error: 'Tu cuenta fue eliminada. Para volver, abre el bot y presiona Inicio.'
-                    });
-                }
-            }
-        } catch (e) {}
+        } catch (e) {
+            console.error('Error verificando estado del usuario en middleware initData:', e);
+        }
     }
     next();
 });
@@ -1408,6 +1406,26 @@ app.post('/api/auth', async (req, res) => {
     if (!userStr) return res.status(400).json({ error: 'No hay datos de usuario' });
 
     const tgUser = JSON.parse(userStr);
+
+    // Defensa en profundidad: un usuario eliminado por admin no puede autenticarse
+    // (ni ser recreado por getOrCreateUser) hasta que se registre de nuevo vía /start.
+    try {
+        const { data: deletedAuthCheck } = await supabase
+            .from('deleted_users')
+            .select('telegram_id, restored_at')
+            .eq('telegram_id', tgUser.id)
+            .maybeSingle();
+        // Eliminación VIGENTE: registro presente y sin reingreso (/start) aún.
+        if (deletedAuthCheck && !deletedAuthCheck.restored_at) {
+            return res.status(403).json({
+                deleted: true,
+                error: 'Tu cuenta fue eliminada. Para volver, abre el bot y presiona Inicio.'
+            });
+        }
+    } catch (e) {
+        console.error('Error verificando deleted_users en /api/auth:', e);
+    }
+
     const user = await getOrCreateUser(tgUser.id, tgUser.first_name, tgUser.username);
     if (user && user.is_banned) {
         return res.status(403).json({ error: 'Tu cuenta ha sido baneada.' });
@@ -4778,23 +4796,11 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
             console.error('Error refrescando caches tras eliminar admin_roles:', e);
         }
 
-        // Eliminar registros stale de deleted_users (de intentos fallidos previos)
-        await supabase.from('deleted_users').delete().eq('telegram_id', telegramId);
-
-        // Desvincular referidos antes de eliminar
-        await supabase.from('users').update({ ref_by: null }).eq('ref_by', telegramId);
-
-        const { error: deleteError } = await supabase
-            .from('users')
-            .delete()
-            .eq('telegram_id', telegramId);
-
-        if (deleteError) {
-            console.error('Error eliminando usuario de la DB:', deleteError);
-            return res.status(500).json({ error: 'No se pudo eliminar al usuario.' });
-        }
-
-        // Backup a deleted_users (best-effort: después de eliminar al usuario)
+        // Respaldo en deleted_users ANTES de eliminar: la webapp detecta a los
+        // eliminados por una eliminación VIGENTE en esta tabla (restored_at nulo),
+        // así que si el respaldo falla se aborta el borrado. El upsert sobreescribe
+        // los datos dejando solo los de la última eliminación; restored_at vuelve
+        // a nulo para que la nueva eliminación sea vigente desde ya.
         try {
             const { error: insErr } = await supabase.from('deleted_users').upsert({
                 telegram_id: user.telegram_id,
@@ -4807,11 +4813,36 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
                 deleted_at: new Date(),
                 deleted_by: userId,
                 deposits_history: JSON.stringify(depositsRes.data || []),
-                withdrawals_history: JSON.stringify(withdrawalsRes.data || [])
+                withdrawals_history: JSON.stringify(withdrawalsRes.data || []),
+                restored_at: null
             });
-            if (insErr) console.error('Error guardando en deleted_users:', insErr);
+            if (insErr) {
+                console.error('Error guardando en deleted_users:', insErr);
+                return res.status(500).json({ error: 'No se pudo eliminar al usuario (falló el respaldo).' });
+            }
         } catch (e) {
             console.error('Error guardando en deleted_users:', e);
+            return res.status(500).json({ error: 'No se pudo eliminar al usuario (falló el respaldo).' });
+        }
+
+        // Desvincular referidos antes de eliminar
+        await supabase.from('users').update({ ref_by: null }).eq('ref_by', telegramId);
+
+        const { error: deleteError } = await supabase
+            .from('users')
+            .delete()
+            .eq('telegram_id', telegramId);
+
+        if (deleteError) {
+            console.error('Error eliminando usuario de la DB:', deleteError);
+            // Compensación: el usuario sigue activo, marcar restored_at para que
+            // no quede bloqueado por una eliminación que nunca se completó.
+            try {
+                await supabase.from('deleted_users').update({ restored_at: new Date() }).eq('telegram_id', telegramId);
+            } catch (compErr) {
+                console.error('Error compensando restored_at tras fallo de borrado:', compErr);
+            }
+            return res.status(500).json({ error: 'No se pudo eliminar al usuario.' });
         }
 
         res.json({ success: true, message: 'Usuario eliminado. Podrá registrarse de nuevo como nuevo usuario.' });

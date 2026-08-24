@@ -2492,6 +2492,15 @@ bot.command('start', async (ctx) => {
     const uid = ctx.from.id;
     const refParam = ctx.payload;
 
+    // Tocar /start completa el re-registro tras una eliminación por admin: marcar
+    // restored_at en deleted_users para desbloquear también la webapp (la API
+    // bloquea mientras exista una eliminación vigente, es decir restored_at nulo).
+    try {
+        await supabase.from('deleted_users').update({ restored_at: new Date() }).eq('telegram_id', uid);
+    } catch (e) {
+        console.error('Error marcando restored_at en deleted_users durante /start:', e);
+    }
+
     if (refParam && ctx.session?.isNewUser) {
         const refId = parseInt(refParam);
         if (refId && refId !== uid) {
