@@ -2322,7 +2322,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const listContainer = document.getElementById('referralList');
                 if (!listContainer) return;
                 if (!data.referredUsers || data.referredUsers.length === 0) {
-                    listContainer.innerHTML = '<p class="text-gray-400 text-sm py-2">Aún no tienes referidos con aportes.</p>';
+                    listContainer.innerHTML = '<p class="text-gray-400 text-sm py-2">Aún no tienes referidos. Comparte tu enlace y empieza a ganar!</p>';
                 } else {
                     let html = `<div class="bg-gray-800/30 p-3 rounded-xl text-sm font-semibold mb-2">Aportes de tus referidos</div>`;
                     data.referredUsers.forEach(u => {
@@ -2332,7 +2332,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         </div>`;
                     });
                     html += `<div class="bg-gray-800/40 p-2 rounded-lg flex justify-between items-center mt-2">
-                        <span class="text-sm font-semibold">Total aportado</span>
+                        <span class="text-sm font-semibold">Total aportado:</span>
                         <span class="text-cyan-300 text-sm font-bold">${data.totalEarnedCUP.toFixed(2)} CUP</span>
                     </div>`;
                     listContainer.innerHTML = html;
