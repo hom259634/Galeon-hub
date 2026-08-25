@@ -15,6 +15,7 @@
 // ==============================
 
 require('dotenv').config();
+const fs = require('fs');
 const { Telegraf, Markup } = require('telegraf');
 const { message } = require('telegraf/filters');
 const LocalSession = require('telegraf-session-local');
@@ -1979,12 +1980,14 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
     return true;
 }
 
+// Devuelve {items, ok}. ok=false si algún token de la línea no corresponde al
+// tipo de apuesta seleccionado (no se descarta en silencio).
 function parseBetLine(line, betType) {
     line = line.trim().toLowerCase();
-    if (!line) return [];
+    if (!line) return { items: [], ok: false };
 
     const match = line.match(/^([\d\s,xtd]+)\s*(?:con|\*)\s*([0-9.]+)\s*(usd|cup|usdt|trx|mlc)$/i);
-    if (!match) return [];
+    if (!match) return { items: [], ok: false };
 
     let numerosStr = match[1].trim();
     const montoStr = match[2];
@@ -1992,7 +1995,7 @@ function parseBetLine(line, betType) {
 
     const numeros = numerosStr.split(/[\s,]+/).filter(n => n.length > 0);
     const montoBase = parseFloat(montoStr);
-    if (isNaN(montoBase) || montoBase <= 0) return [];
+    if (isNaN(montoBase) || montoBase <= 0) return { items: [], ok: false };
 
     const resultados = [];
 
@@ -2009,18 +2012,16 @@ function parseBetLine(line, betType) {
             continue;
         }
 
-        if (betType === 'fijo') {
-            if (!/^\d{2}$/.test(numero)) {
-                continue;
-            }
-        } else if (betType === 'corridos') {
-            if (!/^\d{2}$/.test(numero)) continue;
+        let formatoValido = false;
+        if (betType === 'fijo' || betType === 'corridos') {
+            formatoValido = /^\d{2}$/.test(numero);
         } else if (betType === 'centena') {
-            if (!/^\d{3}$/.test(numero)) continue;
+            formatoValido = /^\d{3}$/.test(numero);
         } else if (betType === 'parle') {
-            if (!/^\d{2}x\d{2}$/.test(numero)) continue;
-        } else {
-            continue;
+            formatoValido = /^\d{2}x\d{2}$/.test(numero);
+        }
+        if (!formatoValido) {
+            return { items: [], ok: false };
         }
 
         resultados.push({
@@ -2030,17 +2031,24 @@ function parseBetLine(line, betType) {
         });
     }
 
-    return resultados;
+    return { items: resultados, ok: true };
 }
 
+// ok=true solo si TODAS las líneas son válidas y hay al menos 1 item.
+// Si ok=false, igual devuelve los items parciales parseados.
 function parseBetMessage(text, betType) {
     const lines = text.split('\n').map(l => l.trim()).filter(l => l);
     const items = [];
     let totalUSD = 0, totalCUP = 0;
+    let todasLasLineasOk = true;
 
     for (const line of lines) {
-        const parsedItems = parseBetLine(line, betType);
-        for (const item of parsedItems) {
+        const parsedLine = parseBetLine(line, betType);
+        if (!parsedLine.ok) {
+            todasLasLineasOk = false;
+            continue;
+        }
+        for (const item of parsedLine.items) {
             items.push(item);
             totalUSD += item.usd;
             totalCUP += item.cup;
@@ -2051,7 +2059,7 @@ function parseBetMessage(text, betType) {
         items,
         totalUSD,
         totalCUP,
-        ok: items.length > 0
+        ok: todasLasLineasOk && items.length > 0
     };
 }
 
@@ -2456,12 +2464,29 @@ async function sendNewUserWelcome(ctx) {
     const me = await ctx.telegram.getMe().catch(() => ({}));
     const botName = me.first_name || 'el Bot';
 
-    await ctx.reply(
+    const welcomeText =
         `👋 ¡Hola, ${escapeHTML(firstName)}! Bienvenido a ${escapeHTML(formatBotDisplayName(botName))}, tu asistente de la suerte 🍀\n\n` +
         `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
-        `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`,
-        getMainKeyboard(ctx)
-    );
+        `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`;
+
+    // Bienvenida con foto (Assets/Inicio.webp). Si el archivo no existe o el
+    // envío falla, se cae al mensaje de texto para no romper el /start.
+    const welcomePhotoPath = 'Assets/Inicio.webp';
+    let photoSent = false;
+    if (fs.existsSync(welcomePhotoPath)) {
+        try {
+            await ctx.replyWithPhoto(
+                { source: welcomePhotoPath },
+                { caption: welcomeText, reply_markup: getMainKeyboard(ctx).reply_markup, protect_content: true }
+            );
+            photoSent = true;
+        } catch (photoErr) {
+            console.error('Error enviando foto de bienvenida, usando texto:', photoErr.message);
+        }
+    }
+    if (!photoSent) {
+        await ctx.reply(welcomeText, getMainKeyboard(ctx));
+    }
 
     const bonusAmount = parseFloat(ctx.dbUser?.bonus_cup);
     const normalizedBonus = Number.isFinite(bonusAmount) ? bonusAmount : BONUS_CUP_DEFAULT;
@@ -2484,6 +2509,15 @@ async function sendNewUserWelcome(ctx) {
 bot.command('start', async (ctx) => {
     const uid = ctx.from.id;
     const refParam = ctx.payload;
+
+    // Tocar /start completa el re-registro tras una eliminación por admin: marcar
+    // restored_at en deleted_users para desbloquear también la webapp (la API
+    // bloquea mientras exista una eliminación vigente, es decir restored_at nulo).
+    try {
+        await supabase.from('deleted_users').update({ restored_at: new Date() }).eq('telegram_id', uid);
+    } catch (e) {
+        console.error('Error marcando restored_at en deleted_users durante /start:', e);
+    }
 
     if (refParam && ctx.session?.isNewUser) {
         const refId = parseInt(refParam);
@@ -2666,6 +2700,12 @@ bot.action('main', async (ctx) => {
 });
 
 bot.action('play', async (ctx) => {
+    // Eliminar el GIF de la lotería seleccionada anteriormente (no se acumulan)
+    try {
+        const gifId = ctx.session?.lotteryGifMessageId;
+        if (gifId) await ctx.telegram.deleteMessage(ctx.chat.id, gifId);
+    } catch (e) { /* ya borrado o demasiado antiguo */ }
+    ctx.session.lotteryGifMessageId = null;
     await safeEdit(ctx, '🎲 Elige una lotería para comenzar:', playLotteryKbd());
 });
 
@@ -2740,7 +2780,9 @@ bot.action(/lot_(.+)/, async (ctx) => {
         const videoPath = lotteryVideoMap[lotteryKey];
         if (videoPath) {
             try {
-                await ctx.replyWithAnimation({ source: videoPath }, { protect_content: true });
+                const animMsg = await ctx.replyWithAnimation({ source: videoPath }, { protect_content: true });
+                // Guardar para poder eliminarlo si el usuario vuelve atrás
+                ctx.session.lotteryGifMessageId = animMsg.message_id;
             } catch (e) {
                 console.warn('Error enviando video de lotería:', e.message);
             }
@@ -3973,7 +4015,7 @@ function formatWinningNumber(num) {
     return num.slice(0, 3) + ' ' + num.slice(3);
 }
 
-async function processWinningNumber(sessionId, winningStr, ctx) {
+async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null) {
     const logReply = (msg, opts) => {
         if (ctx && typeof ctx.reply === 'function') return ctx.reply(msg, opts);
         console.log(`[Publicación automática] ${String(msg).replace(/<[^>]*>/g, '')}`);
@@ -4227,21 +4269,72 @@ async function processWinningNumber(sessionId, winningStr, ctx) {
         .select('telegram_id');
 
     const botName = (await bot.telegram.getMe().catch(() => ({}))).first_name || 'La Bolita Cubana';
-    const publicWinningMessage =
+    const publicHeader =
         `📢 <b>NÚMERO GANADOR PUBLICADO - ${escapeHTML(botName)} 🇨🇺</b>\n\n` +
         `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> - Turno <b>${escapeHTML(session.time_slot)}</b>\n` +
-        `📅 Fecha: ${session.date}\n` +
-        `🔢 Número: <code>${formattedWinning}</code>\n\n` +
-        `💬 Revisa tu historial para ver si has ganado. ¡Mucha suerte en las próximas jugadas!`;
+        `📅 Fecha: ${session.date}`;
+    const publicFooter = `\n\n💬 Revisa tu historial para ver si has ganado. ¡Mucha suerte en las próximas jugadas! 🍀`;
+    // Texto completo (manual, o respaldo si falla la foto): incluye el número
+    const publicWinningMessage =
+        `${publicHeader}\n🔢 Número: <code>${formattedWinning}</code>${publicFooter}`;
+    // Automática con foto: el número se ve en la imagen → sin línea de número.
+    // Mismo encabezado y, tras 2 saltos de línea, fecha y turno juntos.
+    const publicWinningMessagePhoto =
+        `📢 <b>NÚMERO GANADOR PUBLICADO - ${escapeHTML(botName)} 🇨🇺</b>\n\n` +
+        `📅 Fecha: ${session.date} - Turno ${escapeHTML(session.time_slot)}` +
+        `${publicFooter}`;
+
+    // Descargar la foto UNA sola vez antes del bucle y enviarla como archivo
+    // subido. Si falla la descarga, intentar con la URL directa (comportamiento
+    // anterior) y, como último recurso, mensaje solo-texto.
+    let photoBuffer = null;
+    if (photoUrl) {
+        photoBuffer = await downloadChannelPhoto(photoUrl);
+        if (photoBuffer) {
+            console.log(`[AutoPublish] Foto del canal descargada (${photoBuffer.length} bytes), se enviará como archivo subido.`);
+        } else {
+            console.warn('[AutoPublish] No se pudo descargar la foto; se intentará enviar por URL directa.');
+        }
+    }
+
+    let photoOk = 0;
+    let photoUrlFallback = 0;
+    let textFallback = 0;
 
     for (const u of allUsers || []) {
         if (winnerIds.has(String(u.telegram_id))) continue;
         try {
-            await bot.telegram.sendMessage(u.telegram_id, publicWinningMessage, { parse_mode: 'HTML' });
+            let sent = false;
+            if (photoBuffer) {
+                try {
+                    await bot.telegram.sendPhoto(u.telegram_id, { filename: 'resultado.jpg', source: photoBuffer }, { caption: publicWinningMessagePhoto, parse_mode: 'HTML', protect_content: true });
+                    sent = true;
+                    photoOk++;
+                } catch (photoErr) {
+                    console.warn(`sendPhoto(buffer) falló para ${u.telegram_id}, probando URL directa:`, photoErr.message);
+                }
+            }
+            if (!sent && photoUrl) {
+                try {
+                    await bot.telegram.sendPhoto(u.telegram_id, photoUrl, { caption: publicWinningMessagePhoto, parse_mode: 'HTML', protect_content: true });
+                    sent = true;
+                    photoUrlFallback++;
+                } catch (photoErr) {
+                    console.warn(`sendPhoto(URL) falló para ${u.telegram_id}, enviando texto:`, photoErr.message);
+                }
+            }
+            if (!sent) {
+                await bot.telegram.sendMessage(u.telegram_id, publicWinningMessage, { parse_mode: 'HTML', protect_content: true });
+                textFallback++;
+            }
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
             console.warn(`Error enviando broadcast de ganador a ${u.telegram_id}:`, e.message);
         }
+    }
+
+    if (photoUrl) {
+        console.log(`[AutoPublish] Resumen broadcast: foto(buffer)=${photoOk}, foto(url)=${photoUrlFallback}, solo-texto=${textFallback}`);
     }
 
     await logReply(`✅ Números ganadores publicados y premios calculados correctamente.`);
@@ -4275,13 +4368,22 @@ function parseChannelResultBlocks(html) {
         if (!numMatch) continue;
         const number = (numMatch[1] + numMatch[2]).replace(/\s+/g, '');
         if (!/^\d{7}$/.test(number)) continue;
+        // Foto del post en la vista previa web del canal (para publicarla junto al mensaje)
+        let photo = null;
+        const photoTagMatch = block.match(/tgme_widget_message_photo_wrap[^>]*>/);
+        if (photoTagMatch) {
+            const urlMatch = photoTagMatch[0].match(/background-image:\s*url\((['"])([^'"]+)\1\)/i);
+            if (urlMatch) photo = urlMatch[2].replace(/&amp;/g, '&');
+        }
         results.push({
             lottery: String(lotteryMatch[1]).toUpperCase().replace(/\s+/g, ''),
             number,
-            time: timeMatch ? new Date(timeMatch[1]) : null
+            time: timeMatch ? new Date(timeMatch[1]) : null,
+            photo
         });
     }
-    console.log(`[AutoPublish] parseChannelResultBlocks: ${blocks.length} bloques HTML, ${results.length} resultados válidos extraídos`);
+    const withPhoto = results.filter(r => r.photo).length;
+    console.log(`[AutoPublish] parseChannelResultBlocks: ${blocks.length} bloques HTML, ${results.length} resultados válidos extraídos (${withPhoto} con foto, ${results.length - withPhoto} sin foto)`);
     return results;
 }
 
@@ -4313,7 +4415,7 @@ async function fetchChannelWinningNumber(lotteryKey, channel, minTime, maxTime, 
                 r.time <= maxTime
             );
             if (match) {
-                console.log(`[AutoPublish] Match encontrado: ${match.lottery} ${match.number} @ ${match.time}`);
+                console.log(`[AutoPublish] Match encontrado: ${match.lottery} ${match.number} @ ${match.time} | foto=${match.photo ? 'sí' : 'no'}`);
                 return match;
             }
             console.log(`[AutoPublish] Sin match para ${lotteryKey} en ventana ${minTime.toISOString()} - ${maxTime.toISOString()}`);
@@ -4324,6 +4426,24 @@ async function fetchChannelWinningNumber(lotteryKey, channel, minTime, maxTime, 
         }
     }
     return null;
+}
+
+// Descarga la foto del canal nosotros mismos para enviarla como archivo subido
+// (evita que los servidores de Telegram tengan que descargar la URL firmada,
+// cosa que a veces falla con "failed to get HTTP URL content").
+async function downloadChannelPhoto(url) {
+    try {
+        const resp = await axios.get(url, {
+            timeout: 15000,
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36' }
+        });
+        if (resp.status !== 200 || !resp.data || !resp.data.length) return null;
+        return Buffer.from(resp.data);
+    } catch (e) {
+        console.warn(`[AutoPublish] Error descargando foto del canal:`, e.message);
+        return null;
+    }
 }
 // ========== END SCRAPING NÚMEROS GANADORES ==========
 
@@ -4414,7 +4534,7 @@ async function autoPublishWinningResults() {
                 const winner = await fetchChannelWinningNumber(channelLotteryKey, channel, new Date(windowStart), new Date(windowEnd));
                 if (winner) {
                     console.log(`[AutoPublish] Ganador encontrado: ${winner.number} (lottery: ${winner.lottery}, time: ${winner.time})`);
-                    const ok = await processWinningNumber(session.id, winner.number, null);
+                    const ok = await processWinningNumber(session.id, winner.number, null, winner.photo || null);
                     console.log(`[AutoPublish] ${ok ? '✅ Publicado' : '❌ Falló publicación'}: ${session.lottery} ${session.time_slot} (${session.date}) número ${winner.number}`);
                 } else {
                     console.warn(`[AutoPublish] ⚠️ No se encontró ganador para ${session.lottery} ${session.time_slot} en @${channel} dentro de la ventana.`);
@@ -4422,7 +4542,20 @@ async function autoPublishWinningResults() {
                 continue;
             }
 
-            console.warn(`[AutoPublish] Ventana agotada para ${session.lottery} ${session.time_slot} — notificando admin.`);
+            console.warn(`[AutoPublish] Ventana agotada para ${session.lottery} ${session.time_slot} — evaluando notificación al admin.`);
+
+            // Re-verificar el flag justo antes de notificar: si la publicación
+            // automática está desactivada, no se intentó publicar y no corresponde
+            // avisar fallo al admin (ni registrar el fallo).
+            const { data: enabledNow } = await supabase
+                .from('app_config')
+                .select('value')
+                .eq('key', 'auto_publish_enabled')
+                .maybeSingle();
+            if ((enabledNow?.value || 'false') !== 'true') {
+                console.log(`[AutoPublish] Desactivada: omitiendo aviso de fallo para ${session.lottery} ${session.time_slot}.`);
+                continue;
+            }
 
             let failures = {};
             try {
