@@ -2469,9 +2469,9 @@ async function sendNewUserWelcome(ctx) {
         `Estamos encantados de tenerte aquí. ¿Listo para jugar y ganar? 🎲\n\n` +
         `Usa los botones del menú para explorar todas las opciones. Si tienes dudas, solo escríbenos.`;
 
-    // Bienvenida con foto (Assets/inicio.webp). Si el archivo no existe o el
+    // Bienvenida con foto (Assets/Inicio.webp). Si el archivo no existe o el
     // envío falla, se cae al mensaje de texto para no romper el /start.
-    const welcomePhotoPath = 'Assets/inicio.webp';
+    const welcomePhotoPath = 'Assets/Inicio.webp';
     let photoSent = false;
     if (fs.existsSync(welcomePhotoPath)) {
         try {
