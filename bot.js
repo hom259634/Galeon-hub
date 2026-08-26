@@ -2655,7 +2655,7 @@ bot.command('referidos', async (ctx) => {
             mensaje += `💰 <b>Total aportado por tus referidos:</b> ${totalAportadoCUP.toFixed(2)} CUP\n\n`;
             mensaje += `📋 <b>Lista de referidos y su aporte:</b>\n${referidosList}`;
         } else {
-            mensaje += `\nAún no tienes referidos. Comparte tu enlace y empieza a ganar!`;
+            mensaje += `\nAún no tienes referidos. ¡Comparte tu enlace y empieza a ganar!`;
         }
 
         await safeEdit(ctx, mensaje, getMainKeyboard(ctx));
@@ -4961,7 +4961,7 @@ bot.on(message('text'), async (ctx) => {
                     mensaje += `💰 <b>Total aportado por tus referidos:</b> ${totalAportadoCUP.toFixed(2)} CUP\n\n`;
                     mensaje += `📋 <b>Lista de referidos y su aporte:</b>\n${referidosList}`;
                 } else {
-                    mensaje += `\nAún no tienes referidos. Comparte tu enlace y empieza a ganar!`;
+                    mensaje += `\nAún no tienes referidos. ¡Comparte tu enlace y empieza a ganar!`;
                 }
 
                 await safeEdit(ctx, mensaje, getMainKeyboard(ctx));
