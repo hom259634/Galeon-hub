@@ -2740,14 +2740,25 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         async function renderSessionsView() {
             const today = getCurrentCubaDate();
             let sessions = [];
+            let closedSessions = [];
             try {
-                const res = await fetch(`/api/admin/lottery-sessions?date=${today}&userId=${currentUser.telegram_id}`);
-                if (res.ok) sessions = await res.json();
+                const [sessionsRes, closedRes] = await Promise.all([
+                    fetch(`/api/admin/lottery-sessions?date=${today}&userId=${currentUser.telegram_id}`),
+                    fetch(`/api/admin/lottery-sessions/closed?userId=${currentUser.telegram_id}`)
+                ]);
+                if (sessionsRes.ok) sessions = await sessionsRes.json();
+                if (closedRes.ok) closedSessions = await closedRes.json();
             } catch (e) { console.warn('Error fetching sessions', e); }
 
             let html = `<h4 class="text-xl font-semibold mb-4">🎰 Gestión de Sesiones</h4>`;
             for (const [lottery, slots] of Object.entries(LOTTERY_SCHEDULES)) {
-                html += `<div class="mb-4 bg-gray-800/30 p-3 rounded-xl"><h5 class="font-bold text-lg mb-2">${lottery}</h5><div class="grid grid-cols-${slots.length} gap-2">`;
+                const hasClosed = closedSessions.some(s => s.lottery === lottery);
+                html += `<div class="mb-4 bg-gray-800/30 p-3 rounded-xl">
+                    <div class="flex items-center justify-between mb-2">
+                        <h5 class="font-bold text-lg">${lottery}</h5>
+                        ${isAdmin && hasClosed ? `<button onclick="openSessionExport('${lottery}')" class="bg-yellow-600 px-3 py-1 rounded-lg text-xs">📊 Ver apuestas</button>` : ''}
+                    </div>
+                    <div class="grid grid-cols-${slots.length} gap-2">`;
                 for (const slot of slots) {
                     const session = sessions.find(s => s.lottery === lottery && s.time_slot === slot.name && s.date === today);
                     let estado, clase, accion;
@@ -2807,6 +2818,20 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         if (btn) { btn.disabled = false; btn.textContent = 'Abrir'; }
                     }
                 } catch (e) { iziToast.error({ message: 'Error de conexión' }); if (btn) { btn.disabled = false; btn.textContent = 'Abrir'; } }
+            }
+        };
+
+        window.openSessionExport = async (lottery) => {
+            try {
+                const res = await fetch(`/api/admin/session-export-url?lottery=${encodeURIComponent(lottery)}&userId=${currentUser.telegram_id}`);
+                const data = await res.json();
+                if (!res.ok) {
+                    iziToast.warning({ message: data.error || 'No hay sesiones cerradas para esta lotería' });
+                    return;
+                }
+                window.open(data.url, '_blank');
+            } catch (e) {
+                iziToast.error({ message: 'Error al abrir las apuestas' });
             }
         };
 
@@ -3949,7 +3974,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 deposit_approver: { icon: '✅', label: 'Aprobar o Denegar Depósitos' },
                 withdraw_approver: { icon: '✅', label: 'Aprobar o Denegar Retiros' },
                 schedule_manager: { icon: '🕐', label: 'Gestionar Horario de Retiros' },
-                user_manager: { icon: '👥', label: 'Gestión de Usuarios' }
+                user_manager: { icon: '👥', label: 'Gestión de Usuarios' },
+                session_exporter: { icon: '📊', label: 'Exportar datos de sesiones' }
             };
 
             const visibleRoles = userRoles.filter(r => r !== 'activity_self');
@@ -3963,7 +3989,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }).join(' · ')}</div>`;
             }
 
-            const activePrivileges = Object.keys(privilegeLabels).filter(r => visibleRoles.includes(r));
+            // Solo los roles con sección funcional generan tarjeta (session_exporter solo se muestra como permiso)
+            const cardRoles = ['deposit_approver', 'withdraw_approver', 'schedule_manager', 'user_manager'];
+            const activePrivileges = cardRoles.filter(r => visibleRoles.includes(r));
             for (const role of activePrivileges) {
                 const info = privilegeLabels[role];
                 const sectionId = role === 'deposit_approver' ? 'Depositos'
@@ -4522,6 +4550,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <th class="pb-2 text-center" title="Gestión de Usuarios">👥 Usuarios</th>
                                 <th class="pb-2 pl-2 text-center text-xs text-gray-500" title="Eliminar usuarios">🗑️</th>
                                 <th class="pb-2 pl-2 text-center text-xs text-gray-500" title="Ver mi propia actividad">📊</th>
+                                <th class="pb-2 pl-2 text-center" title="Exportar datos de sesiones">🗂️ Datos</th>
                             </tr>
                         </thead>
                         <tbody>`;
@@ -4557,6 +4586,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         </td>
                         <td class="py-2 pl-2 text-center">
                             <input type="checkbox" id="actChk_${u.telegram_id}" ${hasActivity ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'activity_self', this.checked)" class="w-5 h-5 accent-yellow-500 cursor-pointer" ${!hasDepositOrWithdraw ? 'disabled' : ''}>
+                        </td>
+                        <td class="py-2 pl-2 text-center">
+                            <input type="checkbox" id="expChk_${u.telegram_id}" ${userRolesList.includes('session_exporter') ? 'checked' : ''} onchange="toggleUserRole(${u.telegram_id}, 'session_exporter', this.checked)" class="w-4 h-4 accent-yellow-500 cursor-pointer">
                         </td>
                     </tr>`;
                 }
