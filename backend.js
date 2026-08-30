@@ -3548,13 +3548,15 @@ app.post('/api/admin/lottery-sessions/toggle', requireAdmin, async (req, res) =>
             try {
                 await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     chat_id: Number(r.telegram_id),
-                    text: `📊 <b>Jugadas</b>\n\n🎰 ${data.lottery} · <b>${data.time_slot}</b>\n📅 ${data.date}\n\nPulsa el botón para ver las apuestas de la sesión.`,
+                    text: `📊 <b>Jugadas</b>\n\n🎰 ${data.lottery} · <b>${data.time_slot}</b>\n📅 ${data.date}\nℹ️ <b>Sesión cerrada manualmente</b>\n\nPulsa el botón para ver las apuestas de la sesión.`,
                     parse_mode: 'HTML',
                     reply_markup: {
                         inline_keyboard: [[{ text: '👁️ Ver apuestas de la sesión', url: buildSessionExportUrl(data.id) }]]
                     }
                 });
-            } catch (e) {}
+            } catch (e) {
+                console.error(`Error notificando session_exporter ${r.telegram_id}:`, e?.message || e);
+            }
         }
     }
 

@@ -227,6 +227,36 @@ function buildSessionExportUrl(sessionId, download = false) {
     return `${WEBAPP_URL}/export-session/${sessionId}?token=${token}${download ? '&download=1' : ''}`;
 }
 
+// Notifica a los subadmins con rol session_exporter el botón para ver las apuestas de una sesión cerrada
+// manual === true → indica que la sesión se cerró manualmente; si es false (automático) no lo indica.
+async function notifySessionExporters(session, manual = false) {
+    try {
+        await ensureBotRolesCache();
+    } catch (e) {
+        console.error('Error refrescando cache de roles para notificar session_exporters:', e?.message || e);
+    }
+    const region = regionMap[session.lottery];
+    const closeLine = manual ? `\nℹ️ <b>Sesión cerrada manualmente</b>` : '';
+    for (const adminId of botRolesCache.sessionExporters) {
+        try {
+            await bot.telegram.sendMessage(adminId,
+                `📊 <b>Jugadas</b>\n\n` +
+                `🎰 ${region?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> · <b>${escapeHTML(session.time_slot)}</b>\n` +
+                `📅 ${session.date}${closeLine}\n\n` +
+                `Pulsa el botón para ver las apuestas de la sesión.`,
+                {
+                    parse_mode: 'HTML',
+                    reply_markup: Markup.inlineKeyboard([
+                        [Markup.button.url('👁️ Ver apuestas de la sesión', buildSessionExportUrl(session.id))]
+                    ]).reply_markup
+                }
+            );
+        } catch (e) {
+            console.error(`Error notificando session_exporter ${adminId}:`, e?.message || e);
+        }
+    }
+}
+
 async function getBonusCupDefault() {
     const { data } = await supabase
         .from('app_config')
@@ -3561,25 +3591,7 @@ bot.action(/toggle_session_(\d+)_(.+)/, async (ctx) => {
             );
 
             // Notificación con botón de ver apuestas (solo subadmins con privilegio) - cierre manual
-            try {
-                await ensureBotRolesCache();
-                for (const adminId of botRolesCache.sessionExporters) {
-                    try {
-                        await bot.telegram.sendMessage(adminId,
-                            `📊 <b>Jugadas</b>\n\n` +
-                            `🎰 ${region?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> · <b>${escapeHTML(session.time_slot)}</b>\n` +
-                            `📅 ${session.date}\n\n` +
-                            `Pulsa el botón para ver las apuestas de la sesión.`,
-                            {
-                                parse_mode: 'HTML',
-                                reply_markup: Markup.inlineKeyboard([
-                                    [Markup.button.url('👁️ Ver apuestas de la sesión', buildSessionExportUrl(session.id))]
-                                ]).reply_markup
-                            }
-                        );
-                    } catch (e) {}
-                }
-            } catch (e) {}
+            await notifySessionExporters(session, true);
         }
 
         await ctx.answerCbQuery(newStatus === 'open' ? '✅ Sesión abierta' : '🔴 Sesión cerrada');
@@ -7060,6 +7072,9 @@ async function closeExpiredSessions() {
             const region = regionMap[session.lottery];
             const photoPath = getSessionImagePath(session.lottery, session.time_slot, 'closed');
             await broadcastPhotoToAllUsers(photoPath);
+
+            // Notificación con botón de ver apuestas (solo subadmins con privilegio) - cierre automático (cron)
+            await notifySessionExporters(session);
         }
     } catch (e) {
         console.error('Error cerrando sesiones:', e);
