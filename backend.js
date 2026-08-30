@@ -65,7 +65,7 @@ function isAdmin(userId) {
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
-let rolesCache = { depositApprovers: [], withdrawApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], activitySelf: [], lastFetch: 0 };
+let rolesCache = { depositApprovers: [], withdrawApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], activitySelf: [], sessionExporters: [], lastFetch: 0 };
 const ROLES_CACHE_TTL = 60000;
 
 async function refreshRolesCache() {
@@ -77,6 +77,7 @@ async function refreshRolesCache() {
         rolesCache.userManagers = data?.filter(r => r.role === 'user_manager').map(r => Number(r.telegram_id)) || [];
         rolesCache.userDeleters = data?.filter(r => r.role === 'user_deleter').map(r => Number(r.telegram_id)) || [];
         rolesCache.activitySelf = data?.filter(r => r.role === 'activity_self').map(r => Number(r.telegram_id)) || [];
+        rolesCache.sessionExporters = data?.filter(r => r.role === 'session_exporter').map(r => Number(r.telegram_id)) || [];
         rolesCache.lastFetch = Date.now();
     } catch (e) {
         console.error('Error refreshing roles cache:', e);
@@ -97,6 +98,7 @@ async function getUserRoles(userId) {
     if (rolesCache.userManagers.includes(id)) roles.push('user_manager');
     if (rolesCache.userDeleters.includes(id)) roles.push('user_deleter');
     if (rolesCache.activitySelf.includes(id)) roles.push('activity_self');
+    if (rolesCache.sessionExporters.includes(id)) roles.push('session_exporter');
     return roles;
 }
 
@@ -111,6 +113,7 @@ async function hasRole(userId, role) {
         case 'user_manager': return rolesCache.userManagers.includes(id);
         case 'user_deleter': return rolesCache.userDeleters.includes(id);
         case 'activity_self': return rolesCache.activitySelf.includes(id);
+        case 'session_exporter': return rolesCache.sessionExporters.includes(id);
         default: return false;
     }
 }
@@ -154,6 +157,17 @@ async function updatePendingNotifications(key, statusText) {
         } catch (e) {}
     }
     pendingNotifications.delete(key);
+}
+
+// ========== LOCK POR USUARIO PARA APUESTAS CONCURRENTES ==========
+const userBetLocks = new Map();
+async function withUserBetLock(userId, fn) {
+    while (userBetLocks.has(userId)) await userBetLocks.get(userId);
+    let resolve;
+    const p = new Promise(r => resolve = r);
+    userBetLocks.set(userId, p);
+    try { return await fn(); }
+    finally { userBetLocks.delete(userId); resolve(); }
 }
 
 // Almacén de idempotencia para transferencias (evita doble proceso)
@@ -230,6 +244,102 @@ function escapeHTML(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+// ========== EXPORTACIÓN DE JUGADAS DE SESIÓN (HTML + ENLACE FIRMADO) ==========
+function getSessionExportToken(sessionId) {
+    return crypto.createHmac('sha256', BOT_TOKEN).update(String(sessionId)).digest('hex');
+}
+
+function buildSessionExportUrl(sessionId, download = false) {
+    const token = getSessionExportToken(sessionId);
+    return `${WEBAPP_URL}/export-session/${sessionId}?token=${token}${download ? '&download=1' : ''}`;
+}
+
+function turnEmoji(slot) {
+    const s = String(slot || '').toLowerCase();
+    if (s.includes('mañana')) return '🌅';
+    if (s.includes('tarde')) return '☀️';
+    if (s.includes('noche')) return '🌙';
+    return '';
+}
+
+function turnPlainName(slot) {
+    return String(slot || '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F]/gu, '').replace(/\s+/g, ' ').trim();
+}
+
+function lotteryEmoji(lottery) {
+    const hit = regionMap[lottery] || Object.values(regionMap).find(r => r.key === String(lottery || '').toLowerCase());
+    return hit ? hit.emoji : '🎰';
+}
+
+function generateSessionHtml(session, bets, downloadUrl, showDownload = true) {
+    // Filas de la tabla (todo el texto del usuario se escapa)
+    const rows = (bets || []).map(bet => {
+        const user = bet.users || {};
+        const userRef = user.username ? '@' + user.username : String(user.telegram_id || bet.user_id);
+        const hora = bet.placed_at
+            ? new Date(bet.placed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Havana' })
+            : '';
+        return `<tr>
+            <td style="white-space:normal">
+                <span class="user-name">${escapeHTML(user.first_name || user.username || String(bet.user_id))}</span><br>
+                <span class="user-sub">${escapeHTML(userRef)}</span>
+            </td>
+            <td>${escapeHTML(bet.bet_type || '')}</td>
+            <td>${escapeHTML(bet.raw_text || '')}</td>
+            <td class="num">${(parseFloat(bet.cost_cup) || 0).toFixed(2)}</td>
+            <td class="num">${(parseFloat(bet.cost_usd) || 0).toFixed(2)}</td>
+            <td class="num">${(parseFloat(bet.bonus_used_cup) || 0).toFixed(2)}</td>
+            <td>${escapeHTML(hora)}</td>
+        </tr>`;
+    }).join('');
+
+    const totalCup = (bets || []).reduce((s, b) => s + (parseFloat(b.cost_cup) || 0), 0);
+    const totalUsd = (bets || []).reduce((s, b) => s + (parseFloat(b.cost_usd) || 0), 0);
+    const vacio = !bets || bets.length === 0;
+    const turnoTitle = ['Turno', turnEmoji(session.time_slot), turnPlainName(session.time_slot)].filter(Boolean).join(' ').trim();
+
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHTML(session.lottery)} - ${escapeHTML(session.time_slot)} - ${escapeHTML(session.date)}</title>
+<style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background: #f3f4f6; color: #111; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .sub { color: #4b5563; margin: 0 0 12px; font-size: 14px; }
+    .total { background: #16a34a; color: #fff; padding: 10px 12px; border-radius: 8px; margin: 12px 0; font-size: 15px; }
+    .wrap { background: #fff; border-radius: 10px; overflow-x: auto; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    table { width: 100%; border-collapse: collapse; min-width: 560px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 13px; white-space: nowrap; }
+    th { background: #111827; color: #fff; position: sticky; top: 0; }
+    tr:nth-child(even) { background: #f9fafb; }
+    .num { text-align: right; }
+    .empty { text-align: center; padding: 32px 24px; color: #6b7280; font-size: 15px; background: #fff; border-radius: 10px; margin-top: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    .user-sub { font-size: 11px; color: #4b5563; }
+    .download { display: block; margin-top: 16px; text-align: center; background: #2563eb; color: #fff; padding: 12px 16px; border-radius: 8px; text-decoration: none; font-size: 15px; }
+</style>
+</head>
+<body>
+    <h1>${lotteryEmoji(session.lottery)} ${escapeHTML(session.lottery)} — ${escapeHTML(turnoTitle)}</h1>
+    <p class="sub">📅 ${escapeHTML(session.date)} · ${(bets || []).length} apuestas</p>
+    ${vacio ? `<div class="empty">😴 No hubo apuestas en esta sesión</div>` : `
+    <div class="total">💰 Total: ${totalCup.toFixed(2)} CUP / ${totalUsd.toFixed(2)} USD</div>
+    <div class="wrap">
+        <table>
+            <thead>
+                <tr><th>Usuario</th><th>Tipo</th><th>Jugadas</th><th class="num">CUP</th><th class="num">USD</th><th class="num">Bono</th><th>Hora</th></tr>
+            </thead>
+            <tbody>
+                ${rows}
+            </tbody>
+        </table>
+    </div>`}
+    ${showDownload ? `<a class="download" href="${escapeHTML(downloadUrl)}" download="${escapeHTML(session.lottery)}_${escapeHTML(session.time_slot)}_${escapeHTML(session.date)}.html">📥 Descargar archivo</a>` : ''}
+</body>
+</html>`;
 }
 
 async function userHasApprovedDeposit(telegramId) {
@@ -390,10 +500,10 @@ async function convertFromCUP(amountCUP, targetCurrency) {
     }
 }
 
-async function buildCrossCurrencyDebitPlan(user, amount, currency) {
+async function buildCrossCurrencyDebitPlan(user, amount, currency, rateUSDOverride = null) {
     const cupBalance = parseFloat(user?.cup) || 0;
     const usdBalance = parseFloat(user?.usd) || 0;
-    const rateUSD = await getExchangeRateUSD();
+    const rateUSD = rateUSDOverride || await getExchangeRateUSD();
     const amountCUP = await convertToCUP(amount, currency);
     const totalAvailableCUP = cupBalance + (usdBalance * rateUSD);
 
@@ -428,10 +538,10 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
     };
 }
 
-async function buildRealBalanceDebitPlan(user, amount, currency) {
+async function buildRealBalanceDebitPlan(user, amount, currency, rateUSDOverride = null) {
     const cupBalance = parseFloat(user?.cup) || 0;
     const usdBalance = parseFloat(user?.usd) || 0;
-    const rateUSD = await getExchangeRateUSD();
+    const rateUSD = rateUSDOverride || await getExchangeRateUSD();
     const parsedAmount = parseFloat(amount) || 0;
 
     if (currency === 'USD') {
@@ -461,7 +571,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency) {
         };
     }
 
-    return buildCrossCurrencyDebitPlan(user, parsedAmount, currency);
+    return buildCrossCurrencyDebitPlan(user, parsedAmount, currency, rateUSDOverride);
 }
 
 // ========== FUNCIÓN GETORCREATEUSER CON MANEJO DE ERROR DE COLUMNA ==========
@@ -2123,6 +2233,7 @@ app.post('/api/bets', async (req, res) => {
     if (!userId || !lottery || !betType || !rawText) {
         return res.status(400).json({ error: 'Faltan datos' });
     }
+    return await withUserBetLock(userId, async () => {
 
     if (sessionId) {
         const { data: activeSession } = await supabase
@@ -2709,6 +2820,7 @@ app.post('/api/bets', async (req, res) => {
     }
     const updatedUser = await getOrCreateUser(parseInt(userId));
     res.json({ success: true, bet, updatedUser });
+    });
 });
 
 // Revertir bono migrado si el referidor quedó por debajo del umbral
@@ -3429,6 +3541,21 @@ app.post('/api/admin/lottery-sessions/toggle', requireAdmin, async (req, res) =>
             `❌ Ya no se reciben más apuestas.\n` +
             `🔢 Pronto anunciaremos el número ganador. ¡Mantente atento!`
         );
+
+        // Notificación con botón de ver apuestas (solo subadmins con privilegio) - cierre manual
+        const { data: rolesData } = await supabase.from('admin_roles').select('telegram_id').eq('role', 'session_exporter');
+        for (const r of rolesData || []) {
+            try {
+                await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    chat_id: Number(r.telegram_id),
+                    text: `📊 <b>Jugadas</b>\n\n🎰 ${data.lottery} · <b>${data.time_slot}</b>\n📅 ${data.date}\n\nPulsa el botón para ver las apuestas de la sesión.`,
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [[{ text: '👁️ Ver apuestas de la sesión', url: buildSessionExportUrl(data.id) }]]
+                    }
+                });
+            } catch (e) {}
+        }
     }
 
     res.json(data);
@@ -3442,6 +3569,60 @@ app.get('/api/admin/lottery-sessions/closed', requireAdmin, async (req, res) => 
         .eq('status', 'closed')
         .order('date', { ascending: false });
     res.json(data || []);
+});
+
+// --- Ver/descargar apuestas de una sesión (HTML) ---
+// Acceso protegido: requiere ?token= (HMAC del session id). Sin token no se puede abrir.
+app.get('/export-session/:sessionId', async (req, res) => {
+    const sessionId = req.params.sessionId;
+    const expected = getSessionExportToken(sessionId);
+    const token = req.query.token;
+    if (!token || token !== expected) {
+        return res.status(403).send('<!DOCTYPE html><html lang="es"><body style="font-family:sans-serif;text-align:center;padding:40px">⛔ <b>No autorizado</b></body></html>');
+    }
+
+    const { data: session } = await supabase
+        .from('lottery_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+
+    if (!session) return res.status(404).send('Sesión no encontrada');
+
+    const { data: bets } = await supabase
+        .from('bets')
+        .select('*, users:user_id(first_name, username), referrers:referrer_id(first_name, username)')
+        .eq('session_id', sessionId)
+        .order('placed_at', { ascending: true });
+
+    const download = req.query.download === '1';
+    const downloadUrl = buildSessionExportUrl(sessionId, true);
+    const html = generateSessionHtml(session, bets || [], downloadUrl, !download);
+
+    if (download) {
+        res.setHeader('Content-Disposition', `attachment; filename="${session.lottery.replace(/\s+/g, '_')}_${(session.time_slot || '').replace(/[^\w]/g, '')}_${session.date}.html"`);
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+});
+
+// --- URL de apuestas de la última sesión cerrada de una lotería (web panel) ---
+app.get('/api/admin/session-export-url', requireAdmin, async (req, res) => {
+    const { lottery } = req.query;
+    if (!lottery) return res.status(400).json({ error: 'Falta lottery' });
+
+    const { data } = await supabase
+        .from('lottery_sessions')
+        .select('id, lottery, time_slot, date')
+        .eq('lottery', lottery)
+        .eq('status', 'closed')
+        .order('end_time', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (!data) return res.status(404).json({ error: 'No hay sesiones cerradas para esta lotería' });
+
+    res.json({ url: buildSessionExportUrl(data.id), session: data });
 });
 
 // --- Obtener números ganadores publicados ---
@@ -4231,10 +4412,9 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
 
     const { data: request, error: fetchError } = await supabase
         .from('withdraw_requests')
-        .update({ status: 'approved', processed_at: new Date(), processed_by: parseInt(userId) })
+        .select('*')
         .eq('id', id)
         .eq('status', 'pending')
-        .select()
         .single();
 
     if (fetchError || !request) {
@@ -4242,13 +4422,19 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
     }
 
     const user = await getOrCreateUser(request.user_id);
-    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency);
+    const originalRate = (request.amount_usd > 0) ? (parseFloat(request.amount) / parseFloat(request.amount_usd)) : null;
+    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency, originalRate);
     if (!debitPlan.ok) {
         return res.status(400).json({ error: debitPlan.errorMessage || '❌ Saldo insuficiente (posible cambio de tasa). Rechace la solicitud.' });
     }
 
     let newCup = (parseFloat(user.cup) || 0) - debitPlan.cupDebit;
     let newUsd = (parseFloat(user.usd) || 0) - debitPlan.usdDebit;
+
+    await supabase
+        .from('withdraw_requests')
+        .update({ status: 'approved', processed_at: new Date(), processed_by: parseInt(userId) })
+        .eq('id', id);
 
     await supabase
         .from('users')
@@ -5090,7 +5276,7 @@ app.put('/api/admin/admin-roles/:telegramId', requireAdmin, async (req, res) => 
             return res.status(400).json({ error: 'roles debe ser un array' });
         }
 
-        const validRoles = ['deposit_approver', 'withdraw_approver', 'schedule_manager', 'user_manager', 'user_deleter', 'activity_self'];
+        const validRoles = ['deposit_approver', 'withdraw_approver', 'schedule_manager', 'user_manager', 'user_deleter', 'activity_self', 'session_exporter'];
         for (const role of roles) {
             if (!validRoles.includes(role)) {
                 return res.status(400).json({ error: `Rol inválido: ${role}` });
@@ -5577,16 +5763,22 @@ app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
     }
     const { id } = req.params;
     const { data: request, error: fetchError } = await supabase
-        .from('withdraw_requests').update({ status: 'approved', processed_at: new Date(), processed_by: parseInt(userId) })
-        .eq('id', id).eq('status', 'pending').select().single();
+        .from('withdraw_requests').select('*')
+        .eq('id', id).eq('status', 'pending').single();
     if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
 
     const user = await getOrCreateUser(request.user_id);
-    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency);
+    const originalRate = (request.amount_usd > 0) ? (parseFloat(request.amount) / parseFloat(request.amount_usd)) : null;
+    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency, originalRate);
     if (!debitPlan.ok) return res.status(400).json({ error: debitPlan.errorMessage || '❌ Saldo insuficiente' });
 
     let newCup = (parseFloat(user.cup) || 0) - debitPlan.cupDebit;
     let newUsd = (parseFloat(user.usd) || 0) - debitPlan.usdDebit;
+
+    await supabase
+        .from('withdraw_requests').update({ status: 'approved', processed_at: new Date(), processed_by: parseInt(userId) })
+        .eq('id', id);
+
     await supabase.from('users').update({ cup: newCup, usd: newUsd, updated_at: new Date() }).eq('telegram_id', request.user_id);
 
     try {

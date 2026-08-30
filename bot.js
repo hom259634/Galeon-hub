@@ -16,6 +16,7 @@
 
 require('dotenv').config();
 const fs = require('fs');
+const crypto = require('crypto');
 const { Telegraf, Markup } = require('telegraf');
 const { message } = require('telegraf/filters');
 const LocalSession = require('telegraf-session-local');
@@ -77,6 +78,17 @@ const bot = new Telegraf(BOT_TOKEN);
 bot.pendingNotifications = new Map();
 let botInfo = { username: 'bot', first_name: 'Bot' };
 
+// ========== LOCK POR USUARIO PARA APUESTAS CONCURRENTES ==========
+const userBetLocks = new Map();
+async function withUserBetLock(userId, fn) {
+    while (userBetLocks.has(userId)) await userBetLocks.get(userId);
+    let resolve;
+    const p = new Promise(r => resolve = r);
+    userBetLocks.set(userId, p);
+    try { return await fn(); }
+    finally { userBetLocks.delete(userId); resolve(); }
+}
+
 // ========== CONFIGURAR COMANDOS DEL MENÚ LATERAL ==========
 const MENU_COMMANDS = [
   { command: 'start', description: '🏠 Inicio' },
@@ -118,7 +130,7 @@ function isAdmin(userId) {
 }
 
 // ========== SISTEMA DE ROLES ADMINISTRATIVOS ==========
-let botRolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], activitySelf: [], lastFetch: 0 };
+let botRolesCache = { withdrawApprovers: [], depositApprovers: [], scheduleManagers: [], userManagers: [], userDeleters: [], activitySelf: [], sessionExporters: [], lastFetch: 0 };
 const BOT_ROLES_CACHE_TTL = 60000;
 
 async function refreshBotRolesCache() {
@@ -130,6 +142,7 @@ async function refreshBotRolesCache() {
         botRolesCache.userManagers = data?.filter(r => r.role === 'user_manager').map(r => Number(r.telegram_id)) || [];
         botRolesCache.userDeleters = data?.filter(r => r.role === 'user_deleter').map(r => Number(r.telegram_id)) || [];
         botRolesCache.activitySelf = data?.filter(r => r.role === 'activity_self').map(r => Number(r.telegram_id)) || [];
+        botRolesCache.sessionExporters = data?.filter(r => r.role === 'session_exporter').map(r => Number(r.telegram_id)) || [];
         botRolesCache.lastFetch = Date.now();
     } catch (e) {
         console.error('Error refreshing bot roles cache:', e);
@@ -151,6 +164,7 @@ async function hasRole(userId, role) {
         case 'user_manager': return botRolesCache.userManagers.includes(id);
         case 'user_deleter': return botRolesCache.userDeleters.includes(id);
         case 'activity_self': return botRolesCache.activitySelf.includes(id);
+        case 'session_exporter': return botRolesCache.sessionExporters.includes(id);
         default: return false;
     }
 }
@@ -163,7 +177,8 @@ function hasAnyRole(userId) {
            botRolesCache.scheduleManagers.includes(id) ||
            botRolesCache.userManagers.includes(id) ||
            botRolesCache.userDeleters.includes(id) ||
-           botRolesCache.activitySelf.includes(id);
+           botRolesCache.activitySelf.includes(id) ||
+           botRolesCache.sessionExporters.includes(id);
 }
 
 refreshBotRolesCache();
@@ -200,6 +215,16 @@ function escapeHTML(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+// ========== EXPORTACIÓN DE JUGADAS DE SESIÓN (ENLACE FIRMADO ==========
+function getSessionExportToken(sessionId) {
+    return crypto.createHmac('sha256', BOT_TOKEN).update(String(sessionId)).digest('hex');
+}
+
+function buildSessionExportUrl(sessionId, download = false) {
+    const token = getSessionExportToken(sessionId);
+    return `${WEBAPP_URL}/export-session/${sessionId}?token=${token}${download ? '&download=1' : ''}`;
 }
 
 async function getBonusCupDefault() {
@@ -1105,10 +1130,10 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
 }
 // ========== END FETCH OCR RATES ==========
 
-async function buildCrossCurrencyDebitPlan(user, amount, currency) {
+async function buildCrossCurrencyDebitPlan(user, amount, currency, rateUSDOverride = null) {
     const cupBalance = parseFloat(user?.cup) || 0;
     const usdBalance = parseFloat(user?.usd) || 0;
-    const rateUSD = await getExchangeRateUSD();
+    const rateUSD = rateUSDOverride || await getExchangeRateUSD();
     const amountCUP = await convertToCUP(amount, currency);
     const totalAvailableCUP = cupBalance + (usdBalance * rateUSD);
 
@@ -1143,10 +1168,10 @@ async function buildCrossCurrencyDebitPlan(user, amount, currency) {
     };
 }
 
-async function buildRealBalanceDebitPlan(user, amount, currency) {
+async function buildRealBalanceDebitPlan(user, amount, currency, rateUSDOverride = null) {
     const cupBalance = parseFloat(user?.cup) || 0;
     const usdBalance = parseFloat(user?.usd) || 0;
-    const rateUSD = await getExchangeRateUSD();
+    const rateUSD = rateUSDOverride || await getExchangeRateUSD();
     const parsedAmount = parseFloat(amount) || 0;
 
     if (currency === 'USD') {
@@ -1176,7 +1201,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency) {
         };
     }
 
-    return buildCrossCurrencyDebitPlan(user, parsedAmount, currency);
+    return buildCrossCurrencyDebitPlan(user, parsedAmount, currency, rateUSDOverride);
 }
 
 // ========== FUNCIÓN GETUSER MODIFICADA (AHORA NO ENVÍA BONO DIRECTAMENTE) ==========
@@ -1772,6 +1797,7 @@ function overLimitTypePhrase(betTypes) {
 }
 
 async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawText, items, totalCUP, totalUSD, session }) {
+    return await withUserBetLock(uid, async () => {
     const cupBalance = parseFloat(user.cup) || 0;
     const usdBalance = parseFloat(user.usd) || 0;
     const bonusBalance = parseFloat(user.bonus_cup) || 0;
@@ -1955,10 +1981,13 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         `¡Buena suerte! 🍀`;
     if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
         const remainingBonus = bonusBalance - bonusUsed;
+        const esUnSoloCup = Math.abs(bonusUsed - 1) < 1e-6;
+        const verboBono = esUnSoloCup ? 'Se usó' : 'Se usaron';
+        const articuloBono = esUnSoloCup ? 'el ' : 'los ';
         if (remainingBonus === 0) {
-            confirmMsg += `\n\n🎁 Se usaron los ${bonusUsed.toFixed(2)} CUP de tu bono.`;
+            confirmMsg += `\n\n🎁 ${verboBono} ${articuloBono}${bonusUsed.toFixed(2)} CUP de tu bono.`;
         } else {
-            confirmMsg += `\n\n🎁 Se usaron ${bonusUsed.toFixed(2)} CUP de tu bono.`;
+            confirmMsg += `\n\n🎁 ${verboBono} ${bonusUsed.toFixed(2)} CUP de tu bono.`;
         }
     }
     if (arguments[1] && arguments[1].clamped) {
@@ -1978,6 +2007,7 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         delete session.pendingBetOverride;
     }
     return true;
+    });
 }
 
 // Devuelve {items, ok}. ok=false si algún token de la línea no corresponde al
@@ -3529,6 +3559,27 @@ bot.action(/toggle_session_(\d+)_(.+)/, async (ctx) => {
                 `❌ Ya no se reciben más apuestas para esta sesión.\n` +
                 `🔢 Pronto anunciaremos el número ganador. ¡Mantente atento!`
             );
+
+            // Notificación con botón de ver apuestas (solo subadmins con privilegio) - cierre manual
+            try {
+                await ensureBotRolesCache();
+                for (const adminId of botRolesCache.sessionExporters) {
+                    try {
+                        await bot.telegram.sendMessage(adminId,
+                            `📊 <b>Jugadas</b>\n\n` +
+                            `🎰 ${region?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> · <b>${escapeHTML(session.time_slot)}</b>\n` +
+                            `📅 ${session.date}\n\n` +
+                            `Pulsa el botón para ver las apuestas de la sesión.`,
+                            {
+                                parse_mode: 'HTML',
+                                reply_markup: Markup.inlineKeyboard([
+                                    [Markup.button.url('👁️ Ver apuestas de la sesión', buildSessionExportUrl(session.id))]
+                                ]).reply_markup
+                            }
+                        );
+                    } catch (e) {}
+                }
+            } catch (e) {}
         }
 
         await ctx.answerCbQuery(newStatus === 'open' ? '✅ Sesión abierta' : '🔴 Sesión cerrada');
@@ -4175,8 +4226,6 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
         }
     }
 
-    const winnerIds = new Set();
-
     for (const [userId, result] of userResults.entries()) {
         let totalPremioUSD = 0;
         let totalPremioCUP = 0;
@@ -4187,8 +4236,6 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
         }
 
         if (totalPremioUSD > 0 || totalPremioCUP > 0) {
-            winnerIds.add(String(userId));
-
             // Mover bono al saldo principal cuando el usuario gana
             let bonusMovedCup = 0;
             try {
@@ -4302,7 +4349,6 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
     let textFallback = 0;
 
     for (const u of allUsers || []) {
-        if (winnerIds.has(String(u.telegram_id))) continue;
         try {
             let sent = false;
             if (photoBuffer) {
@@ -6905,10 +6951,9 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
         const requestId = parseInt(ctx.match[1]);
         const { data: request } = await supabase
             .from('withdraw_requests')
-            .update({ status: 'approved', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
+            .select('*')
             .eq('id', requestId)
             .eq('status', 'pending')
-            .select()
             .single();
 
         if (!request) {
@@ -6923,12 +6968,18 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             .single();
 
         const amount = parseFloat(request.amount) || 0;
-        const debitPlan = await buildRealBalanceDebitPlan(user, amount, request.currency);
+        const originalRate = (request.amount_usd > 0) ? (amount / parseFloat(request.amount_usd)) : null;
+        const debitPlan = await buildRealBalanceDebitPlan(user, amount, request.currency, originalRate);
 
         if (!debitPlan.ok) {
             await ctx.reply(`❌ ${debitPlan.errorMessage || 'El usuario ya no tiene saldo suficiente para este retiro.'}`);
             return;
         }
+
+        await supabase
+            .from('withdraw_requests')
+            .update({ status: 'approved', updated_at: new Date(), processed_at: new Date(), processed_by: ctx.from.id })
+            .eq('id', requestId);
 
         await supabase
             .from('users')
