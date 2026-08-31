@@ -2770,8 +2770,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     html += `<div class="bg-gray-700/50 p-2 rounded-lg text-center">
                         <span class="block text-sm">${slot.name}</span>
                         <span class="${clase} text-xs">${estado}</span>
+                        ${(session && session.status === 'closed') ? `<button onclick="openSessionExportById(${session.id})" class="mt-2 bg-yellow-600 px-3 py-1 rounded-lg text-xs w-full">🎲 Ver apuestas</button>` : ''}
                         <button onclick="toggleSession('${lottery}', '${slot.name}', ${session ? session.id : 'null'}, '${session ? session.status : 'closed'}', this)" 
-                            class="mt-2 bg-${session && session.status === 'open' ? 'red' : 'green'}-600 px-3 py-1 rounded-lg text-xs w-full">${accion}</button>
+                            class="mt-2 bg-${session && session.status === 'open' ? 'red' : 'green'}-600 px-3 py-1 rounded-lg text-xs w-full ${session && session.status === 'closed' ? 'mt-1' : ''}">${accion}</button>
                     </div>`;
                 }
                 html += `</div></div>`;
@@ -2827,6 +2828,20 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const data = await res.json();
                 if (!res.ok) {
                     iziToast.warning({ message: data.error || 'No hay sesiones cerradas para esta lotería' });
+                    return;
+                }
+                window.open(data.url, '_blank');
+            } catch (e) {
+                iziToast.error({ message: 'Error al abrir las apuestas' });
+            }
+        };
+
+        window.openSessionExportById = async (sessionId) => {
+            try {
+                const res = await fetch(`/api/admin/session-export-url?sessionId=${encodeURIComponent(sessionId)}&userId=${currentUser.telegram_id}`);
+                const data = await res.json();
+                if (!res.ok) {
+                    iziToast.warning({ message: data.error || 'No se pudo abrir las apuestas de la sesión' });
                     return;
                 }
                 window.open(data.url, '_blank');
@@ -3975,7 +3990,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 withdraw_approver: { icon: '✅', label: 'Aprobar o Denegar Retiros' },
                 schedule_manager: { icon: '🕐', label: 'Gestionar Horario de Retiros' },
                 user_manager: { icon: '👥', label: 'Gestión de Usuarios' },
-                session_exporter: { icon: '🎲', label: 'Ver jugadas' }
+                session_exporter: { icon: '🎲', label: 'Ver Jugadas' }
             };
 
             const visibleRoles = userRoles.filter(r => r !== 'activity_self');
@@ -4550,7 +4565,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <th class="pb-2 text-center" title="Gestión de Usuarios">👥 Usuarios</th>
                                 <th class="pb-2 pl-2 text-center text-xs text-gray-500" title="Eliminar usuarios">🗑️</th>
                                 <th class="pb-2 pl-2 text-center text-xs text-gray-500" title="Ver mi propia actividad">📊</th>
-                                <th class="pb-2 pl-2 text-center" title="Ver jugadas/apuestas de una sesión">🎲 Ver Jugadas</th>
+                                <th class="pb-2 pl-2 text-center" title="Ver jugadas/apuestas de una sesión">🎲 Jugadas</th>
                             </tr>
                         </thead>
                         <tbody>`;
@@ -5235,8 +5250,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-blue-600 px-3 py-1 rounded-full text-sm" data-filter="referred">Refiriendo</button>
                         <button class="filter-btn bg-cyan-600 px-3 py-1 rounded-full text-sm" data-filter="withBets">Con jugadas</button>
                         <button class="filter-btn bg-orange-600 px-3 py-1 rounded-full text-sm" data-filter="onlyId">Solo con ID</button>
-                        <button class="filter-btn bg-red-700 px-3 py-1 rounded-full text-sm" data-filter="banned">🚫 Baneados</button>
-                        <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="deleted">🗑 Eliminados</button>
+                        <button class="filter-btn bg-red-700 px-3 py-1 rounded-full text-sm" data-filter="banned">Baneados</button>
+                        <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="deleted">Eliminados</button>
+                        <button class="filter-btn bg-red-900 px-3 py-1 rounded-full text-sm" data-filter="blocked">Que bloquearon el bot</button>
                     </div>
                     <div class="flex justify-between items-center mb-2 text-gray-400 text-sm px-1">
                         <span><span id="userTotalLabel">Total de usuarios registrados</span>: <span id="userTotalCount" class="text-white font-semibold">${users ? users.length : 0}</span></span>
@@ -5282,12 +5298,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const bannedClass = isBanned ? 'opacity-60 border border-red-500' : '';
                         const bannedBadge = isBanned ? '<span class="text-red-400 text-xs ml-2">🚫 BANEADO</span>' : '';
                         const bannedAtStr = u.banned_at ? formatDate(u.banned_at) : '';
+                        const blockedAtStr = u.blocked_at ? formatDate(u.blocked_at) : '';
+                        const blockedLine = u.blocked_at ? `<p class="text-xs text-red-300 mt-1">🔒 Bloqueó el bot: ${blockedAtStr}</p>` : '';
                         cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-pointer hover:bg-gray-700/60 transition user-card ${bannedClass}" data-userid="${u.telegram_id}" onclick="openBalanceModalWithFetch(${u.telegram_id}, '${escapeHTML(u.first_name || 'Sin nombre')}')">
                             <div class="flex justify-between items-start">
                                 <div>
                                     <p class="font-bold">${escapeHTML(u.first_name || 'Usuario')} ${u.username ? '<span class="text-gray-400 text-sm">@'+escapeHTML(u.username)+'</span>' : ''}${bannedBadge}</p>
                                     <p class="text-xs text-gray-400">ID: ${u.telegram_id}</p>
                                     ${isBanned && bannedAtStr ? `<p class="text-xs text-white mt-1">🚫 Baneado: ${bannedAtStr}</p>` : ''}
+                                    ${blockedLine}
                                 </div>
                                 <div class="text-right text-sm">
                                     <p>CUP: <span class="text-cyan-300">${cup.toFixed(2)}</span></p>
@@ -5326,6 +5345,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             case 'withBets': count = allUsers.filter(u => u.has_bets === true).length; break;
                             case 'onlyId': count = allUsers.filter(u => !u.username || String(u.username).trim() === '').length; break;
                             case 'banned': count = allUsers.filter(u => u.is_banned === true).length; break;
+                            case 'blocked': count = allUsers.filter(u => u.has_blocked_bot === true).length; break;
                         }
                         const base = btn.textContent.replace(/\s*\(\d+\)\s*$/, '').trim();
                         btn.textContent = base + ' (' + count + ')';
@@ -5346,6 +5366,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     withBets: 'con jugadas',
                     onlyId: 'solo con ID',
                     banned: 'baneados',
+                    blocked: 'que bloquearon el bot',
                     deleted: 'eliminados'
                 };
 
@@ -5443,6 +5464,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 break;
                             case 'banned':
                                 categoryMatch = (user.is_banned === true);
+                                break;
+                            case 'blocked':
+                                categoryMatch = (user.has_blocked_bot === true);
                                 break;
                         }
                         card.style.display = categoryMatch ? '' : 'none';
