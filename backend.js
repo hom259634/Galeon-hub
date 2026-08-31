@@ -246,14 +246,24 @@ function escapeHTML(text) {
         .replace(/'/g, '&#039;');
 }
 
-// ========== EXPORTACIÓN DE JUGADAS DE SESIÓN (HTML + ENLACE FIRMADO) ==========
-function getSessionExportToken(sessionId) {
-    return crypto.createHmac('sha256', BOT_TOKEN).update(String(sessionId)).digest('hex');
+// ========== EXPORTACIÓN DE JUGADAS DE SESIÓN (HTML + ENLACE POR TOKEN ALEATORIO) ==========
+// Cada vez que se genera un enlace se crea un token aleatorio nuevo y se guarda en la BD,
+// de modo que solo el enlace más reciente de la sesión es válido.
+function generateSessionExportToken() {
+    return crypto.randomBytes(16).toString('hex');
 }
 
-function buildSessionExportUrl(sessionId, download = false) {
-    const token = getSessionExportToken(sessionId);
+function exportTokenToUrl(sessionId, token, download = false) {
     return `${WEBAPP_URL}/export-session/${sessionId}?token=${token}${download ? '&download=1' : ''}`;
+}
+
+async function buildSessionExportUrl(sessionId, download = false) {
+    const token = generateSessionExportToken();
+    await supabase
+        .from('lottery_sessions')
+        .update({ export_token: token })
+        .eq('id', sessionId);
+    return exportTokenToUrl(sessionId, token, download);
 }
 
 function turnEmoji(slot) {
@@ -325,7 +335,7 @@ function generateSessionHtml(session, bets, downloadUrl, showDownload = true) {
 <body>
     <h1>${lotteryEmoji(session.lottery)} ${escapeHTML(session.lottery)} — ${escapeHTML(turnoTitle)}</h1>
     <p class="sub">📅 ${escapeHTML(session.date)} · ${(bets || []).length} apuestas</p>
-    ${vacio ? `<div class="empty">😴 No hubo apuestas en esta sesión</div>` : `
+    ${vacio ? `<div class="empty">ℹ️ No hubo jugadas en esta sesión</div>` : `
     <div class="total">💰 Total: ${totalCup.toFixed(2)} CUP / ${totalUsd.toFixed(2)} USD</div>
     <div class="wrap">
         <table>
@@ -1409,6 +1419,18 @@ function getEndTimeFromSlot(lottery, timeSlot) {
     return endTime.toDate();
 }
 
+async function recordBotBlock(telegramId) {
+    try {
+        await supabase
+            .from('users')
+            .update({ blocked_at: new Date().toISOString() })
+            .eq('telegram_id', telegramId)
+            .is('blocked_at', null);
+    } catch (e) {
+        console.warn(`[RecordBotBlock] Error registrando bloqueo de ${telegramId}:`, e?.message);
+    }
+}
+
 async function broadcastToAllUsers(message, parseMode = 'HTML', protectContent = false) {
     const { data: users } = await supabase
         .from('users')
@@ -1433,6 +1455,10 @@ async function broadcastToAllUsers(message, parseMode = 'HTML', protectContent =
         } catch (e) {
             const errorMessage = (e?.message || '').toLowerCase();
             const isInactiveUser = deliveryErrorsToIgnore.some(fragment => errorMessage.includes(fragment));
+
+            if (errorMessage.includes('blocked by the user')) {
+                await recordBotBlock(u.telegram_id);
+            }
 
             if (isInactiveUser) {
                 inactiveCount += 1;
@@ -2235,16 +2261,17 @@ app.post('/api/bets', async (req, res) => {
     }
     return await withUserBetLock(userId, async () => {
 
-    if (sessionId) {
-        const { data: activeSession } = await supabase
-            .from('lottery_sessions')
-            .select('*')
-            .eq('id', sessionId)
-            .eq('status', 'open')
-            .maybeSingle();
-        if (!activeSession) {
-            return res.status(400).json({ error: 'La sesión de juego no está activa' });
-        }
+    if (!sessionId) {
+        return res.status(400).json({ error: 'No hay una sesión de juego activa' });
+    }
+    const { data: activeSession } = await supabase
+        .from('lottery_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .eq('status', 'open')
+        .maybeSingle();
+    if (!activeSession) {
+        return res.status(400).json({ error: 'La sesión de juego no está activa' });
     }
 
     const user = await getOrCreateUser(parseInt(userId));
@@ -2703,7 +2730,7 @@ app.post('/api/bets', async (req, res) => {
 
     // Anadida la nueva variable (usdUsed)
 
-    const { data: bet, error: betError } = await supabase.from('bets').insert({ user_id: parseInt(userId), lottery, session_id: sessionId || null, bet_type: betType, raw_text: effectiveRawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, bonus_used_cup: bonusUsed, placed_at: new Date() }).select().single();
+    const { data: bet, error: betError } = await supabase.from('bets').insert({ user_id: parseInt(userId), lottery, session_id: sessionId, bet_type: betType, raw_text: effectiveRawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, bonus_used_cup: bonusUsed, placed_at: new Date() }).select().single();
     if (betError) {
         console.error('Error insertando apuesta:', betError);
         return res.status(500).json({ error: 'Error al registrar la apuesta' });
@@ -3394,6 +3421,9 @@ app.post('/api/admin/send-rate-update', requireAdmin, async (req, res) => {
                 sent++;
             } catch (e) {
                 const msg = (e?.message || '').toLowerCase();
+                if (msg.includes('blocked by the user')) {
+                    await recordBotBlock(u.telegram_id);
+                }
                 if (!errorsToIgnore.some(f => msg.includes(f))) failed++;
             }
         }
@@ -3544,15 +3574,24 @@ app.post('/api/admin/lottery-sessions/toggle', requireAdmin, async (req, res) =>
 
         // Notificación con botón de ver apuestas (solo subadmins con privilegio) - cierre manual
         const { data: rolesData } = await supabase.from('admin_roles').select('telegram_id').eq('role', 'session_exporter');
+        const { count: betCount } = await supabase
+            .from('bets')
+            .select('*', { count: 'exact', head: true })
+            .eq('session_id', data.id);
+        const hasBets = (betCount || 0) > 0;
         for (const r of rolesData || []) {
             try {
+                // El superadmin siempre recibe el botón; el subadmin solo si hay apuestas,
+                // de lo contrario recibe el mensaje sin botón y con el aviso de que no hay apuestas.
+                const isSuper = ADMIN_IDS.includes(Number(r.telegram_id));
+                const showButton = isSuper || hasBets;
                 await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     chat_id: Number(r.telegram_id),
-                    text: `📊 <b>Jugadas</b>\n\n🎰 ${data.lottery} · <b>${data.time_slot}</b>\n📅 ${data.date}\nℹ️ <b>Sesión cerrada manualmente</b>\n\nPulsa el botón para ver las apuestas de la sesión.`,
+                    text: `📊 <b>Jugadas</b>\n\n🎰 ${data.lottery} · <b>${data.time_slot}</b>\n📅 ${data.date}\n\n${showButton ? 'Pulsa el botón para ver las apuestas de la sesión.' : '📭 No hay apuestas en esta sesión.'}`,
                     parse_mode: 'HTML',
-                    reply_markup: {
-                        inline_keyboard: [[{ text: '👁️ Ver apuestas de la sesión', url: buildSessionExportUrl(data.id) }]]
-                    }
+                    reply_markup: showButton ? {
+                        inline_keyboard: [[{ text: '👁️ Ver apuestas de la sesión', url: await buildSessionExportUrl(data.id) }]]
+                    } : undefined
                 });
             } catch (e) {
                 console.error(`Error notificando session_exporter ${r.telegram_id}:`, e?.message || e);
@@ -3574,14 +3613,10 @@ app.get('/api/admin/lottery-sessions/closed', requireAdmin, async (req, res) => 
 });
 
 // --- Ver/descargar apuestas de una sesión (HTML) ---
-// Acceso protegido: requiere ?token= (HMAC del session id). Sin token no se puede abrir.
+// Acceso protegido: requiere ?token= (token aleatorio guardado en la BD para esa sesión).
 app.get('/export-session/:sessionId', async (req, res) => {
     const sessionId = req.params.sessionId;
-    const expected = getSessionExportToken(sessionId);
     const token = req.query.token;
-    if (!token || token !== expected) {
-        return res.status(403).send('<!DOCTYPE html><html lang="es"><body style="font-family:sans-serif;text-align:center;padding:40px">⛔ <b>No autorizado</b></body></html>');
-    }
 
     const { data: session } = await supabase
         .from('lottery_sessions')
@@ -3591,6 +3626,10 @@ app.get('/export-session/:sessionId', async (req, res) => {
 
     if (!session) return res.status(404).send('Sesión no encontrada');
 
+    if (!token || !session.export_token || token !== session.export_token) {
+        return res.status(403).send('<!DOCTYPE html><html lang="es"><body style="font-family:sans-serif;text-align:center;padding:40px">⛔ <b>Enlace no autorizado o expirado</b></body></html>');
+    }
+
     const { data: bets } = await supabase
         .from('bets')
         .select('*, users:user_id(first_name, username), referrers:referrer_id(first_name, username)')
@@ -3598,7 +3637,8 @@ app.get('/export-session/:sessionId', async (req, res) => {
         .order('placed_at', { ascending: true });
 
     const download = req.query.download === '1';
-    const downloadUrl = buildSessionExportUrl(sessionId, true);
+    // El enlace de descarga reutiliza el mismo token ya validado (no invalida la apertura)
+    const downloadUrl = exportTokenToUrl(sessionId, session.export_token, true);
     const html = generateSessionHtml(session, bets || [], downloadUrl, !download);
 
     if (download) {
@@ -3608,9 +3648,21 @@ app.get('/export-session/:sessionId', async (req, res) => {
     res.send(html);
 });
 
-// --- URL de apuestas de la última sesión cerrada de una lotería (web panel) ---
+// --- URL de apuestas de una sesión cerrada de una lotería (web panel) ---
 app.get('/api/admin/session-export-url', requireAdmin, async (req, res) => {
-    const { lottery } = req.query;
+    const { lottery, sessionId } = req.query;
+
+    if (sessionId) {
+        const { data } = await supabase
+            .from('lottery_sessions')
+            .select('id, lottery, time_slot, date')
+            .eq('id', sessionId)
+            .maybeSingle();
+        if (!data) return res.status(404).json({ error: 'La sesión no existe' });
+        res.json({ url: await buildSessionExportUrl(data.id), session: data });
+        return;
+    }
+
     if (!lottery) return res.status(400).json({ error: 'Falta lottery' });
 
     const { data } = await supabase
@@ -3624,7 +3676,7 @@ app.get('/api/admin/session-export-url', requireAdmin, async (req, res) => {
 
     if (!data) return res.status(404).json({ error: 'No hay sesiones cerradas para esta lotería' });
 
-    res.json({ url: buildSessionExportUrl(data.id), session: data });
+    res.json({ url: await buildSessionExportUrl(data.id), session: data });
 });
 
 // --- Obtener números ganadores publicados ---
@@ -3787,6 +3839,10 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
         .single();
 
     if (!session) return res.status(404).json({ error: 'Sesión no encontrada' });
+
+    if (session.status !== 'closed') {
+        return res.status(400).json({ error: 'La sesión debe estar cerrada para publicar sus resultados' });
+    }
 
     const { data: existingWin } = await supabase
         .from('winning_numbers')
@@ -4498,7 +4554,7 @@ app.get('/api/admin/users', async (req, res) => {
         // 1. Obtener todos los usuarios (incluyendo ref_by)
         const { data: users, error } = await supabase
             .from('users')
-            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by, is_banned, banned_at')
+            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by, is_banned, banned_at, blocked_at')
             .order('first_name', { ascending: true });
 
         if (error) {
@@ -4547,6 +4603,8 @@ app.get('/api/admin/users', async (req, res) => {
             referral_count: referralCounts.get(u.telegram_id) || 0,
             is_banned: !!u.is_banned,
             banned_at: u.banned_at,
+            blocked_at: u.blocked_at,
+            has_blocked_bot: !!u.blocked_at,
             is_superadmin: isAdmin(u.telegram_id),
             is_staff: adminRoleUserIds.has(u.telegram_id)
         }));

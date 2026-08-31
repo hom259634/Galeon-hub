@@ -217,40 +217,63 @@ function escapeHTML(text) {
         .replace(/'/g, '&#039;');
 }
 
-// ========== EXPORTACIÓN DE JUGADAS DE SESIÓN (ENLACE FIRMADO ==========
-function getSessionExportToken(sessionId) {
-    return crypto.createHmac('sha256', BOT_TOKEN).update(String(sessionId)).digest('hex');
+// ========== EXPORTACIÓN DE JUGADAS DE SESIÓN (ENLACE POR TOKEN ALEATORIO) ==========
+// Cada vez que se genera un enlace se crea un token aleatorio nuevo y se guarda en la BD,
+// de modo que solo el enlace más reciente de la sesión es válido.
+function generateSessionExportToken() {
+    return crypto.randomBytes(16).toString('hex');
 }
 
-function buildSessionExportUrl(sessionId, download = false) {
-    const token = getSessionExportToken(sessionId);
+function exportTokenToUrl(sessionId, token, download = false) {
     return `${WEBAPP_URL}/export-session/${sessionId}?token=${token}${download ? '&download=1' : ''}`;
 }
 
+async function buildSessionExportUrl(sessionId, download = false) {
+    const token = generateSessionExportToken();
+    await supabase
+        .from('lottery_sessions')
+        .update({ export_token: token })
+        .eq('id', sessionId);
+    return exportTokenToUrl(sessionId, token, download);
+}
+
 // Notifica a los subadmins con rol session_exporter el botón para ver las apuestas de una sesión cerrada
-// manual === true → indica que la sesión se cerró manualmente; si es false (automático) no lo indica.
-async function notifySessionExporters(session, manual = false) {
+async function notifySessionExporters(session) {
     try {
         await ensureBotRolesCache();
     } catch (e) {
         console.error('Error refrescando cache de roles para notificar session_exporters:', e?.message || e);
     }
     const region = regionMap[session.lottery];
-    const closeLine = manual ? `\nℹ️ <b>Sesión cerrada manualmente</b>` : '';
+    const { count } = await supabase
+        .from('bets')
+        .select('*', { count: 'exact', head: true })
+        .eq('session_id', session.id);
+    const hasBets = (count || 0) > 0;
+
     for (const adminId of botRolesCache.sessionExporters) {
         try {
-            await bot.telegram.sendMessage(adminId,
+            // El superadmin siempre recibe el botón; el subadmin solo si hay apuestas,
+            // de lo contrario recibe el mensaje sin botón y con el aviso de que no hay apuestas.
+            const isSuper = ADMIN_IDS.includes(Number(adminId));
+            const showButton = isSuper || hasBets;
+
+            const text =
                 `📊 <b>Jugadas</b>\n\n` +
                 `🎰 ${region?.emoji || '🎰'} <b>${escapeHTML(session.lottery)}</b> · <b>${escapeHTML(session.time_slot)}</b>\n` +
-                `📅 ${session.date}${closeLine}\n\n` +
-                `Pulsa el botón para ver las apuestas de la sesión.`,
-                {
-                    parse_mode: 'HTML',
-                    reply_markup: Markup.inlineKeyboard([
-                        [Markup.button.url('👁️ Ver apuestas de la sesión', buildSessionExportUrl(session.id))]
+                `📅 ${session.date}\n\n` +
+                (showButton
+                    ? `Pulsa el botón para ver las apuestas de la sesión.`
+                    : `📭 No hay apuestas en esta sesión.`);
+
+            await bot.telegram.sendMessage(adminId, text, {
+                parse_mode: 'HTML',
+                reply_markup: showButton
+                    ? Markup.inlineKeyboard([
+                        [Markup.button.url('👁️ Ver apuestas de la sesión', await buildSessionExportUrl(session.id))]
                     ]).reply_markup
-                }
-            );
+                    : undefined
+            });
         } catch (e) {
             console.error(`Error notificando session_exporter ${adminId}:`, e?.message || e);
         }
@@ -1860,6 +1883,26 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         return false;
     }
 
+    // Re-verificar que la sesión siga abierta en la base (el admin o el cron
+    // pudieron cerrarla después de elegir la lotería). Evita apostar contra una
+    // sesión ya cerrada o no vinculadas a la misma.
+    if (!playSessionId) {
+        await ctx.reply('❌ No se encontró la sesión de juego activa. Por favor inicia de nuevo con 🎲 Jugar.', getMainKeyboard(ctx));
+        if (session) delete session.pendingBetOverride;
+        return false;
+    }
+    const { data: stillOpen, error: openErr } = await supabase
+        .from('lottery_sessions')
+        .select('id')
+        .eq('id', playSessionId)
+        .eq('status', 'open')
+        .maybeSingle();
+    if (openErr || !stillOpen) {
+        await ctx.reply('❌ La sesión de juego ya se cerró. Ya no se aceptan apuestas.', getMainKeyboard(ctx));
+        if (session) delete session.pendingBetOverride;
+        return false;
+    }
+
     // Preparar objeto de actualización sólo con las monedas que cambian
     const updates = { updated_at: new Date() };
     let bonusUsed = 0;
@@ -1875,8 +1918,6 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         }
     }
     if (totalUSD > 0) updates.usd = Math.max(0, usdBalance - totalUSD);
-
-    await supabase.from('users').update(updates).eq('telegram_id', uid);
 
     // Guardar la jugada
     const { data: betInserted, error: betError } = await supabase
@@ -1901,6 +1942,13 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         await ctx.reply('❌ Error al registrar la jugada. Por favor, intenta de nuevo más tarde.', getMainKeyboard(ctx));
         if (session) delete session.pendingBetOverride;
         return false;
+    }
+
+    // Descontar el saldo SOLO después de que la jugada quedó guardada
+    const { error: userUpdateError } = await supabase.from('users').update(updates).eq('telegram_id', uid);
+    if (userUpdateError) {
+        console.error('Error descontando saldo tras guardar jugada:', userUpdateError);
+        await ctx.reply('⚠️ Tu jugada fue registrada, pero ocurrió un error al descontar el saldo. Contacta al administrador.', getMainKeyboard(ctx));
     }
 
     //---------- Cambios hechos por Luis David -----------//
@@ -2210,6 +2258,18 @@ function getEndTimeFromSlot(lottery, timeSlot) {
     return endTime.toDate();
 }
 
+async function recordBotBlock(telegramId) {
+    try {
+        await supabase
+            .from('users')
+            .update({ blocked_at: new Date().toISOString() })
+            .eq('telegram_id', telegramId)
+            .is('blocked_at', null);
+    } catch (e) {
+        console.warn(`[RecordBotBlock] Error registrando bloqueo de ${telegramId}:`, e?.message);
+    }
+}
+
 // Para notificaciones automáticas (cron, números ganadores, sesiones…)
 async function broadcastToAllUsers(message, parseMode = 'HTML') {
     const { data: users } = await supabase.from('users').select('telegram_id');
@@ -2224,6 +2284,9 @@ async function broadcastToAllUsers(message, parseMode = 'HTML') {
             await new Promise(resolve => setTimeout(resolve, 10));
         } catch (e) {
             const errorMessage = (e?.message || '').toLowerCase();
+            if (errorMessage.includes('blocked by the user')) {
+                await recordBotBlock(u.telegram_id);
+            }
             if (!deliveryErrorsToIgnore.some(frag => errorMessage.includes(frag))) {
                 console.warn(`Error broadcast a ${u.telegram_id}:`, e.message);
             }
@@ -2245,6 +2308,9 @@ async function broadcastPhotoToAllUsers(photoPath) {
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
             const errorMessage = (e?.message || '').toLowerCase();
+            if (errorMessage.includes('blocked by the user')) {
+                await recordBotBlock(u.telegram_id);
+            }
             if (!deliveryErrorsToIgnore.some(frag => errorMessage.includes(frag))) {
                 console.warn(`Error enviando foto broadcast a ${u.telegram_id}:`, e.message);
             }
@@ -2304,6 +2370,9 @@ async function adminBroadcast(ctx, messageText = null) {
             await new Promise(resolve => setTimeout(resolve, 30));
         } catch (e) {
             const errorMessage = (e?.message || '').toLowerCase();
+            if (errorMessage.includes('blocked by the user')) {
+                await recordBotBlock(u.telegram_id);
+            }
             if (!deliveryErrorsToIgnore.some(frag => errorMessage.includes(frag))) {
                 console.warn(`Error broadcast a ${u.telegram_id}:`, e.message);
             }
@@ -3591,7 +3660,7 @@ bot.action(/toggle_session_(\d+)_(.+)/, async (ctx) => {
             );
 
             // Notificación con botón de ver apuestas (solo subadmins con privilegio) - cierre manual
-            await notifySessionExporters(session, true);
+            await notifySessionExporters(session);
         }
 
         await ctx.answerCbQuery(newStatus === 'open' ? '✅ Sesión abierta' : '🔴 Sesión cerrada');
@@ -4102,6 +4171,11 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
         return false;
     }
 
+    if (session.status !== 'closed') {
+        await logReply('❌ La sesión debe estar CERRADA para publicar sus resultados.');
+        return false;
+    }
+
     const { data: existingWin } = await supabase
         .from('winning_numbers')
         .select('id')
@@ -4445,7 +4519,7 @@ function parseChannelResultBlocks(html) {
     return results;
 }
 
-async function fetchChannelWinningNumber(lotteryKey, channel, minTime, maxTime, retries = 2, baseDelay = 2000) {
+async function fetchChannelWinningNumber(lotteryKey, channel, minTime, maxTime, referenceTime = null, excludeTimes = null, retries = 2, baseDelay = 2000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
             console.log(`[AutoPublish] Scraping @${channel} (intento ${attempt}/${retries})...`);
@@ -4466,12 +4540,22 @@ async function fetchChannelWinningNumber(lotteryKey, channel, minTime, maxTime, 
 
             const results = parseChannelResultBlocks(resp.data);
             console.log(`[AutoPublish] Bloques encontrados en canal: ${results.length} con resultado válido`, results.length > 0 ? results.map(r => `${r.lottery}:${r.number}@${r.time}`).join(', ') : '(ninguno)');
-            const match = results.find(r =>
-                r.lottery === lotteryKey &&
-                r.time &&
-                r.time >= minTime &&
-                r.time <= maxTime
-            );
+            // Elegir el post más cercano al cierre del turno (referenceTime), nunca uno
+            // anterior al sorteo, y evitando números ya asignados a otro turno en esta
+            // misma ejecución (excludeTimes). Antes se tomaba el PRIMERO de la ventana,
+            // lo que podía acreditar a una sesión el número de un sorteo vecino.
+            const refTime = referenceTime || minTime;
+            const candidates = results
+                .filter(r =>
+                    r.lottery === lotteryKey &&
+                    r.time &&
+                    r.time >= minTime &&
+                    r.time <= maxTime &&
+                    r.time.getTime() >= refTime.getTime() &&
+                    !(excludeTimes && excludeTimes.has(r.time.getTime()))
+                )
+                .sort((a, b) => Math.abs(a.time.getTime() - refTime.getTime()) - Math.abs(b.time.getTime() - refTime.getTime()));
+            const match = candidates[0];
             if (match) {
                 console.log(`[AutoPublish] Match encontrado: ${match.lottery} ${match.number} @ ${match.time} | foto=${match.photo ? 'sí' : 'no'}`);
                 return match;
@@ -4557,6 +4641,10 @@ async function autoPublishWinningResults() {
 
         const now = Date.now();
 
+        // Números de publicaciones ya asignadas a un turno en esta ejecución, para
+        // que un mismo post del canal no se acredite a dos sesiones distintas.
+        const usedResultTimes = new Set();
+
         for (const session of sessions || []) {
             if (publishedSet.has(`${session.lottery}|${session.date}|${session.time_slot}`)) {
                 console.log(`[AutoPublish] Saltando ${session.lottery} ${session.time_slot} — ya publicado hoy.`);
@@ -4589,10 +4677,11 @@ async function autoPublishWinningResults() {
 
             if (now <= windowEnd) {
                 console.log(`[AutoPublish] Buscando ganador para ${session.lottery} ${session.time_slot} en @${channel} (ventana ${new Date(windowStart).toISOString()} - ${new Date(windowEnd).toISOString()})...`);
-                const winner = await fetchChannelWinningNumber(channelLotteryKey, channel, new Date(windowStart), new Date(windowEnd));
+                const winner = await fetchChannelWinningNumber(channelLotteryKey, channel, new Date(windowStart), new Date(windowEnd), new Date(endTime), usedResultTimes);
                 if (winner) {
                     console.log(`[AutoPublish] Ganador encontrado: ${winner.number} (lottery: ${winner.lottery}, time: ${winner.time})`);
                     const ok = await processWinningNumber(session.id, winner.number, null, winner.photo || null);
+                    if (ok && winner.time) usedResultTimes.add(winner.time.getTime());
                     console.log(`[AutoPublish] ${ok ? '✅ Publicado' : '❌ Falló publicación'}: ${session.lottery} ${session.time_slot} (${session.date}) número ${winner.number}`);
                 } else {
                     console.warn(`[AutoPublish] ⚠️ No se encontró ganador para ${session.lottery} ${session.time_slot} en @${channel} dentro de la ventana.`);
