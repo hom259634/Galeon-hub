@@ -4817,6 +4817,29 @@ function hasActiveAdminFlow(session) {
     );
 }
 
+// ========== DETECCIÓN INMEDIATA DE BLOQUEO/DESBLOQUEO ==========
+// Telegram notifica vía my_chat_member cuando un usuario bloquea (kicked) o
+// desbloquea (member) al bot. Con long-polling este evento llega por getUpdates,
+// así que lo capturamos en tiempo real sin depender de broadcasts fallidos.
+bot.on('my_chat_member', async (ctx) => {
+    try {
+        const tgId = ctx.myChatMember?.chat?.id;
+        const status = ctx.myChatMember?.new_chat_member?.status;
+        if (!tgId) return;
+
+        if (status === 'kicked') {
+            await recordBotBlock(tgId);
+        } else if (status === 'member') {
+            await supabase
+                .from('users')
+                .update({ blocked_at: null })
+                .eq('telegram_id', tgId);
+        }
+    } catch (e) {
+        console.warn(`[MyChatMember] Error procesando evento de ${ctx.myChatMember?.chat?.id}:`, e?.message);
+    }
+});
+
 // ========== MANEJADOR DE TEXTO PRINCIPAL ==========
 bot.on(message('text'), async (ctx) => {
     const uid = ctx.from.id;
