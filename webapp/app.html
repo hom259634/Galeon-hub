@@ -2740,23 +2740,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         async function renderSessionsView() {
             const today = getCurrentCubaDate();
             let sessions = [];
-            let closedSessions = [];
             try {
-                const [sessionsRes, closedRes] = await Promise.all([
-                    fetch(`/api/admin/lottery-sessions?date=${today}&userId=${currentUser.telegram_id}`),
-                    fetch(`/api/admin/lottery-sessions/closed?userId=${currentUser.telegram_id}`)
-                ]);
+                const sessionsRes = await fetch(`/api/admin/lottery-sessions?date=${today}&userId=${currentUser.telegram_id}`);
                 if (sessionsRes.ok) sessions = await sessionsRes.json();
-                if (closedRes.ok) closedSessions = await closedRes.json();
             } catch (e) { console.warn('Error fetching sessions', e); }
 
             let html = `<h4 class="text-xl font-semibold mb-4">🎰 Gestión de Sesiones</h4>`;
             for (const [lottery, slots] of Object.entries(LOTTERY_SCHEDULES)) {
-                const hasClosed = closedSessions.some(s => s.lottery === lottery);
                 html += `<div class="mb-4 bg-gray-800/30 p-3 rounded-xl">
-                    <div class="flex items-center justify-between mb-2">
+                    <div class="mb-2">
                         <h5 class="font-bold text-lg">${lottery}</h5>
-                        ${isAdmin && hasClosed ? `<button onclick="openSessionExport('${lottery}')" class="bg-yellow-600 px-3 py-1 rounded-lg text-xs">🎲 Ver apuestas</button>` : ''}
                     </div>
                     <div class="grid grid-cols-${slots.length} gap-2">`;
                 for (const slot of slots) {
