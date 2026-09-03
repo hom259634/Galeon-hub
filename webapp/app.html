@@ -2763,9 +2763,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     html += `<div class="bg-gray-700/50 p-2 rounded-lg text-center">
                         <span class="block text-sm">${slot.name}</span>
                         <span class="${clase} text-xs">${estado}</span>
-                        ${(session && session.status === 'closed') ? `<button onclick="openSessionExportById(${session.id})" class="mt-2 bg-yellow-600 px-3 py-1 rounded-lg text-xs w-full">🎲 Ver apuestas</button>` : ''}
                         <button onclick="toggleSession('${lottery}', '${slot.name}', ${session ? session.id : 'null'}, '${session ? session.status : 'closed'}', this)" 
-                            class="mt-2 bg-${session && session.status === 'open' ? 'red' : 'green'}-600 px-3 py-1 rounded-lg text-xs w-full ${session && session.status === 'closed' ? 'mt-1' : ''}">${accion}</button>
+                            class="mt-2 bg-${session && session.status === 'open' ? 'red' : 'green'}-600 px-3 py-1 rounded-lg text-xs w-full">${accion}</button>
+                        ${(session && session.status === 'closed') ? `<button onclick="openSessionExportById(${session.id})" class="mt-2 bg-yellow-600 px-3 py-1 rounded-lg text-xs w-full">🎲 Ver apuestas</button>` : ''}
                     </div>`;
                 }
                 html += `</div></div>`;
