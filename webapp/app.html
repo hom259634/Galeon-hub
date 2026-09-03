@@ -2823,7 +2823,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.warning({ message: data.error || 'No hay sesiones cerradas para esta lotería' });
                     return;
                 }
-                window.open(data.url, '_blank');
+                window.location.href = data.url;
             } catch (e) {
                 iziToast.error({ message: 'Error al abrir las apuestas' });
             }
@@ -2837,7 +2837,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.warning({ message: data.error || 'No se pudo abrir las apuestas de la sesión' });
                     return;
                 }
-                window.open(data.url, '_blank');
+                window.location.href = data.url;
             } catch (e) {
                 iziToast.error({ message: 'Error al abrir las apuestas' });
             }
