@@ -225,10 +225,44 @@ function generateSessionExportToken() {
 }
 
 function exportTokenToUrl(sessionId, token, download = false) {
-    return `${WEBAPP_URL}/export-session/${sessionId}?token=${token}${download ? '&download=1' : ''}`;
+    const key = getBotUsernameParam();
+    return `${WEBAPP_URL}/export-session/${sessionId}?${key}=${token}${download ? '&download=1' : ''}`;
+}
+
+// Nombre de parámetro del enlace de apuestas: usa el username real del bot
+// (sincronizado vía getMe) para ocultar la palabra "token" del enlace.
+function getBotUsernameParam() {
+    if (botInfo && botInfo.username) return botInfo.username;
+    return 'bot';
+}
+
+// Garantiza que botInfo.username esté resuelto (vía getMe) antes de generar
+// un enlace de apuestas. Si ya se resolvió, no vuelve a llamar a la API.
+let botInfoResolved = false;
+let botInfoPromise = null;
+async function ensureBotInfo() {
+    if (botInfoResolved) return botInfo;
+    if (!botInfoPromise) {
+        botInfoPromise = (async () => {
+            try {
+                if (bot && bot.telegram && typeof bot.telegram.getMe === 'function') {
+                    const info = await bot.telegram.getMe();
+                    if (info && info.username) {
+                        botInfo = info;
+                        botInfoResolved = true;
+                    }
+                }
+            } catch (e) {
+                console.error('Error resolviendo botInfo en ensureBotInfo:', e?.message || e);
+            }
+            return botInfo;
+        })();
+    }
+    return botInfoPromise;
 }
 
 async function buildSessionExportUrl(sessionId, download = false) {
+    await ensureBotInfo();
     const token = generateSessionExportToken();
     await supabase
         .from('lottery_sessions')
@@ -4170,8 +4204,8 @@ bot.action(/publish_win_(\d+)/, async (ctx) => {
         'Se desglosará automáticamente en:\n' +
         '• Centena: primeros 3 dígitos\n' +
         '• Fijo: últimos 2 de la centena\n' +
-        '• Corridos: fijo, primeros 2 de cuarteta, últimos 2 de cuarteta\n' +
-        '• Parlet: combinaciones de los corridos',
+        '• Corridos: 3 pares consecutivos de la cuarteta (pares 1-2, 2-3 y 3-4)\n' +
+        '• Parlet: combinaciones de fijo, primeros 2 y últimos 2 de cuarteta',
         { parse_mode: 'HTML' }
     );
     await ctx.answerCbQuery();

@@ -254,10 +254,45 @@ function generateSessionExportToken() {
 }
 
 function exportTokenToUrl(sessionId, token, download = false) {
-    return `${WEBAPP_URL}/export-session/${sessionId}?token=${token}${download ? '&download=1' : ''}`;
+    const key = getBotUsernameParam();
+    return `${WEBAPP_URL}/export-session/${sessionId}?${key}=${token}${download ? '&download=1' : ''}`;
+}
+
+// Nombre de parámetro del enlace de apuestas: usa el username real del bot
+// (sincronizado vía getMe) para ocultar la palabra "token" del enlace.
+function getBotUsernameParam() {
+    if (botInfo && botInfo.username) return botInfo.username;
+    return 'bot';
+}
+
+// Garantiza que botInfo.username esté resuelto (vía getMe) antes de generar
+// un enlace de apuestas, para que el nombre de parámetro sea el real del bot
+// y no el fallback 'bot'. Si ya se resolvió, no vuelve a llamar a la API.
+let botInfoResolved = false;
+let botInfoPromise = null;
+async function ensureBotInfo() {
+    if (botInfoResolved) return botInfo;
+    if (!botInfoPromise) {
+        botInfoPromise = (async () => {
+            try {
+                if (bot && bot.telegram && typeof bot.telegram.getMe === 'function') {
+                    const info = await bot.telegram.getMe();
+                    if (info && info.username) {
+                        botInfo = info;
+                        botInfoResolved = true;
+                    }
+                }
+            } catch (e) {
+                console.error('Error resolviendo botInfo en ensureBotInfo:', e?.message || e);
+            }
+            return botInfo;
+        })();
+    }
+    return botInfoPromise;
 }
 
 async function buildSessionExportUrl(sessionId, download = false) {
+    await ensureBotInfo();
     const token = generateSessionExportToken();
     await supabase
         .from('lottery_sessions')
@@ -296,7 +331,7 @@ function generateSessionHtml(session, bets, downloadUrl, showDownload = true) {
                 <span class="user-name">${escapeHTML(user.first_name || user.username || String(bet.user_id))}</span><br>
                 <span class="user-sub">${escapeHTML(userRef)}</span>
             </td>
-            <td>${escapeHTML(bet.bet_type || '')}</td>
+            <td>${escapeHTML(formatBetTypeLabel(bet.bet_type))}</td>
             <td>${escapeHTML(bet.raw_text || '')}</td>
             <td class="num">${(parseFloat(bet.cost_cup) || 0).toFixed(2)}</td>
             <td class="num">${(parseFloat(bet.cost_usd) || 0).toFixed(2)}</td>
@@ -324,7 +359,7 @@ function generateSessionHtml(session, bets, downloadUrl, showDownload = true) {
     .wrap { background: #fff; border-radius: 10px; overflow-x: auto; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
     table { width: 100%; border-collapse: collapse; min-width: 560px; }
     th, td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 13px; white-space: nowrap; }
-    th { background: #111827; color: #fff; position: sticky; top: 0; }
+    th { background: #111827; color: #fff; }
     tr:nth-child(even) { background: #f9fafb; }
     .num { text-align: right; }
     .empty { text-align: center; padding: 32px 24px; color: #6b7280; font-size: 15px; background: #fff; border-radius: 10px; margin-top: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
@@ -3651,7 +3686,7 @@ app.get('/api/admin/lottery-sessions/closed', requireAdmin, async (req, res) => 
 // Acceso protegido: requiere ?token= (token aleatorio guardado en la BD para esa sesión).
 app.get('/export-session/:sessionId', async (req, res) => {
     const sessionId = req.params.sessionId;
-    const token = req.query.token;
+    const token = req.query[getBotUsernameParam()];
 
     const { data: session } = await supabase
         .from('lottery_sessions')
@@ -3711,6 +3746,7 @@ app.get('/export-session/:sessionId', async (req, res) => {
         res.setHeader('Content-Disposition', `attachment; filename="${session.lottery.replace(/\s+/g, '_')}_${(session.time_slot || '').replace(/[^\w]/g, '')}_${session.date}.html"`);
     }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.send(html);
 });
 
