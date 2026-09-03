@@ -263,11 +263,24 @@ async function ensureBotInfo() {
 
 async function buildSessionExportUrl(sessionId, download = false) {
     await ensureBotInfo();
-    const token = generateSessionExportToken();
-    await supabase
+
+    // Reutilizar el token existente si la sesión ya tiene uno válido, para que
+    // el primer enlace generado siga funcionando. Solo se crea uno nuevo si
+    // la sesión aún no tiene token.
+    const { data: existing } = await supabase
         .from('lottery_sessions')
-        .update({ export_token: token })
-        .eq('id', sessionId);
+        .select('export_token')
+        .eq('id', sessionId)
+        .single();
+
+    let token = existing?.export_token || null;
+    if (!token) {
+        token = generateSessionExportToken();
+        await supabase
+            .from('lottery_sessions')
+            .update({ export_token: token })
+            .eq('id', sessionId);
+    }
     return exportTokenToUrl(sessionId, token, download);
 }
 
@@ -4018,7 +4031,7 @@ bot.action('adm_send_rate_update', async (ctx) => {
 
         const lines = [
             '💹 Tasas de Cambio del Día',
-            `🕐 Actualizado por ADMIN: ${dateStr} ${timeStr}`,
+            `🕐 Actualizado por ADMIN: 📅 ${dateStr} ${timeStr}`,
             '',
             'Mercado Informal',
         ];
@@ -4355,6 +4368,28 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
                 const itemCup = itemMontoCup(item);
                 premioTotalUSD += itemUsd * multiplicador;
                 premioTotalCUP += itemCup * multiplicador;
+                console.log('[ValGanador] GANÓ', {
+                    session: sessionId,
+                    winning: formattedWinning,
+                    user: bet.user_id,
+                    bet_type: bet.bet_type,
+                    numero,
+                    ganado: true,
+                    montoUsd: itemUsd,
+                    montoCup: itemCup,
+                    corridos,
+                    fijo,
+                    centena
+                });
+            } else {
+                console.log('[ValGanador] NO ganó', {
+                    session: sessionId,
+                    winning: formattedWinning,
+                    user: bet.user_id,
+                    bet_type: bet.bet_type,
+                    numero,
+                    ganado: false
+                });
             }
         }
 
@@ -7560,7 +7595,7 @@ cron.schedule('0 8 * * *', async () => {
         const prev = bot.lastBroadcastRates;
         const lines = [
             '💹 Tasas de Cambio del Día',
-            `🕐 ${fetchOk ? 'Actualizado en tiempo real' : 'Últimas tasas disponibles'}: ${dateStr} ${timeStr}`,
+            `🕐 ${fetchOk ? 'Actualizado en tiempo real' : 'Últimas tasas disponibles'}: 📅 ${dateStr} ${timeStr}`,
             'Fuente: eltoque.com',
             '',
             'Mercado Informal',
