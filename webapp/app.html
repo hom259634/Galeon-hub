@@ -1627,7 +1627,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (res.ok) {
                     const wasOmitted = payload.omitLimitOverride === true;
                     const overLimitPhrase = overLimitTypePhrase([selectedBetType]).replace(/^./, c => c.toLowerCase());
-                    iziToast.success({ title: '✅ Jugada registrada', message: wasOmitted ? `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.` : '¡Buena suerte!' });
+                    iziToast.success({ title: isEditing ? '✅ Jugada editada' : '✅ Jugada registrada', message: (wasOmitted ? `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.` : '¡Buena suerte!') + ' 🍀' });
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
@@ -2223,7 +2223,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             betDetailModalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-2">Detalles de la jugada</h4>
                 <p class="text-sm text-gray-300 mb-1">🎰 ${escapeHTML(bet.lottery)} - ${escapeHTML(formatBetTypeLabel(bet.bet_type))}</p>
-                <p class="text-xs text-gray-400 mb-3">${new Date(bet.placed_at).toLocaleString()}</p>
+                <p class="text-xs text-gray-400 mb-3">${new Date(bet.placed_at).toLocaleString()}${bet.updated_at && new Date(bet.updated_at) - new Date(bet.placed_at) > 60000 ? `<span class="block mt-0.5 text-cyan-400/90">✏️ Editada: ${new Date(bet.updated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}</span>` : ''}</p>
                 
                 <div class="mb-3">
                     <p class="font-semibold mb-1">${bet.bet_type === 'centena' ? '💯 Centenas jugadas:' : bet.bet_type === 'parle' ? '🔗 Parlets jugados:' : bet.bet_type === 'fijo' ? '🎯 Números jugados:' : bet.bet_type === 'corridos' ? '🏃 Números jugados:' : '📝 Números jugados:'}</p>
@@ -2765,7 +2765,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <span class="${clase} text-xs">${estado}</span>
                         <button onclick="toggleSession('${lottery}', '${slot.name}', ${session ? session.id : 'null'}, '${session ? session.status : 'closed'}', this)" 
                             class="mt-2 bg-${session && session.status === 'open' ? 'red' : 'green'}-600 px-3 py-1 rounded-lg text-xs w-full">${accion}</button>
-                        ${(session && session.status === 'closed') ? `<button onclick="openSessionExportById(${session.id})" class="mt-2 bg-yellow-600 px-3 py-1 rounded-lg text-xs w-full">🎲 Ver apuestas</button>` : ''}
+                        ${(session && session.status === 'closed') ? ((session.bet_count || 0) > 0
+                            ? `<button onclick="openSessionExportById(${session.id})" class="mt-2 bg-yellow-600 px-3 py-1 rounded-lg text-xs w-full">🎲 Ver apuestas</button>`
+                            : `<span class="mt-2 block px-3 py-1 rounded-lg text-xs w-full text-gray-400 bg-gray-700/40 cursor-default">📭 Sin apuestas</span>`
+                        ) : ''}
                     </div>`;
                 }
                 html += `</div></div>`;
