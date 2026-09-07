@@ -3572,7 +3572,19 @@ app.get('/api/admin/lottery-sessions', requireAdmin, async (req, res) => {
         .from('lottery_sessions')
         .select('*')
         .eq('date', date);
-    res.json(data || []);
+    const sessions = data || [];
+    if (sessions.length > 0) {
+        const { data: betCounts } = await supabase
+            .from('bets')
+            .select('session_id, id', { count: 'exact' })
+            .in('session_id', sessions.map(s => s.id));
+        const bySession = {};
+        (betCounts || []).forEach(b => {
+            bySession[String(b.session_id)] = (bySession[String(b.session_id)] || 0) + 1;
+        });
+        sessions.forEach(s => { s.bet_count = bySession[String(s.id)] || 0; });
+    }
+    res.json(sessions);
 });
 
 // --- Crear nueva sesión ---
