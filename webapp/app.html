@@ -669,6 +669,17 @@
     </div>
 </div>
 
+<!-- MODAL para ver jugadas de una sesión cerrada (sin cerrar la Web App) -->
+<div id="sessionExportModal" class="modal hidden">
+    <div style="position: fixed; inset: 0; display: flex; flex-direction: column; background: #1f2437; border: 1px solid #00ffff; border-radius: 16px; overflow: hidden; z-index: 1001;">
+        <div style="display: flex; align-items: center; justify-content: space-between; background: #2d3349; padding: 10px 16px; border-bottom: 1px solid #00ffff;">
+            <span class="font-semibold" style="color: #fff;">🎲 Jugadas de la sesión</span>
+            <button onclick="closeSessionExportModal()" class="bg-red-600 px-3 py-1 rounded-lg text-xs" style="color:#fff;">✕ Cerrar</button>
+        </div>
+        <iframe id="sessionExportFrame" title="Jugadas de la sesión" style="flex:1; width:100%; border:0;"></iframe>
+    </div>
+</div>
+
 <script>
     (function() {
         const TG = window.Telegram.WebApp;
@@ -2223,7 +2234,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             betDetailModalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-2">Detalles de la jugada</h4>
                 <p class="text-sm text-gray-300 mb-1">🎰 ${escapeHTML(bet.lottery)} - ${escapeHTML(formatBetTypeLabel(bet.bet_type))}</p>
-                <p class="text-xs text-gray-400 mb-3">${new Date(bet.placed_at).toLocaleString()}${bet.updated_at && new Date(bet.updated_at) - new Date(bet.placed_at) > 60000 ? `<span class="block mt-0.5 text-cyan-400/90">✏️ Editada: ${new Date(bet.updated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}</span>` : ''}</p>
+                <p class="text-xs text-gray-400 mb-3">${new Date(bet.placed_at).toLocaleString()}${bet.updated_at && new Date(bet.updated_at) - new Date(bet.placed_at) > 60000 ? `<span class="block mt-0.5 text-cyan-400/90">✏️ Editada: ${new Date(bet.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Havana' })}</span>` : ''}</p>
                 
                 <div class="mb-3">
                     <p class="font-semibold mb-1">${bet.bet_type === 'centena' ? '💯 Centenas jugadas:' : bet.bet_type === 'parle' ? '🔗 Parlets jugados:' : bet.bet_type === 'fijo' ? '🎯 Números jugados:' : bet.bet_type === 'corridos' ? '🏃 Números jugados:' : '📝 Números jugados:'}</p>
@@ -2826,7 +2837,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.warning({ message: data.error || 'No hay sesiones cerradas para esta lotería' });
                     return;
                 }
-                window.location.href = data.url;
+                openSessionExportModal(data.url);
             } catch (e) {
                 iziToast.error({ message: 'Error al abrir las apuestas' });
             }
@@ -2840,10 +2851,24 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.warning({ message: data.error || 'No se pudo abrir las apuestas de la sesión' });
                     return;
                 }
-                window.location.href = data.url;
+                openSessionExportModal(data.url);
             } catch (e) {
                 iziToast.error({ message: 'Error al abrir las apuestas' });
             }
+        };
+
+        window.openSessionExportModal = (url) => {
+            const modal = document.getElementById('sessionExportModal');
+            const frame = document.getElementById('sessionExportFrame');
+            frame.src = url;
+            modal.classList.remove('hidden');
+        };
+
+        window.closeSessionExportModal = () => {
+            const modal = document.getElementById('sessionExportModal');
+            const frame = document.getElementById('sessionExportFrame');
+            modal.classList.add('hidden');
+            frame.src = '';
         };
 
         async function renderPublishWinningView() {
