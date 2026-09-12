@@ -225,18 +225,19 @@ function generateSessionExportToken() {
 }
 
 function exportTokenToUrl(sessionId, token, download = false) {
-    const key = getBotUsernameParam();
+    const key = encodeURIComponent(getBotUsernameParam());
     return `${WEBAPP_URL}/export-session/${sessionId}?${key}=${token}${download ? '&download=1' : ''}`;
 }
 
-// Nombre de parámetro del enlace de apuestas: usa el username real del bot
-// (sincronizado vía getMe) para ocultar la palabra "token" del enlace.
+// Nombre de parámetro del enlace de apuestas: usa el nombre real del bot
+// (first_name de BotFather, sincronizado vía getMe) para ocultar la palabra
+// "token" del enlace. Se codifica con encodeURIComponent al armar el URL.
 function getBotUsernameParam() {
-    if (botInfo && botInfo.username) return botInfo.username;
+    if (botInfo && botInfo.first_name) return botInfo.first_name;
     return 'bot';
 }
 
-// Garantiza que botInfo.username esté resuelto (vía getMe) antes de generar
+// Garantiza que botInfo.first_name esté resuelto (vía getMe) antes de generar
 // un enlace de apuestas. Si ya se resolvió, no vuelve a llamar a la API.
 let botInfoResolved = false;
 let botInfoPromise = null;
@@ -247,7 +248,7 @@ async function ensureBotInfo() {
             try {
                 if (bot && bot.telegram && typeof bot.telegram.getMe === 'function') {
                     const info = await bot.telegram.getMe();
-                    if (info && info.username) {
+                    if (info && info.first_name) {
                         botInfo = info;
                         botInfoResolved = true;
                     }
@@ -405,7 +406,10 @@ function buildLastBetsText(bets) {
     let text = '📋 <b>Tus últimas 5 jugadas:</b>\n\n';
 
     bets.forEach((b, i) => {
-        const date = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY hh:mm A');
+        const created = moment(b.placed_at).tz(TIMEZONE).format('DD/MM/YYYY hh:mm A');
+        const edited = b.updated_at && new Date(b.updated_at) - new Date(b.placed_at) > 60000
+            ? moment(b.updated_at).tz(TIMEZONE).format('hh:mm A')
+            : null;
         const lottery = escapeHTML(b.lottery || '-');
         const betType = escapeHTML(formatBetTypeLabel(b.bet_type) || '-');
         const rawTextLines = String(b.raw_text || '')
@@ -418,7 +422,9 @@ function buildLastBetsText(bets) {
         const usd = (parseFloat(b.cost_usd) || 0).toFixed(2);
 
         text += `<b>${i + 1}.</b>\n` +
-            `<pre>Lotería : ${lottery}\nTipo    : ${betType}\nJugada:\n${rawText}\nMonto   : ${cup} CUP / ${usd} USD\nFecha y Hora : ${date}</pre>\n`;
+            `<pre>Lotería    : ${lottery}\nTipo       : ${betType}\nJugada:\n${rawText}\nMonto      : ${cup} CUP / ${usd} USD\nRegistrada : ${created}` +
+            (edited ? `\nEditada    : ${edited}` : '') +
+            `</pre>\n`;
     });
 
     text += '¿Quieres ver más? Puedes consultar el historial completo en la Web-App.';
@@ -2636,6 +2642,11 @@ bot.use(async (ctx, next) => {
             // bienvenida con cualquier interacción.
             if (ctx.session?.isNewUser) {
                 const msgText = ctx.message?.text || '';
+                // Updates sin texto (my_chat_member, etc.) no deben disparar la
+                // redirección ni la bienvenida; solo updates de mensaje/callback
+                // con contenido. Esto evita que el desbloqueo del bot (que llega
+                // antes de /start) enviar el aviso de "selecciona el botón Inicio".
+                if (!msgText) return next();
                 if (!/^\/start(?:\s|$)/.test(msgText)) {
                     if (ctx.session?.isDeletedUser) {
                         try {
