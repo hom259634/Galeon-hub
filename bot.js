@@ -328,6 +328,67 @@ async function notifySessionExporters(session) {
     }
 }
 
+// ========== JUGADAS DEL DÍA (REPORTE DIARIO A ADMINS) ==========
+// Genera/lee el token diario (app_config: daily_report_token_{date}) y arma el enlace
+// del endpoint /reporte-dia/{date} reutilizando el parámetro oculto con el nombre del bot.
+async function buildDailyReportUrl(date) {
+    await ensureBotInfo();
+
+    // Se reutiliza el token del día si ya existe para que el primer enlace siga válido.
+    const configKey = `daily_report_token_${date}`;
+    const { data: existing } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', configKey)
+        .single();
+
+    let token = existing?.value || null;
+    if (!token) {
+        token = generateSessionExportToken();
+        await supabase
+            .from('app_config')
+            .upsert({ key: configKey, value: token }, { onConflict: 'key' });
+    }
+
+    const param = encodeURIComponent(getBotUsernameParam());
+    return `${WEBAPP_URL}/reporte-dia/${date}?${param}=${token}`;
+}
+
+// Envía el reporte del día que acaba de terminar a superadmins y session_exporters
+async function notifyDailyBetsReport() {
+    try {
+        await ensureBotRolesCache();
+    } catch (e) {
+        console.error('Error refrescando cache de roles para el reporte diario:', e?.message || e);
+    }
+
+    const reportDate = moment.tz(TIMEZONE).subtract(1, 'day').format('YYYY-MM-DD');
+    const readableDate = moment.tz(TIMEZONE).subtract(1, 'day').format('DD/MM/YYYY');
+
+    const recipients = [...new Set([...ADMIN_IDS, ...botRolesCache.sessionExporters])];
+    const url = await buildDailyReportUrl(reportDate);
+
+    const text =
+        `📊 <b>Jugadas del día</b>\n\n` +
+        `📅 ${readableDate}\n\n` +
+        `Pulsa el botón para ver el resumen del día.`;
+
+    const replyMarkup = Markup.inlineKeyboard([
+        [Markup.button.url('👁️ Ver jugadas del día', url)]
+    ]).reply_markup;
+
+    for (const adminId of recipients) {
+        try {
+            await bot.telegram.sendMessage(adminId, text, {
+                parse_mode: 'HTML',
+                reply_markup: replyMarkup
+            });
+        } catch (e) {
+            console.error(`Error enviando reporte diario a ${adminId}:`, e?.message || e);
+        }
+    }
+}
+
 async function getBonusCupDefault() {
     const { data } = await supabase
         .from('app_config')
@@ -2008,7 +2069,10 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
     }
     if (totalUSD > 0) updates.usd = Math.max(0, usdBalance - totalUSD);
 
-    // Guardar la jugada
+    // placed_at y updated_at se escriben con el MISMO instante para que una jugada recién
+    // registrada nunca parezca "editada" (si updated_at lo fija el DEFAULT/trigger de la BD,
+    // un desfase de reloj entre el servidor y la base genera falsos positivos).
+    const placedAt = new Date();
     const { data: betInserted, error: betError } = await supabase
         .from('bets')
         .insert({
@@ -2021,7 +2085,8 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
             raw_text: rawText,
             lottery: session?.lottery || null,
             bonus_used_cup: bonusUsed,
-            placed_at: new Date()
+            placed_at: placedAt,
+            updated_at: placedAt
         })
         .select()
         .single();
@@ -7500,6 +7565,11 @@ cron.schedule('* * * * *', async () => {
     } catch (e) {
         console.error('Error en cron job:', e);
     }
+}, { timezone: TIMEZONE });
+
+// Cron 00:00 - Reporte diario "Jugadas del día" a superadmins y session_exporters
+cron.schedule('0 0 * * *', () => {
+    notifyDailyBetsReport().catch(e => console.error('Error en cron de jugadas del día:', e?.message || e));
 }, { timezone: TIMEZONE });
 
 // Cron 7:31 AM - Colectar tasas desde Telegram @eltoquecom2 (SIN broadcast)

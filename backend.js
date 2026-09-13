@@ -314,6 +314,29 @@ async function buildSessionExportUrl(sessionId, download = false) {
     return exportTokenToUrl(sessionId, token, download);
 }
 
+// ========== JUGADAS DEL DÍA (REPORTE DIARIO A ADMINS) ==========
+// El token diario se guarda en app_config con key `daily_report_token_{date}` para que
+// el enlace del reporte siga válido (misma idea que export_token de las sesiones).
+async function getDailyReportToken(date, createIfMissing = false) {
+    const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', `daily_report_token_${date}`)
+        .single();
+    if (data?.value) return data.value;
+    if (!createIfMissing) return null;
+    const token = generateSessionExportToken();
+    await supabase
+        .from('app_config')
+        .upsert({ key: `daily_report_token_${date}`, value: token }, { onConflict: 'key' });
+    return token;
+}
+
+function dailyReportUrl(date, token, download = false) {
+    const key = encodeURIComponent(getBotUsernameParam());
+    return `${WEBAPP_URL}/reporte-dia/${date}?${key}=${token}${download ? '&download=1' : ''}`;
+}
+
 function turnEmoji(slot) {
     const s = String(slot || '').toLowerCase();
     if (s.includes('mañana')) return '🌅';
@@ -396,6 +419,103 @@ function generateSessionHtml(session, bets, downloadUrl, showDownload = true) {
         </table>
     </div>`}
     ${showDownload ? `<a class="download" href="${escapeHTML(downloadUrl)}" download="${escapeHTML(session.lottery)}_${escapeHTML(session.time_slot)}_${escapeHTML(session.date)}.html" target="_parent">📥 Descargar archivo</a>` : ''}
+</body>
+</html>`;
+}
+
+// Formato de monto estilo cubano: 1240 -> "1.240,00" (punto de miles, coma decimal)
+function formatMoney(n) {
+    const parts = Number(n || 0).toFixed(2).split('.');
+    return parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + parts[1];
+}
+
+// Orden estable para el reporte diario: Florida, Georgia, Nueva York; Mañana, Tarde, Noche
+const DAILY_REPORT_REGIONS = Object.keys(regionMap);
+const DAILY_REPORT_SLOTS = ['🌅 Mañana', '☀️ Tarde', '🌙 Noche'];
+
+function generateDailyBetsHtml(date, sessions, downloadUrl, showDownload = true) {
+    const matchDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ''));
+    const readableDate = matchDate ? `${matchDate[3]}/${matchDate[2]}/${matchDate[1]}` : String(date || '');
+
+    const rows = (sessions || []).map(s => {
+        const cup = (s.bets || []).filter(b => (parseFloat(b.cost_cup) || 0) > 0);
+        const usd = (s.bets || []).filter(b => (parseFloat(b.cost_usd) || 0) > 0);
+        const region = regionMap[s.lottery];
+        const label = `${region?.emoji || '🎰'} ${escapeHTML(s.lottery)} · ${escapeHTML(turnPlainName(s.time_slot))} ${turnEmoji(s.time_slot)}`;
+        return {
+            session: s,
+            label,
+            cup,
+            usd,
+            sumCup: cup.reduce((acc, b) => acc + (parseFloat(b.cost_cup) || 0), 0),
+            sumUsd: usd.reduce((acc, b) => acc + (parseFloat(b.cost_usd) || 0), 0)
+        };
+    });
+
+    const sortIndex = r => {
+        const reg = DAILY_REPORT_REGIONS.indexOf(r.session.lottery);
+        const slot = DAILY_REPORT_SLOTS.indexOf(r.session.time_slot);
+        return (reg < 0 ? 99 : reg) * 10 + (slot < 0 ? 99 : slot);
+    };
+    rows.sort((a, b) => sortIndex(a) - sortIndex(b));
+
+    const vacio = !rows.some(r => r.cup.length > 0 || r.usd.length > 0);
+
+    const totalCupCount = rows.reduce((acc, r) => acc + r.cup.length, 0);
+    const totalCup = rows.reduce((acc, r) => acc + r.sumCup, 0);
+    const totalUsdCount = rows.reduce((acc, r) => acc + r.usd.length, 0);
+    const totalUsd = rows.reduce((acc, r) => acc + r.sumUsd, 0);
+
+    const rowHtml = rows.map(r => `<tr>
+                    <td>${r.label}</td>
+                    <td class="num">${r.cup.length} / $${formatMoney(r.sumCup)}<span class="count"><br>apuestas en CUP / monto</span></td>
+                    <td class="num">${r.usd.length} / $${formatMoney(r.sumUsd)}<span class="count"><br>apuestas en USD / monto</span></td>
+                </tr>`).join('\n');
+
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jugadas del día - ${escapeHTML(readableDate)}</title>
+<style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background: #f3f4f6; color: #111; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .sub { color: #4b5563; margin: 0 0 12px; font-size: 14px; }
+    .total { background: #16a34a; color: #fff; padding: 10px 12px; border-radius: 8px; margin: 12px 0; font-size: 15px; }
+    .wrap { background: #fff; border-radius: 10px; overflow-x: auto; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    table { width: 100%; border-collapse: collapse; min-width: 560px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 13px; white-space: nowrap; }
+    th { background: #111827; color: #fff; }
+    tr:nth-child(even) { background: #f9fafb; }
+    .num { text-align: right; }
+    .empty { text-align: center; padding: 32px 24px; color: #6b7280; font-size: 15px; background: #fff; border-radius: 10px; margin-top: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    .user-sub { font-size: 11px; color: #4b5563; }
+    .tot-row td { background: #16a34a; color: #fff; font-weight: 600; }
+    .count { color: #6b7280; font-size: 11px; }
+    .download { display: block; margin-top: 16px; text-align: center; background: #2563eb; color: #fff; padding: 12px 16px; border-radius: 8px; text-decoration: none; font-size: 15px; }
+</style>
+</head>
+<body>
+    <h1>📊 Jugadas del día</h1>
+    <p class="sub">📅 ${escapeHTML(readableDate)} · ${(sessions || []).length} sesiones</p>
+    ${vacio ? `<div class="empty">ℹ️ No hubo jugadas en este día</div>` : `
+    <div class="wrap">
+        <table>
+            <thead>
+                <tr><th>Sesiones</th><th class="num">Total CUP</th><th class="num">Total USD</th></tr>
+            </thead>
+            <tbody>
+                ${rowHtml}
+                <tr class="tot-row">
+                    <td>Total</td>
+                    <td class="num">${totalCupCount} / $${formatMoney(totalCup)}</td>
+                    <td class="num">${totalUsdCount} / $${formatMoney(totalUsd)}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>`}
+    ${showDownload ? `<a class="download" href="${escapeHTML(downloadUrl)}" download="Jugadas_del_dia_${escapeHTML(date)}.html" target="_parent">📥 Descargar archivo</a>` : ''}
 </body>
 </html>`;
 }
@@ -2814,7 +2934,11 @@ app.post('/api/bets', async (req, res) => {
 
     // Anadida la nueva variable (usdUsed)
 
-    const { data: bet, error: betError } = await supabase.from('bets').insert({ user_id: parseInt(userId), lottery, session_id: sessionId, bet_type: betType, raw_text: effectiveRawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, bonus_used_cup: bonusUsed, placed_at: new Date() }).select().single();
+    // placed_at y updated_at se escriben con el MISMO instante para que una jugada recién
+    // registrada nunca parezca "editada" (si updated_at se deja en manos del DEFAULT/trigger
+    // de la BD, un desfase de reloj entre el servidor y la base da falsos positivos).
+    const placedAt = new Date();
+    const { data: bet, error: betError } = await supabase.from('bets').insert({ user_id: parseInt(userId), lottery, session_id: sessionId, bet_type: betType, raw_text: effectiveRawText, items: parsed.items, cost_usd: totalUSD, cost_cup: totalCUP, bonus_used_cup: bonusUsed, placed_at: placedAt, updated_at: placedAt }).select().single();
     if (betError) {
         console.error('Error insertando apuesta:', betError);
         return res.status(500).json({ error: 'Error al registrar la apuesta' });
@@ -3771,6 +3895,60 @@ app.get('/export-session/:sessionId', async (req, res) => {
 
     if (download) {
         res.setHeader('Content-Disposition', `attachment; filename="${session.lottery.replace(/\s+/g, '_')}_${(session.time_slot || '').replace(/[^\w]/g, '')}_${session.date}.html"`);
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.send(html);
+});
+
+// --- Jugadas del día (reporte diario a admins, protegido por token) ---
+// Acceso protegido: requiere ?<param>=<token> (token diario guardado en app_config por el bot).
+app.get('/reporte-dia/:date', async (req, res) => {
+    const date = req.params.date;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+        return res.status(400).send('Fecha inválida');
+    }
+
+    const token = req.query[getBotUsernameParam()];
+    const storedToken = await getDailyReportToken(date);
+    if (!token || !storedToken || token !== storedToken) {
+        return res.status(403).send('<!DOCTYPE html><html lang="es"><body style="font-family:sans-serif;text-align:center;padding:40px">⛔ <b>Enlace no autorizado o expirado</b></body></html>');
+    }
+
+    const { data: sessionsRaw, error: sessionsError } = await supabase
+        .from('lottery_sessions')
+        .select('*')
+        .eq('date', date);
+    if (sessionsError) {
+        console.error('Error cargando sesiones del día:', sessionsError);
+    }
+
+    const sessionIds = (sessionsRaw || []).map(s => s.id);
+    let bets = [];
+    if (sessionIds.length > 0) {
+        const { data: betsRaw, error: betsError } = await supabase
+            .from('bets')
+            .select('*')
+            .in('session_id', sessionIds);
+        if (betsError) {
+            console.error('Error cargando apuestas del día:', betsError);
+        }
+        bets = betsRaw || [];
+    }
+
+    const bySession = new Map();
+    for (const bet of bets) {
+        if (!bySession.has(bet.session_id)) bySession.set(bet.session_id, []);
+        bySession.get(bet.session_id).push(bet);
+    }
+    const sessions = (sessionsRaw || []).map(s => ({ ...s, bets: bySession.get(s.id) || [] }));
+
+    const download = req.query.download === '1';
+    const downloadUrl = dailyReportUrl(date, storedToken, true);
+    const html = generateDailyBetsHtml(date, sessions, downloadUrl, !download);
+
+    if (download) {
+        res.setHeader('Content-Disposition', `attachment; filename="Jugadas_del_dia_${date}.html"`);
     }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
