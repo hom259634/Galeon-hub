@@ -354,6 +354,36 @@ async function buildDailyReportUrl(date) {
     return `${WEBAPP_URL}/reporte-dia/${date}?${param}=${token}`;
 }
 
+// Indica si hubo al menos una apuesta en cualquier sesión de la fecha dada
+async function dayHasBets(date) {
+    try {
+        const { data: sessionsRaw, error: sessionsError } = await supabase
+            .from('lottery_sessions')
+            .select('id')
+            .eq('date', date);
+        if (sessionsError) {
+            console.error('Error cargando sesiones del día (reporte diario):', sessionsError?.message || sessionsError);
+            return true;
+        }
+        const sessionIds = (sessionsRaw || []).map(s => s.id);
+        if (sessionIds.length === 0) return false;
+
+        const { data: betsRaw, error: betsError } = await supabase
+            .from('bets')
+            .select('id')
+            .in('session_id', sessionIds)
+            .limit(1);
+        if (betsError) {
+            console.error('Error cargando apuestas del día (reporte diario):', betsError?.message || betsError);
+            return true;
+        }
+        return (betsRaw || []).length > 0;
+    } catch (e) {
+        console.error('Excepción verificando apuestas del día (reporte diario):', e?.message || e);
+        return true;
+    }
+}
+
 // Envía el reporte del día que acaba de terminar a superadmins y session_exporters
 async function notifyDailyBetsReport() {
     try {
@@ -368,13 +398,17 @@ async function notifyDailyBetsReport() {
     const recipients = [...new Set([...ADMIN_IDS, ...botRolesCache.sessionExporters])];
     const url = await buildDailyReportUrl(reportDate);
 
+    const hasBets = await dayHasBets(reportDate);
+
     const text =
         `📊 <b>Jugadas del día</b>\n\n` +
         `📅 ${readableDate}\n\n` +
-        `Pulsa el botón para ver el resumen del día.`;
+        (hasBets
+            ? `Pulsa el botón para ver el resumen del día.`
+            : `📭 No hubo apuestas en este día`);
 
     const replyMarkup = Markup.inlineKeyboard([
-        [Markup.button.url('👁️ Ver jugadas del día', url)]
+        [Markup.button.url('👁️ Ver resumen del día', url)]
     ]).reply_markup;
 
     for (const adminId of recipients) {
