@@ -2155,7 +2155,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             
             let html = '';
             visibleBets.forEach(b => {
-                const date = new Date(b.placed_at).toLocaleString();
+                const placedTs = toCubaTs(b.placed_at);
+                const date = placedTs ? fmtCuba(placedTs, true) : '';
                 html += `<div class="bg-gray-800/50 p-4 rounded-xl bet-item mb-3" onclick="showBetDetail(${b.id})">
                     <div class="flex justify-between items-center">
                         <div>
@@ -2234,7 +2235,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             betDetailModalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-2">Detalles de la jugada</h4>
                 <p class="text-sm text-gray-300 mb-1">🎰 ${escapeHTML(bet.lottery)} - ${escapeHTML(formatBetTypeLabel(bet.bet_type))}</p>
-                <p class="text-xs text-gray-400 mb-3">${new Date(bet.placed_at).toLocaleString()}${bet.updated_at && new Date(bet.updated_at) - new Date(bet.placed_at) > 60000 ? `<span class="block mt-0.5 text-cyan-400/90">✏️ Editada: ${new Date(bet.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Havana' })}</span>` : ''}</p>
+                <p class="text-xs text-gray-400 mb-3">${fmtCuba(toCubaTs(bet.placed_at), true)}${fueEditada(bet) ? `<span class="block mt-0.5 text-cyan-400/90">✏️ Editada: ${fmtCuba(toCubaTs(bet.updated_at), false)}</span>` : ''}</p>
                 
                 <div class="mb-3">
                     <p class="font-semibold mb-1">${bet.bet_type === 'centena' ? '💯 Centenas jugadas:' : bet.bet_type === 'parle' ? '🔗 Parlets jugados:' : bet.bet_type === 'fijo' ? '🎯 Números jugados:' : bet.bet_type === 'corridos' ? '🏃 Números jugados:' : '📝 Números jugados:'}</p>
@@ -5193,6 +5194,33 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (m === '"') return '&quot;';
                 return m;
             });
+        }
+
+        // Las columnas placed_at/updated_at se guardan como UTC. Postgres devuelve el
+        // texto SIN zona horaria, y un string sin 'Z' u offset lo interpreta JS como
+        // hora LOCAL del dispositivo, corrompiendo el instante y la hora mostrada.
+        // Aquí se fuerza 'Z' (UTC) cuando falta el sufijo para reconstruir el instante real.
+        function toCubaTs(value) {
+            if (value == null || value === '') return null;
+            const s = String(value);
+            if (/Z|[+-]\d{2}:?\d{2}$/i.test(s)) return new Date(s);
+            return new Date(s + 'Z');
+        }
+
+        function fmtCuba(date, withDate) {
+            if (!date || isNaN(date.getTime())) return '';
+            const opts = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Havana' };
+            if (withDate) {
+                return date.toLocaleString([], Object.assign({ day: '2-digit', month: '2-digit', year: 'numeric' }, opts));
+            }
+            return date.toLocaleTimeString([], opts);
+        }
+
+        function fueEditada(bet) {
+            const placed = toCubaTs(bet && bet.placed_at);
+            const updated = toCubaTs(bet && bet.updated_at);
+            if (!placed || !updated) return false;
+            return updated.getTime() - placed.getTime() > 60000;
         }
 
         function formatBetTypeLabel(betType) {
