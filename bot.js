@@ -396,7 +396,6 @@ async function notifyDailyBetsReport() {
     const readableDate = moment.tz(TIMEZONE).subtract(1, 'day').format('DD/MM/YYYY');
 
     const recipients = [...new Set([...ADMIN_IDS, ...botRolesCache.sessionExporters])];
-    const url = await buildDailyReportUrl(reportDate);
 
     const hasBets = await dayHasBets(reportDate);
 
@@ -405,11 +404,13 @@ async function notifyDailyBetsReport() {
         `📅 ${readableDate}\n\n` +
         (hasBets
             ? `Pulsa el botón para ver el resumen del día.`
-            : `📭 No hubo apuestas en este día`);
+            : `📭 No hubo apuestas en este día.`);
 
-    const replyMarkup = Markup.inlineKeyboard([
-        [Markup.button.url('👁️ Ver resumen del día', url)]
-    ]).reply_markup;
+    const replyMarkup = hasBets
+        ? Markup.inlineKeyboard([
+            [Markup.button.url('👁️ Ver resumen del día', await buildDailyReportUrl(reportDate))]
+        ]).reply_markup
+        : undefined;
 
     for (const adminId of recipients) {
         try {
@@ -644,7 +645,7 @@ async function getExchangeRateMLC() {
 const withdrawalTemplates = {
     CUP: {
         messages: [
-            "Retiro CUP\nMínimo: {min} CUP\n\n\n{cardPrompt}",
+            "Retiro CUP\nMínimo: {min} CUP\n\n\n\n{cardPrompt}",
             "Retiro CUP\n\n\n{confirmPrompt}",
             "Retiro CUP\nMínimo: {min} CUP\n🇨🇺 CUP real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en CUP (ej: 1000 para 1000 CUP)."
         ]
@@ -658,7 +659,7 @@ const withdrawalTemplates = {
     },
     USD: {
         messages: [
-            "Retiro USD\nMínimo: {min} USD\n\n\n{cardPrompt}",
+            "Retiro USD\nMínimo: {min} USD\n\n\n\n{cardPrompt}",
             "Retiro USD\n\n\n{confirmPrompt}",
             "Retiro USD\nMínimo: {min} USD\n💵 USD real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en USD (ej: 10 para 10 USD)."
         ]
@@ -672,7 +673,7 @@ const withdrawalTemplates = {
     },
     MLC: {
         messages: [
-            "Retiro MLC\nMínimo: {min} MLC\n\n\n{cardPrompt}",
+            "Retiro MLC\nMínimo: {min} MLC\n\n\n\n{cardPrompt}",
             "Retiro MLC\n\n\n{confirmPrompt}",
             "Retiro MLC\nMínimo: {min} MLC\n🏦 MLC real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en MLC (ej: 10 para 10 MLC)."
         ]
@@ -727,9 +728,7 @@ function getWithdrawalTemplate(currency, balance, min, currencyLabel, method) {
     const cardText = (method && !emptyInstruction(method.card)) ? String(method.card).trim() : '';
     const confirmText = (method && !emptyInstruction(method.confirm)) ? String(method.confirm).trim() : '';
 
-    const cardPrompt = cardText
-        ? `${cardText}\n\n📝 Por favor, escribe el dato solicitado`
-        : '📝 Por favor, ingresa los datos de tu cuenta';
+    const cardPrompt = cardText;
     const confirmPrompt = confirmText
         ? `📝 Indica: ${confirmText}`
         : '📝 Indica el dato de confirmación';
@@ -6350,8 +6349,7 @@ bot.on(message('text'), async (ctx) => {
                     const cardInstruccion = (method && !emptyInstruction(method.card)) ? String(method.card).trim() : null;
                     await ctx.reply(
                         `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
-                        (cardInstruccion ? `${cardInstruccion}\n\n` : '') +
-                        `Por favor, escribe los <b>datos de tu cuenta</b> para recibir el retiro.`,
+                        (cardInstruccion ? `${cardInstruccion}\n\n` : ''),
                         { parse_mode: 'HTML' }
                     );
                 }
