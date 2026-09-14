@@ -2099,16 +2099,28 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     </div>
                 `;
             } else {
-                // Fiat: dos campos personalizados (tarjeta y confirmación)
+                // Fiat: la "Instrucción/número" del método se usa como etiqueta del campo;
+                // la "Número a confirmar/red" solo se dibuja si está definida (no vacía/'ninguno').
+                const cardText = (method.card && String(method.card).trim() && !/^ninguno$/i.test(String(method.card).trim()))
+                    ? String(method.card).trim()
+                    : '';
+                const confirmText = (method.confirm && String(method.confirm).trim() && !/^ninguno$/i.test(String(method.confirm).trim()))
+                    ? String(method.confirm).trim()
+                    : '';
+                const cardLabel = cardText || 'Datos de tu cuenta';
+                const hasConfirm = !!confirmText;
+
                 html = `
                     <div>
-                        <label class="block text-sm font-medium mb-1">Número de tarjeta / cuenta</label>
-                        <input type="text" id="withdrawCard" class="digits-only w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500" placeholder="${escapeHTML(method.card) || 'Ej: 1234567890123456'}" inputmode="numeric" maxlength="20">
+                        <label class="block text-sm font-medium mb-1">${escapeHTML(cardLabel)}</label>
+                        <input type="text" id="withdrawCard" class="digits-only w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500" placeholder="${escapeHTML(cardLabel)}" inputmode="numeric" maxlength="20">
                     </div>
+                    ${hasConfirm ? `
                     <div>
-                        <label class="block text-sm font-medium mb-1">Número a confirmar</label>
-                        <input type="text" id="withdrawConfirm" class="digits-only w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500" placeholder="${escapeHTML(method.confirm) || 'Ej: 1234'}" inputmode="numeric" maxlength="8">
+                        <label class="block text-sm font-medium mb-1">${escapeHTML(confirmText)}</label>
+                        <input type="text" id="withdrawConfirm" class="digits-only w-full p-3 rounded-xl bg-gray-800 text-white border border-pink-500" placeholder="${escapeHTML(confirmText)}" inputmode="numeric" maxlength="8">
                     </div>
+                    ` : ''}
                 `;
             }
 
@@ -2578,12 +2590,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 accountInfo = `Wallet: ${wallet} (Red: ${network})`;
             } else {
                 const card = document.getElementById('withdrawCard')?.value.trim();
-                const confirm = document.getElementById('withdrawConfirm')?.value.trim();
-                if (!card || !confirm) {
-                    iziToast.warning({ message: 'Debes ingresar todos los datos de la cuenta' });
+                const confirmEl = document.getElementById('withdrawConfirm');
+                const confirm = confirmEl ? confirmEl.value.trim() : '';
+                if (!card) {
+                    iziToast.warning({ message: 'Debes ingresar los datos de la cuenta' });
                     return;
                 }
-                accountInfo = `Tarjeta: ${card} | 📞 Confirmación: ${confirm}`;
+                if (confirmEl && !confirm) {
+                    iziToast.warning({ message: 'Debes ingresar el dato de confirmación' });
+                    return;
+                }
+                accountInfo = `Cuenta: ${card}` + (confirm ? ` | 📞 Confirmación: ${confirm}` : '');
             }
 
             // Limpiar campos y bloquear botón
