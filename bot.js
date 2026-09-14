@@ -637,11 +637,15 @@ async function getExchangeRateMLC() {
 }
 
 // ========== RETIRO: PLANTILLAS POR MONEDA ==========
+// Las plantillas fiat interpulan {cardPrompt} y {confirmPrompt} con la
+// "Instrucción/número" y "Número a confirmar/red" que el administrador define
+// en el método. Si esas instrucciones están en blanco, se omite su panel/texto
+// y se usa un prompt genérico (ver emptyInstruction y getWithdrawalTemplate).
 const withdrawalTemplates = {
     CUP: {
         messages: [
-            "Retiro CUP\nMínimo: {min} CUP\n\n\nPor favor, ingresa tu tarjeta CUP",
-            "Retiro CUP\n\n\nIndica tu móvil a confirmar",
+            "Retiro CUP\nMínimo: {min} CUP\n\n\n{cardPrompt}",
+            "Retiro CUP\n\n\n{confirmPrompt}",
             "Retiro CUP\nMínimo: {min} CUP\n🇨🇺 CUP real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en CUP (ej: 1000 para 1000 CUP)."
         ]
     },
@@ -654,8 +658,8 @@ const withdrawalTemplates = {
     },
     USD: {
         messages: [
-            "Retiro USD\nMínimo: {min} USD\n\n\nPor favor, ingresa tu tarjeta USD",
-            "Retiro USD\n\n\nIndica tu móvil a confirmar",
+            "Retiro USD\nMínimo: {min} USD\n\n\n{cardPrompt}",
+            "Retiro USD\n\n\n{confirmPrompt}",
             "Retiro USD\nMínimo: {min} USD\n💵 USD real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en USD (ej: 10 para 10 USD)."
         ]
     },
@@ -668,13 +672,21 @@ const withdrawalTemplates = {
     },
     MLC: {
         messages: [
-            "Retiro MLC\nMínimo: {min} MLC\n\n\nPor favor, ingresa tu tarjeta MLC",
-            "Retiro MLC\n\n\nIndica tu móvil a confirmar",
+            "Retiro MLC\nMínimo: {min} MLC\n\n\n{cardPrompt}",
+            "Retiro MLC\n\n\n{confirmPrompt}",
             "Retiro MLC\nMínimo: {min} MLC\n🏦 MLC real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en MLC (ej: 10 para 10 MLC)."
         ]
     }
     // Puedes agregar más monedas siguiendo el mismo patrón
 };
+
+// Indica si una instrucción del método está en blanco (vacía o 'ninguno'),
+// caso en el que se omitirá su panel en la web y su paso/texto en el bot.
+function emptyInstruction(value) {
+    if (!value) return true;
+    const trimmed = String(value).trim();
+    return !trimmed || /^ninguno$/i.test(trimmed);
+}
 
 // Construye plantillas por defecto con el mismo formato que las plantillas definidas
 function buildFallbackWithdrawalTemplates(method, balance, min, currencyLabel) {
@@ -700,7 +712,7 @@ function buildFallbackWithdrawalTemplates(method, balance, min, currencyLabel) {
     ];
 }
 
-function getWithdrawalTemplate(currency, balance, min, currencyLabel) {
+function getWithdrawalTemplate(currency, balance, min, currencyLabel, method) {
     // Normalize the incoming currency value to a canonical token (e.g. 'usd','USD','USD-TRC20' -> 'USD')
     const key = canonicalizeCurrency(String(currency || ''));
     // Only use exact key matches from the user's templates. Avoid fallback to other templates.
@@ -708,10 +720,28 @@ function getWithdrawalTemplate(currency, balance, min, currencyLabel) {
 
     if (!tpl || !Array.isArray(tpl.messages)) return null;
     const label = currencyLabel || key;
+
+    // Instrucciones definidas por el administrador en el método. Si están en
+    // blanco ('', espacios o 'ninguno') se omite su texto y se usa un prompt
+    // genérico ({cardPrompt} / {confirmPrompt}).
+    const cardText = (method && !emptyInstruction(method.card)) ? String(method.card).trim() : '';
+    const confirmText = (method && !emptyInstruction(method.confirm)) ? String(method.confirm).trim() : '';
+
+    const cardPrompt = cardText
+        ? `${cardText}\n\n📝 Por favor, escribe el dato solicitado`
+        : '📝 Por favor, ingresa los datos de tu cuenta';
+    const confirmPrompt = confirmText
+        ? `📝 Indica: ${confirmText}`
+        : '📝 Indica el dato de confirmación';
+
     return tpl.messages.map(m => (m || '')
         .replace(/{balance}/g, typeof balance !== 'undefined' ? String(balance) : '0.00')
         .replace(/{min}/g, typeof min !== 'undefined' ? String(min) : String(tpl.minimum || '0'))
         .replace(/{currency}/g, label)
+        .replace(/{card}/g, cardText)
+        .replace(/{confirm}/g, confirmText)
+        .replace(/{cardPrompt}/g, cardPrompt)
+        .replace(/{confirmPrompt}/g, confirmPrompt)
     );
 }
 
@@ -3502,13 +3532,13 @@ bot.action(/^wit_(\d+)$/, async (ctx) => {
         instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n` +
             `- Después de confirmar el monto, te pediré por separado:\n` +
             `   • Dirección de wallet\n` +
-            `   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n` +
+            `   • Red (ej: TRC-20 para USDT, sugerida: ${!emptyInstruction(method.confirm) ? method.confirm : 'la que corresponda'})\n` +
             `- Asegúrate de usar la red correcta para evitar pérdidas.`;
     }
 
     // Intentar obtener plantilla específica para la moneda usando la clave guardada
     const currencyCode = ctx.session.withdrawTemplateKey || canonicalizeCurrency(method.currency);
-    const templates = getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency);
+    const templates = getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency, method);
     if (templates && templates.length >= 1) {
         // Enviar solo el primer mensaje de la plantilla y continuar el flujo paso a paso
         await safeEdit(ctx,
@@ -5872,7 +5902,7 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-         const cardPattern = /^[\d\s\-_]+$/;
+        const cardPattern = /^[\d\s\-_]+$/;
         if (!cardPattern.test(card)) {
             await ctx.reply('❌ Solo se permiten números, espacios, guiones (-) y guiones bajos (_). Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
             return;
@@ -5885,9 +5915,9 @@ bot.on(message('text'), async (ctx) => {
         session.withdrawAccountCard = card;
         // No persistir en la base de datos: mantener el dato en la sesión
         delete session.awaitingWithdrawAccountCard;
-        session.awaitingWithdrawAccountMobile = true;
 
-        // Intentar usar plantilla para pedir el móvil si existe
+        // Si el método no define confirmación (instrucción en blanco/'ninguno'),
+        // se omite ese paso y se pide directamente el monto.
         const method = session.withdrawMethod;
         const methodMin = method && method.min_amount !== null && method.min_amount !== undefined ? parseFloat(method.min_amount) : 0;
         let balanceForTemplate = '0.00';
@@ -5905,8 +5935,9 @@ bot.on(message('text'), async (ctx) => {
             }
         }
         const currencyCode = session.withdrawTemplateKey || (method ? canonicalizeCurrency(method.currency) : '');
-        let templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
-        if (!templates || templates.length < 2) {
+        const hasConfirm = !(method && emptyInstruction(method.confirm));
+        let templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency, method) : null;
+        if (!templates || templates.length < (hasConfirm ? 2 : 3)) {
             // No usar fallback: cancelar flujo y notificar al usuario
             delete session.awaitingWithdrawAccountCard;
             delete session.withdrawMethod;
@@ -5915,7 +5946,13 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply(`⚠️ El método seleccionado (${escapeHTML(method.name)} - ${escapeHTML(method.currency)}) no tiene plantilla válida para continuar. Por favor, contacta al administrador.`, getMainKeyboard(ctx));
             return;
         }
-        await ctx.reply(templates[1], { parse_mode: 'HTML' });
+        if (hasConfirm) {
+            session.awaitingWithdrawAccountMobile = true;
+            await ctx.reply(templates[1], { parse_mode: 'HTML' });
+        } else {
+            session.awaitingWithdrawAmount = true;
+            await ctx.reply(templates[2], { parse_mode: 'HTML' });
+        }
         return;
     }
 
@@ -5927,7 +5964,7 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
 
-         if (!/^\d{8}$/.test(mobile)) {
+        if (!/^\d{8}$/.test(mobile)) {
             await ctx.reply('❌ Indica un número de móvil válido. Por favor, inténtalo de nuevo.', getMainKeyboard(ctx));
             return;
         }
@@ -5954,10 +5991,10 @@ bot.on(message('text'), async (ctx) => {
             }
         }
         const currencyCode = session.withdrawTemplateKey || (method ? canonicalizeCurrency(method.currency) : '');
-        let templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
+        let templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency, method) : null;
         let instruccionesAdicionales = '';
         if (method && (method.currency === 'USDT' || method.currency === 'TRX')) {
-            instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
+            instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${!emptyInstruction(method.confirm) ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
         }
         if (!templates || templates.length < 3) {
             // No usar fallback: cancelar flujo y notificar al usuario
@@ -6134,7 +6171,7 @@ bot.on(message('text'), async (ctx) => {
             const existingAccountCard = session.withdrawAccountCard;
             const existingAccountMobile = session.withdrawAccountMobile;
             if (existingAccountCard || existingAccountMobile) {
-                const accountInfo = `${existingAccountCard ? `Tarjeta: ${existingAccountCard}` : ''}${existingAccountCard && existingAccountMobile ? ' · ' : ''}${existingAccountMobile ? `Móvil: ${existingAccountMobile}` : ''}`;
+                const accountInfo = `${existingAccountCard ? `Cuenta: ${existingAccountCard}` : ''}${existingAccountCard && existingAccountMobile ? ' · ' : ''}${existingAccountMobile ? `Confirmación: ${existingAccountMobile}` : ''}`;
                 try {
                     const { data: existingPending } = await supabase
                         .from('withdraw_requests')
@@ -6178,7 +6215,7 @@ bot.on(message('text'), async (ctx) => {
                                 `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
                                 `💰 Monto: ${amount} ${currency}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
-                                `${existingAccountCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingAccountCard)}` : ''}${existingAccountCard && existingAccountMobile ? '\n' : ''}${existingAccountMobile ? `📞 Móvil: ${escapeHTML(existingAccountMobile)}` : ''}\n` +
+                                `${existingAccountCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Cuenta: ${escapeHTML(existingAccountCard)}` : ''}${existingAccountCard && existingAccountMobile ? '\n' : ''}${existingAccountMobile ? `📞 Confirmación: ${escapeHTML(existingAccountMobile)}` : ''}\n` +
                                 `🆔 Solicitud: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
@@ -6196,8 +6233,8 @@ bot.on(message('text'), async (ctx) => {
                     await ctx.reply(
                         `✅ <b>Solicitud de retiro enviada</b>\n` +
                         `💰 Monto: ${amount} ${currency}\n` +
-                        `${existingAccountCard ? `${cardEmoji} Tarjeta: ${escapeHTML(existingAccountCard)}\n` : ''}` +
-                        `${existingAccountMobile ? `📞 Móvil: ${escapeHTML(existingAccountMobile)}\n` : ''}` +
+                        `${existingAccountCard ? `${cardEmoji} Cuenta: ${escapeHTML(existingAccountCard)}\n` : ''}` +
+                        `${existingAccountMobile ? `📞 Confirmación: ${escapeHTML(existingAccountMobile)}\n` : ''}` +
                         `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor, espera a que sea aprobada.`,
                         { parse_mode: 'HTML' }
                     );
@@ -6223,7 +6260,7 @@ bot.on(message('text'), async (ctx) => {
                 const existingCard = session.withdrawAccountCard;
                 const existingMobile = session.withdrawAccountMobile;
                 if (existingCard || existingMobile) {
-                    const accountInfo = `${existingCard ? `Tarjeta: ${existingCard}` : ''}${existingCard && existingMobile ? ' · ' : ''}${existingMobile ? `Móvil: ${existingMobile}` : ''}`;
+                    const accountInfo = `${existingCard ? `Cuenta: ${existingCard}` : ''}${existingCard && existingMobile ? ' · ' : ''}${existingMobile ? `Confirmación: ${existingMobile}` : ''}`;
                     try {
                         const { data: existingPending } = await supabase
                             .from('withdraw_requests')
@@ -6268,7 +6305,7 @@ bot.on(message('text'), async (ctx) => {
                                     `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
                                     `💰 Monto: ${amount} ${currency}\n` +
                                     `🏦 Método: ${escapeHTML(method.name || '')}\n` +
-                                    `${existingCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Tarjeta: ${escapeHTML(existingCard)}` : ''}${existingCard && existingMobile ? '\n' : ''}${existingMobile ? `📞 Móvil: ${escapeHTML(existingMobile)}` : ''}\n` +
+                                    `${existingCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Cuenta: ${escapeHTML(existingCard)}` : ''}${existingCard && existingMobile ? '\n' : ''}${existingMobile ? `📞 Confirmación: ${escapeHTML(existingMobile)}` : ''}\n` +
                                     `🆔 Solicitud: ${request.id}`,
                                 {
                                     parse_mode: 'HTML',
@@ -6287,8 +6324,8 @@ bot.on(message('text'), async (ctx) => {
                         await ctx.reply(
                             `✅ <b>Solicitud de retiro enviada</b>\n` +
                             `💰 Monto: ${amount} ${currency}\n` +
-                            `${existingCard ? `${cardEmoji} Tarjeta: ${escapeHTML(existingCard)}\n` : ''}` +
-                            `${existingMobile ? `📞 Móvil: ${escapeHTML(existingMobile)}\n` : ''}` +
+                            `${existingCard ? `${cardEmoji} Cuenta: ${escapeHTML(existingCard)}\n` : ''}` +
+                            `${existingMobile ? `📞 Confirmación: ${escapeHTML(existingMobile)}\n` : ''}` +
                             `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor, espera a que sea aprobada.`,
                             { parse_mode: 'HTML' }
                         );
@@ -6310,9 +6347,11 @@ bot.on(message('text'), async (ctx) => {
                 } else {
                     session.awaitingWithdrawAccount = true;
                     delete session.awaitingWithdrawAmount;
+                    const cardInstruccion = (method && !emptyInstruction(method.card)) ? String(method.card).trim() : null;
                     await ctx.reply(
                         `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
-                        `Por favor, escribe los <b>datos de tu cuenta</b> (número de teléfono, tarjeta, etc.) para recibir el retiro.`,
+                        (cardInstruccion ? `${cardInstruccion}\n\n` : '') +
+                        `Por favor, escribe los <b>datos de tu cuenta</b> para recibir el retiro.`,
                         { parse_mode: 'HTML' }
                     );
                 }
@@ -6354,7 +6393,7 @@ bot.on(message('text'), async (ctx) => {
         }
 
         const currencyCode = method ? canonicalizeCurrency(method.currency) : '';
-        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
+        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency, method) : null;
         if (!templates || templates.length < 2) {
             // No usar fallback: cancelar flujo y notificar al usuario
             delete session.awaitingWithdrawNetwork;
@@ -6403,10 +6442,10 @@ bot.on(message('text'), async (ctx) => {
         }
 
         const currencyCode = method ? canonicalizeCurrency(method.currency) : '';
-        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency) : null;
+        const templates = method ? getWithdrawalTemplate(currencyCode, balanceForTemplate, methodMin, method.currency, method) : null;
         let instruccionesAdicionales = '';
         if (method && (method.currency === 'USDT' || method.currency === 'TRX')) {
-            instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${method.confirm !== 'ninguno' ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
+            instruccionesAdicionales = `\n\n🔐 <b>Para retiros en ${method.currency}:</b>\n- Después de confirmar el monto, te pediré por separado:\n   • Dirección de wallet\n   • Red (ej: TRC-20 para USDT, sugerida: ${!emptyInstruction(method.confirm) ? method.confirm : 'la que corresponda'})\n- Asegúrate de usar la red correcta para evitar pérdidas.`;
         }
 
         if (templates && templates.length >= 3) {
