@@ -646,35 +646,35 @@ const withdrawalTemplates = {
     CUP: {
         messages: [
             "Retiro CUP\nMínimo: {min} CUP\n\n\n\n{cardPrompt}",
-            "Retiro CUP\n\n\n{confirmPrompt}",
+            "Retiro CUP\n\n\n\n{confirmPrompt}",
             "Retiro CUP\nMínimo: {min} CUP\n🇨🇺 CUP real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en CUP (ej: 1000 para 1000 CUP)."
         ]
     },
     USDT: {
         messages: [
-            "Retirar USDT\nMínimo: {min} {currency}\n\n\nPor favor, ingresa tu wallet USDT",
-            "Retirar USDT\n\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc. Asegúrate de usar la red correcta para evitar pérdidas)",
+            "Retirar USDT\nMínimo: {min} {currency}\n\n\n\nPor favor, ingresa tu wallet USDT",
+            "Retirar USDT\n\n\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc. Asegúrate de usar la red correcta para evitar pérdidas)",
             "Retirar USDT\nMínimo: {min} {currency}\n🪙 USDT real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
         ]
     },
     USD: {
         messages: [
             "Retiro USD\nMínimo: {min} USD\n\n\n\n{cardPrompt}",
-            "Retiro USD\n\n\n{confirmPrompt}",
+            "Retiro USD\n\n\n\n{confirmPrompt}",
             "Retiro USD\nMínimo: {min} USD\n💵 USD real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en USD (ej: 10 para 10 USD)."
         ]
     },
     TRX: {
         messages: [
-            "Retirar TRX\nMínimo: {min} {currency}\n\n\nPor favor, ingresa tu wallet TRX",
-            "Retirar TRX\n\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20. Asegúrate de usar la red correcta para evitar pérdidas)",
+            "Retirar TRX\nMínimo: {min} {currency}\n\n\n\nPor favor, ingresa tu wallet TRX",
+            "Retirar TRX\n\n\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20. Asegúrate de usar la red correcta para evitar pérdidas)",
             "Retirar TRX\nMínimo: {min} {currency}\n🪙 TRX real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en {currency} (ej: 100 para 100 {currency})."
         ]
     },
     MLC: {
         messages: [
             "Retiro MLC\nMínimo: {min} MLC\n\n\n\n{cardPrompt}",
-            "Retiro MLC\n\n\n{confirmPrompt}",
+            "Retiro MLC\n\n\n\n{confirmPrompt}",
             "Retiro MLC\nMínimo: {min} MLC\n🏦 MLC real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en MLC (ej: 10 para 10 MLC)."
         ]
     }
