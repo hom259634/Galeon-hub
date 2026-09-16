@@ -647,35 +647,35 @@ const withdrawalTemplates = {
         messages: [
             "Retiro CUP\nMínimo: {min} CUP\n\n\n\n{cardPrompt}",
             "Retiro CUP\n\n\n\n{confirmPrompt}",
-            "Retiro CUP\nMínimo: {min} CUP\n🇨🇺 CUP real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en CUP (ej: 1000 para 1000 CUP)."
+            "Retiro CUP\nMínimo: {min} CUP\n🇨🇺 CUP real disponible: {balance}\n\n\n\nEscribe el monto que deseas retirar en CUP (ej: 1000 para 1000 CUP)."
         ]
     },
     USDT: {
         messages: [
             "Retirar USDT\nMínimo: {min} {currency}\n\n\n\nPor favor, ingresa tu wallet USDT",
             "Retirar USDT\n\n\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20, BEP-20, etc. Asegúrate de usar la red correcta para evitar pérdidas)",
-            "Retirar USDT\nMínimo: {min} {currency}\n🪙 USDT real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
+            "Retirar USDT\nMínimo: {min} {currency}\n🪙 USDT real disponible: {balance}\n\n\n\nEscribe el monto que deseas retirar en {currency} (ej: 10 para 10 {currency})."
         ]
     },
     USD: {
         messages: [
             "Retiro USD\nMínimo: {min} USD\n\n\n\n{cardPrompt}",
             "Retiro USD\n\n\n\n{confirmPrompt}",
-            "Retiro USD\nMínimo: {min} USD\n💵 USD real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en USD (ej: 10 para 10 USD)."
+            "Retiro USD\nMínimo: {min} USD\n💵 USD real disponible: {balance}\n\n\n\nEscribe el monto que deseas retirar en USD (ej: 10 para 10 USD)."
         ]
     },
     TRX: {
         messages: [
             "Retirar TRX\nMínimo: {min} {currency}\n\n\n\nPor favor, ingresa tu wallet TRX",
             "Retirar TRX\n\n\n\nIndica tu red\nAhora, por favor, escribe la red que usarás (ej: TRC-20. Asegúrate de usar la red correcta para evitar pérdidas)",
-            "Retirar TRX\nMínimo: {min} {currency}\n🪙 TRX real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en {currency} (ej: 100 para 100 {currency})."
+            "Retirar TRX\nMínimo: {min} {currency}\n🪙 TRX real disponible: {balance}\n\n\n\nEscribe el monto que deseas retirar en {currency} (ej: 100 para 100 {currency})."
         ]
     },
     MLC: {
         messages: [
             "Retiro MLC\nMínimo: {min} MLC\n\n\n\n{cardPrompt}",
             "Retiro MLC\n\n\n\n{confirmPrompt}",
-            "Retiro MLC\nMínimo: {min} MLC\n🏦 MLC real disponible: {balance}\n\n\nEscribe el monto que deseas retirar en MLC (ej: 10 para 10 MLC)."
+            "Retiro MLC\nMínimo: {min} MLC\n🏦 MLC real disponible: {balance}\n\n\n\nEscribe el monto que deseas retirar en MLC (ej: 10 para 10 MLC)."
         ]
     }
     // Puedes agregar más monedas siguiendo el mismo patrón
@@ -723,15 +723,13 @@ function getWithdrawalTemplate(currency, balance, min, currencyLabel, method) {
     const label = currencyLabel || key;
 
     // Instrucciones definidas por el administrador en el método. Si están en
-    // blanco ('', espacios o 'ninguno') se omite su texto y se usa un prompt
-    // genérico ({cardPrompt} / {confirmPrompt}).
+    // blanco ('', espacios o 'ninguno') se omite su texto y el paso se salta.
+    // Se muestra únicamente lo escrito en el método, sin prefijos automáticos.
     const cardText = (method && !emptyInstruction(method.card)) ? String(method.card).trim() : '';
     const confirmText = (method && !emptyInstruction(method.confirm)) ? String(method.confirm).trim() : '';
 
     const cardPrompt = cardText;
-    const confirmPrompt = confirmText
-        ? `📝 Indica: ${confirmText}`
-        : '📝 Indica el dato de confirmación';
+    const confirmPrompt = confirmText;
 
     return tpl.messages.map(m => (m || '')
         .replace(/{balance}/g, typeof balance !== 'undefined' ? String(balance) : '0.00')
