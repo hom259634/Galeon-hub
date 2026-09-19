@@ -2980,7 +2980,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 if (String(w.telegram_id || w.user_id) === String(currentUser.telegram_id)) {
                                     userFound = true;
                                     const bonusMovedMsg = (w.bonus_moved && w.bonus_moved > 0) ? `<br>🎁 Tu bono de bienvenida de <b>${w.bonus_moved.toFixed(2)} CUP</b> se ha movido a tu saldo principal.` : '';
-                                    const msg = `🎉 <b>¡FELICIDADES! Has ganado</b><br>\n\n🔢 Número ganador: <b>${winningNumber}</b><br>💰 Premio: <b>${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</b><br>✅ El premio ya fue acreditado a tu saldo.${bonusMovedMsg}`;
+                                    const msg = `🎉 <b>¡FELICIDADES! Has ganado 🏆</b><br>\n\n🔢 Número ganador: <b>${winningNumber}</b><br>💰 Premio: <b>${w.prize_cup.toFixed(2)} CUP / ${w.prize_usd.toFixed(2)} USD</b><br>✅ El premio ya fue acreditado a tu saldo.${bonusMovedMsg}`;
                                     iziToast.success({
                                         title: '¡Ganador!',
                                         message: msg,
@@ -5317,7 +5317,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-orange-600 px-3 py-1 rounded-full text-sm" data-filter="onlyId">Solo con ID</button>
                         <button class="filter-btn bg-red-700 px-3 py-1 rounded-full text-sm" data-filter="banned">Baneados</button>
                         <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="deleted">Eliminados</button>
-                        <button class="filter-btn bg-red-900 px-3 py-1 rounded-full text-sm" data-filter="blocked">Que bloquearon el bot</button>
+                        <button class="filter-btn bg-red-900 px-3 py-1 rounded-full text-sm" data-filter="blocked">Que bloquearon al bot</button>
                     </div>
                     <div class="flex justify-between items-center mb-2 text-gray-400 text-sm px-1">
                         <span><span id="userTotalLabel">Total de usuarios registrados</span>: <span id="userTotalCount" class="text-white font-semibold">${users ? users.length : 0}</span></span>
@@ -5431,7 +5431,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     withBets: 'con jugadas',
                     onlyId: 'solo con ID',
                     banned: 'baneados',
-                    blocked: 'que bloquearon el bot',
+                    blocked: 'que bloquearon al bot',
                     deleted: 'eliminados'
                 };
 
