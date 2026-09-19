@@ -4602,7 +4602,7 @@ async function processWinningNumber(sessionId, winningStr, ctx, photoUrl = null)
             if (deptResult.won) {
                 const bonusMovedCup = (globalThis.__bonusMovedByUser && globalThis.__bonusMovedByUser.get(String(userId))) || 0;
 
-                let text = `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
+                let text = `🎉 <b>¡FELICIDADES! Has ganado 🏆</b>\n\n` +
                     `🔢 Número ganador: <code>${formattedWinning}</code>\n` +
                     `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${escapeHTML(session.lottery)} - ${escapeHTML(session.time_slot)}\n` +
                     `🏷️ Tipo: ${typeLabel}\n` +

@@ -4368,7 +4368,7 @@ app.post('/api/admin/winning-numbers', requireAdmin, async (req, res) => {
                     const bonusMoved = (globalThis.__bonusMovedByUser && globalThis.__bonusMovedByUser.get(String(userId))) || 0;
                     const bonusMovedMsg = bonusMoved > 0 ? `\n🎁 Tu bono de bienvenida de ${bonusMoved.toFixed(2)} CUP se ha movido a tu saldo principal.` : '';
                     await bot.telegram.sendMessage(userId,
-                        `🎉 <b>¡FELICIDADES! Has ganado</b>\n\n` +
+                        `🎉 <b>¡FELICIDADES! Has ganado 🏆</b>\n\n` +
                         `🔢 Número ganador: <code>${formatted}</code>\n` +
                         `🎰 ${regionMap[session.lottery]?.emoji || '🎰'} ${session.lottery} - ${session.time_slot}\n` +
                         `🏷️ Tipo: ${typeLabel}\n` +
