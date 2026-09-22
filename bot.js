@@ -2863,8 +2863,14 @@ bot.command('start', async (ctx) => {
     // Tocar /start completa el re-registro tras una eliminación por admin: marcar
     // restored_at en deleted_users para desbloquear también la webapp (la API
     // bloquea mientras exista una eliminación vigente, es decir restored_at nulo).
+    // El update filtra por restored_at nulo para que SOLO el primer /start tras la
+    // eliminación registre el reingreso; toques posteriores de /start no lo reescriben.
     try {
-        await supabase.from('deleted_users').update({ restored_at: new Date() }).eq('telegram_id', uid);
+        await supabase
+            .from('deleted_users')
+            .update({ restored_at: new Date() })
+            .eq('telegram_id', uid)
+            .is('restored_at', null);
     } catch (e) {
         console.error('Error marcando restored_at en deleted_users durante /start:', e);
     }
@@ -4994,6 +5000,17 @@ function buildSupportKeyboard(targetUid, { muted, showReply, userMsgId } = {}) {
     return Markup.inlineKeyboard(rows).reply_markup;
 }
 
+// Edita SOLO el teclado inline de una notificación de soporte. Telegraf exige el
+// markup directo como 4º argumento de editMessageReplyMarkup; pasarlo envuelto en
+// { reply_markup: ... } produce un 400 de Telegram y la edición se pierde en silencio.
+async function editSupportKeyboard(chatId, msgId, keyboard) {
+    try {
+        await bot.telegram.editMessageReplyMarkup(chatId, msgId, undefined, keyboard);
+    } catch (e) {
+        console.warn(`Error editando teclado de soporte (chat ${chatId}, msg ${msgId}):`, e?.message || e);
+    }
+}
+
 async function getSupportMuted(uid) {
     try {
         const { data } = await supabase
@@ -5019,13 +5036,7 @@ async function cascadeSupportMuteUi(targetUid, muted, skip) {
         for (const [userMsgId, adminNotifyMap] of activeMap) {
             for (const [adminId, notifMsgId] of adminNotifyMap) {
                 if (skip && adminId === skip.adminId && notifMsgId === skip.notifMsgId) continue;
-                try {
-                    await bot.telegram.editMessageReplyMarkup(adminId, notifMsgId, undefined, {
-                        reply_markup: buildSupportKeyboard(targetUid, { muted, showReply: true, userMsgId })
-                    });
-                } catch (e) {
-                    console.warn(`Error actualizando botones de soporte (admin ${adminId}):`, e?.message || e);
-                }
+                await editSupportKeyboard(adminId, notifMsgId, buildSupportKeyboard(targetUid, { muted, showReply: true, userMsgId }));
             }
         }
     }
@@ -5034,13 +5045,7 @@ async function cascadeSupportMuteUi(targetUid, muted, skip) {
         for (const adminNotifyMap of answeredMap.values()) {
             for (const [adminId, notifMsgId] of adminNotifyMap) {
                 if (skip && adminId === skip.adminId && notifMsgId === skip.notifMsgId) continue;
-                try {
-                    await bot.telegram.editMessageReplyMarkup(adminId, notifMsgId, undefined, {
-                        reply_markup: buildSupportKeyboard(targetUid, { muted, showReply: false })
-                    });
-                } catch (e) {
-                    console.warn(`Error actualizando botones de soporte respondido (admin ${adminId}):`, e?.message || e);
-                }
+                await editSupportKeyboard(adminId, notifMsgId, buildSupportKeyboard(targetUid, { muted, showReply: false }));
             }
         }
     }
@@ -5100,13 +5105,7 @@ bot.action(/support_mute_(\d+)/, async (ctx) => {
         }
     }
     const clickedUnanswered = clickedUserMsgId != null;
-    try {
-        await bot.telegram.editMessageReplyMarkup(ctx.chat?.id, clickedNotifMsgId, undefined, {
-            reply_markup: buildSupportKeyboard(targetUid, { muted: newMuted, showReply: clickedUnanswered, userMsgId: clickedUserMsgId })
-        });
-    } catch (e) {
-        console.warn('Error editando mensaje de soporte:', e.message);
-    }
+    await editSupportKeyboard(ctx.chat?.id, clickedNotifMsgId, buildSupportKeyboard(targetUid, { muted: newMuted, showReply: clickedUnanswered, userMsgId: clickedUserMsgId }));
     // Refrescar el estado del botón en TIEMPO REAL para los demás admins
     await cascadeSupportMuteUi(targetUid, newMuted, { adminId: clickedAdminId, notifMsgId: clickedNotifMsgId });
     await ctx.answerCbQuery(newMuted ? '🔇 Silenciado' : '🔊 Desilenciado');
@@ -5147,32 +5146,13 @@ bot.on('my_chat_member', async (ctx) => {
             await recordBotBlock(tgId);
         } else if (status === 'member') {
             // Desbloqueo (old_chat_member kicked → member): usuario que había
-            // bloqueado el bot vuelve a entrar. Si además tiene una eliminación
-            // vigente por admin (deleted_users sin restored_at), se desmarca
-            // automáticamente: al tocar /start recibirá bienvenida + bono y no se
-            // le mostrará la redirección de "selecciona el botón Inicio".
+            // bloqueado el bot vuelve a entrar. El reingreso tras una eliminación
+            // por admin (deleted_users.restored_at) se registra SOLO cuando toca
+            // /start, no aquí: hasta ese momento la webapp sigue bloqueada.
             await supabase
                 .from('users')
                 .update({ blocked_at: null })
                 .eq('telegram_id', tgId);
-            const wasKicked = ctx.myChatMember?.old_chat_member?.status === 'kicked';
-            if (wasKicked) {
-                try {
-                    const { data: deletedRec } = await supabase
-                        .from('deleted_users')
-                        .select('telegram_id, restored_at')
-                        .eq('telegram_id', tgId)
-                        .maybeSingle();
-                    if (deletedRec && !deletedRec.restored_at) {
-                        await supabase
-                            .from('deleted_users')
-                            .update({ restored_at: new Date() })
-                            .eq('telegram_id', tgId);
-                    }
-                } catch (deletedErr) {
-                    console.warn(`[MyChatMember] Error desmarcando eliminación de ${tgId}:`, deletedErr?.message);
-                }
-            }
         }
     } catch (e) {
         console.warn(`[MyChatMember] Error procesando evento de ${ctx.myChatMember?.chat?.id}:`, e?.message);
@@ -5251,11 +5231,14 @@ bot.on(message('text'), async (ctx) => {
         // Eliminar el botón Responder del mensaje reenviado (conservando el
         // botón silenciar/desilenciar con la etiqueta del estado actual), y
         // registrar el mensaje como respondido para poder refrescar su botón
-        // de silenciar en tiempo real si otro admin hace mute/desilence.
+        // de silenciar en tiempo real si otro admin hace mute/desilence. Solo
+        // se toca la notificación del mensaje realmente respondido; si la
+        // referencia no está vigente (ej. el bot reinició y los Map perdieron
+        // el estado), no se edita nada para no alterar otras notificaciones.
         const muted = await getSupportMuted(targetUserId);
         const targetUserMsgId = session.supportReplyMessageId;
         const userNotifyMap = supportNotifyMessageIds.get(targetUserId);
-        if (targetUserMsgId && userNotifyMap) {
+        if (targetUserMsgId != null && userNotifyMap) {
             const adminNotifyMap = userNotifyMap.get(targetUserMsgId);
             if (adminNotifyMap) {
                 if (!supportAnsweredMessageIds.has(targetUserId)) supportAnsweredMessageIds.set(targetUserId, new Map());
@@ -5264,36 +5247,11 @@ bot.on(message('text'), async (ctx) => {
                 const answeredAdminMap = answeredUserMap.get(targetUserMsgId);
                 for (const [adminId, msgId] of adminNotifyMap) {
                     answeredAdminMap.set(adminId, msgId);
-                    try {
-                        await bot.telegram.editMessageReplyMarkup(adminId, msgId, undefined, {
-                            reply_markup: buildSupportKeyboard(targetUserId, { muted, showReply: false })
-                        });
-                    } catch (e) {
-                        console.warn(`Error editando mensaje de soporte para admin ${adminId}:`, e.message);
-                    }
+                    await editSupportKeyboard(adminId, msgId, buildSupportKeyboard(targetUserId, { muted, showReply: false }));
                 }
                 userNotifyMap.delete(targetUserMsgId);
                 if (userNotifyMap.size === 0) supportNotifyMessageIds.delete(targetUserId);
             }
-        } else if (userNotifyMap) {
-            // Fallback: si no hay messageId (ej. mute/desilence), quitar el botón Responder de todas las notificaciones
-            if (!supportAnsweredMessageIds.has(targetUserId)) supportAnsweredMessageIds.set(targetUserId, new Map());
-            const answeredUserMap = supportAnsweredMessageIds.get(targetUserId);
-            for (const [userMsgId, adminNotifyMap] of userNotifyMap.entries()) {
-                if (!answeredUserMap.has(userMsgId)) answeredUserMap.set(userMsgId, new Map());
-                const answeredAdminMap = answeredUserMap.get(userMsgId);
-                for (const [adminId, msgId] of adminNotifyMap) {
-                    answeredAdminMap.set(adminId, msgId);
-                    try {
-                        await bot.telegram.editMessageReplyMarkup(adminId, msgId, undefined, {
-                            reply_markup: buildSupportKeyboard(targetUserId, { muted, showReply: false })
-                        });
-                    } catch (e) {
-                        console.warn(`Error editando mensaje de soporte para admin ${adminId}:`, e.message);
-                    }
-                }
-            }
-            supportNotifyMessageIds.delete(targetUserId);
         }
         // Si quien responde es un subadmin (no está en ADMIN_IDS), reenviar al superadmin
         if (!isAdmin(uid)) {
