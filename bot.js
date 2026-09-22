@@ -37,6 +37,7 @@ const OCR_API_KEY = process.env.OCR_API_KEY || '';
 const broadcastMap = new Map();
 const supportReplyMessageIds = new Map();
 const supportNotifyMessageIds = new Map(); // userId -> Map<userMessageId, Map<adminId, notificationMessageId>>
+const supportAnsweredMessageIds = new Map(); // userId -> Map<userMessageId, Map<adminId, notificationMessageId>> (mensajes ya respondidos, solo botón de silenciar)
 const supportUserMessages = new Map(); // userId -> Map<userMessageId, { text, firstName }>
 
 // ========== HORARIO DE RETIROS (hora Cuba) ==========
@@ -4837,12 +4838,12 @@ async function autoPublishWinningResults() {
 
         const channel = configMap.auto_publish_channel || 'resultados_de_la_bolita';
 
-        let windowCfg = { min: 10, max: 30 };
+        let windowCfg = { min: 10, max: 50 };
         try {
             if (configMap.auto_publish_window) windowCfg = { ...windowCfg, ...JSON.parse(configMap.auto_publish_window) };
         } catch (e) { console.warn('[AutoPublish] auto_publish_window inválido, usando defaults:', e.message); }
         windowCfg.min = parseInt(windowCfg.min) || 10;
-        windowCfg.max = parseInt(windowCfg.max) || 30;
+        windowCfg.max = parseInt(windowCfg.max) || 50;
 
         const today = moment.tz(TIMEZONE).format('YYYY-MM-DD');
 
@@ -4973,6 +4974,78 @@ async function autoPublishWinningResults() {
 // ========== END PUBLICACIÓN AUTOMÁTICA ==========
 
 // ========== SISTEMA DE SOPORTE ==========
+// Etiqueta del botón de silenciar/desilenciar según el estado actual del usuario.
+function supportMuteLabel(muted) {
+    return muted ? '🔊 Desilenciar' : '🔇 Silenciar';
+}
+
+// Teclado de las notificaciones de soporte: el botón de Responder (solo si el
+// mensaje aún no fue respondido, conservando su message_id) y/o el botón de
+// silenciar/desilenciar con la etiqueta del estado actual.
+function buildSupportKeyboard(targetUid, { muted, showReply, userMsgId } = {}) {
+    const muteBtn = Markup.button.callback(supportMuteLabel(muted), `support_mute_${targetUid}`);
+    const rows = [];
+    if (showReply) {
+        const replyCb = userMsgId != null ? `support_reply_${targetUid}_${userMsgId}` : `support_reply_${targetUid}`;
+        rows.push([Markup.button.callback('📩 Responder', replyCb), muteBtn]);
+    } else {
+        rows.push([muteBtn]);
+    }
+    return Markup.inlineKeyboard(rows).reply_markup;
+}
+
+async function getSupportMuted(uid) {
+    try {
+        const { data } = await supabase
+            .from('users')
+            .select('support_muted')
+            .eq('telegram_id', uid)
+            .maybeSingle();
+        return !!data?.support_muted;
+    } catch (e) {
+        console.warn('Error leyendo support_muted:', e?.message || e);
+        return false;
+    }
+}
+
+// Actualiza en TIEMPO REAL los botones de TODAS las notificaciones de soporte
+// del usuario (respondidas o no) en todos los admins, reflejando el estado de
+// mute actual. Los mensajes sin responder conservan el botón Responder; los ya
+// respondidos solo muestran el botón silenciar/desilenciar. Con `skip` se evita
+// re-editar el mensaje que ya se editó.
+async function cascadeSupportMuteUi(targetUid, muted, skip) {
+    const activeMap = supportNotifyMessageIds.get(targetUid);
+    if (activeMap) {
+        for (const [userMsgId, adminNotifyMap] of activeMap) {
+            for (const [adminId, notifMsgId] of adminNotifyMap) {
+                if (skip && adminId === skip.adminId && notifMsgId === skip.notifMsgId) continue;
+                try {
+                    await bot.telegram.editMessageReplyMarkup(adminId, notifMsgId, undefined, {
+                        reply_markup: buildSupportKeyboard(targetUid, { muted, showReply: true, userMsgId })
+                    });
+                } catch (e) {
+                    console.warn(`Error actualizando botones de soporte (admin ${adminId}):`, e?.message || e);
+                }
+            }
+        }
+    }
+    const answeredMap = supportAnsweredMessageIds.get(targetUid);
+    if (answeredMap) {
+        for (const adminNotifyMap of answeredMap.values()) {
+            for (const [adminId, notifMsgId] of adminNotifyMap) {
+                if (skip && adminId === skip.adminId && notifMsgId === skip.notifMsgId) continue;
+                try {
+                    await bot.telegram.editMessageReplyMarkup(adminId, notifMsgId, undefined, {
+                        reply_markup: buildSupportKeyboard(targetUid, { muted, showReply: false })
+                    });
+                } catch (e) {
+                    console.warn(`Error actualizando botones de soporte respondido (admin ${adminId}):`, e?.message || e);
+                }
+            }
+        }
+    }
+}
+
 // Acción para que un admin responda a un usuario
 bot.action(/support_reply_(\d+)(?:_(\d+))?/, async (ctx) => {
     if (!isAdmin(ctx.from.id) && !hasAnyRole(ctx.from.id)) {
@@ -5011,18 +5084,31 @@ bot.action(/support_mute_(\d+)/, async (ctx) => {
     } catch (e) {
         console.warn(`Error notificando mute a ${targetUid}:`, e.message);
     }
-    const muteBtnLabel = newMuted ? '🔊 Desilenciar' : '🔇 Silenciar';
+    // Determinar si el mensaje pulsado aún no fue respondido (conserva el botón
+    // Responder), buscando el message_id del callback entre las notificaciones
+    // vigentes de este usuario.
+    const clickedAdminId = ctx.from.id;
+    const clickedNotifMsgId = ctx.callbackQuery?.message?.message_id;
+    let clickedUserMsgId = null;
+    const activeMap = supportNotifyMessageIds.get(targetUid);
+    if (activeMap && clickedNotifMsgId) {
+        for (const [userMsgId, adminNotifyMap] of activeMap) {
+            if (adminNotifyMap.get(clickedAdminId) === clickedNotifMsgId) {
+                clickedUserMsgId = userMsgId;
+                break;
+            }
+        }
+    }
+    const clickedUnanswered = clickedUserMsgId != null;
     try {
-        await ctx.editMessageText(ctx.callbackQuery.message.text || '', {
-            parse_mode: 'HTML',
-            reply_markup: Markup.inlineKeyboard([
-                [Markup.button.callback('📩 Responder', `support_reply_${targetUid}`),
-                 Markup.button.callback(muteBtnLabel, `support_mute_${targetUid}`)]
-            ]).reply_markup
+        await bot.telegram.editMessageReplyMarkup(ctx.chat?.id, clickedNotifMsgId, undefined, {
+            reply_markup: buildSupportKeyboard(targetUid, { muted: newMuted, showReply: clickedUnanswered, userMsgId: clickedUserMsgId })
         });
     } catch (e) {
         console.warn('Error editando mensaje de soporte:', e.message);
     }
+    // Refrescar el estado del botón en TIEMPO REAL para los demás admins
+    await cascadeSupportMuteUi(targetUid, newMuted, { adminId: clickedAdminId, notifMsgId: clickedNotifMsgId });
     await ctx.answerCbQuery(newMuted ? '🔇 Silenciado' : '🔊 Desilenciado');
 });
 
@@ -5119,10 +5205,7 @@ bot.on(message('text'), async (ctx) => {
                     `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}) <b>[BANEADO]</b>:\n\n${escapeHTML(text)}`,
                     {
                         parse_mode: 'HTML',
-                        reply_markup: Markup.inlineKeyboard([
-                            [Markup.button.callback('📩 Responder', `support_reply_${uid}_${ctx.message.message_id}`),
-                             Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
-                        ]).reply_markup
+                        reply_markup: buildSupportKeyboard(uid, { muted: false, showReply: true, userMsgId: ctx.message.message_id })
                     }
                 );
                 if (sent?.message_id) {
@@ -5165,18 +5248,25 @@ bot.on(message('text'), async (ctx) => {
         } catch (e) {
             await ctx.reply('❌ No se pudo enviar la respuesta. El usuario podría haber bloqueado el bot.');
         }
-        // Eliminar botón Responder del mensaje reenviado correspondiente
+        // Eliminar el botón Responder del mensaje reenviado (conservando el
+        // botón silenciar/desilenciar con la etiqueta del estado actual), y
+        // registrar el mensaje como respondido para poder refrescar su botón
+        // de silenciar en tiempo real si otro admin hace mute/desilence.
+        const muted = await getSupportMuted(targetUserId);
         const targetUserMsgId = session.supportReplyMessageId;
         const userNotifyMap = supportNotifyMessageIds.get(targetUserId);
         if (targetUserMsgId && userNotifyMap) {
             const adminNotifyMap = userNotifyMap.get(targetUserMsgId);
             if (adminNotifyMap) {
+                if (!supportAnsweredMessageIds.has(targetUserId)) supportAnsweredMessageIds.set(targetUserId, new Map());
+                const answeredUserMap = supportAnsweredMessageIds.get(targetUserId);
+                if (!answeredUserMap.has(targetUserMsgId)) answeredUserMap.set(targetUserMsgId, new Map());
+                const answeredAdminMap = answeredUserMap.get(targetUserMsgId);
                 for (const [adminId, msgId] of adminNotifyMap) {
+                    answeredAdminMap.set(adminId, msgId);
                     try {
                         await bot.telegram.editMessageReplyMarkup(adminId, msgId, undefined, {
-                            reply_markup: Markup.inlineKeyboard([
-                                [Markup.button.callback('🔇 Silenciar', `support_mute_${targetUserId}`)]
-                            ]).reply_markup
+                            reply_markup: buildSupportKeyboard(targetUserId, { muted, showReply: false })
                         });
                     } catch (e) {
                         console.warn(`Error editando mensaje de soporte para admin ${adminId}:`, e.message);
@@ -5186,14 +5276,17 @@ bot.on(message('text'), async (ctx) => {
                 if (userNotifyMap.size === 0) supportNotifyMessageIds.delete(targetUserId);
             }
         } else if (userNotifyMap) {
-            // Fallback: si no hay messageId (ej. mute/desilence), eliminar de todas las notificaciones
-            for (const adminNotifyMap of userNotifyMap.values()) {
+            // Fallback: si no hay messageId (ej. mute/desilence), quitar el botón Responder de todas las notificaciones
+            if (!supportAnsweredMessageIds.has(targetUserId)) supportAnsweredMessageIds.set(targetUserId, new Map());
+            const answeredUserMap = supportAnsweredMessageIds.get(targetUserId);
+            for (const [userMsgId, adminNotifyMap] of userNotifyMap.entries()) {
+                if (!answeredUserMap.has(userMsgId)) answeredUserMap.set(userMsgId, new Map());
+                const answeredAdminMap = answeredUserMap.get(userMsgId);
                 for (const [adminId, msgId] of adminNotifyMap) {
+                    answeredAdminMap.set(adminId, msgId);
                     try {
                         await bot.telegram.editMessageReplyMarkup(adminId, msgId, undefined, {
-                            reply_markup: Markup.inlineKeyboard([
-                                [Markup.button.callback('🔇 Silenciar', `support_mute_${targetUserId}`)]
-                            ]).reply_markup
+                            reply_markup: buildSupportKeyboard(targetUserId, { muted, showReply: false })
                         });
                     } catch (e) {
                         console.warn(`Error editando mensaje de soporte para admin ${adminId}:`, e.message);
@@ -7036,10 +7129,7 @@ bot.on(message('text'), async (ctx) => {
                     `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}):\n\n${escapeHTML(text)}`,
                     {
                         parse_mode: 'HTML',
-                        reply_markup: Markup.inlineKeyboard([
-                            [Markup.button.callback('📩 Responder', `support_reply_${uid}_${ctx.message.message_id}`),
-                             Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
-                        ]).reply_markup
+                        reply_markup: buildSupportKeyboard(uid, { muted: false, showReply: true, userMsgId: ctx.message.message_id })
                     }
                 );
                 if (sent?.message_id) {
@@ -7075,10 +7165,7 @@ bot.on(message('text'), async (ctx) => {
                     `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}):\n\n${escapeHTML(text)}`,
                     {
                         parse_mode: 'HTML',
-                        reply_markup: Markup.inlineKeyboard([
-                            [Markup.button.callback('📩 Responder', `support_reply_${uid}_${ctx.message.message_id}`),
-                             Markup.button.callback('🔇 Silenciar', `support_mute_${uid}`)]
-                        ]).reply_markup
+                        reply_markup: buildSupportKeyboard(uid, { muted: false, showReply: true, userMsgId: ctx.message.message_id })
                     }
                     );
                     if (sent?.message_id) {

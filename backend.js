@@ -3891,7 +3891,10 @@ app.get('/export-session/:sessionId', async (req, res) => {
     const download = req.query.download === '1';
     // El enlace de descarga reutiliza el mismo token ya validado (no invalida la apertura)
     const downloadUrl = exportTokenToUrl(sessionId, session.export_token, true);
-    const html = generateSessionHtml(session, bets || [], downloadUrl, !download);
+    // Desde el panel del superadmin (?panel=1) se omite el botón de descarga:
+    // la descarga se dispara sola al tocar "Ver apuestas". En el bot se conserva.
+    const showDownload = !download && req.query.panel !== '1';
+    const html = generateSessionHtml(session, bets || [], downloadUrl, showDownload);
 
     if (download) {
         res.setHeader('Content-Disposition', `attachment; filename="${session.lottery.replace(/\s+/g, '_')}_${(session.time_slot || '').replace(/[^\w]/g, '')}_${session.date}.html"`);
