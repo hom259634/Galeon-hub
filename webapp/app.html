@@ -2846,6 +2846,23 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             }
         };
 
+        function getSessionHtmlDownloadedSet() {
+            try {
+                const raw = localStorage.getItem('bolitaSessionHtmlDownloaded');
+                return new Set(raw ? JSON.parse(raw) : []);
+            } catch (e) {
+                return new Set();
+            }
+        }
+
+        function markSessionHtmlDownloaded(sessionId) {
+            try {
+                const set = getSessionHtmlDownloadedSet();
+                set.add(String(sessionId));
+                localStorage.setItem('bolitaSessionHtmlDownloaded', JSON.stringify([...set]));
+            } catch (e) { /* silencioso */ }
+        }
+
         window.openSessionExport = async (lottery) => {
             try {
                 const res = await fetch(`/api/admin/session-export-url?lottery=${encodeURIComponent(lottery)}&userId=${currentUser.telegram_id}`);
@@ -2854,7 +2871,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.warning({ message: data.error || 'No hay sesiones cerradas para esta lotería' });
                     return;
                 }
-                openSessionExportModal(data.url);
+                openSessionExportModal(data.url, data.session ? data.session.id : null);
             } catch (e) {
                 iziToast.error({ message: 'Error al abrir las apuestas' });
             }
@@ -2868,17 +2885,26 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     iziToast.warning({ message: data.error || 'No se pudo abrir las apuestas de la sesión' });
                     return;
                 }
-                openSessionExportModal(data.url);
+                openSessionExportModal(data.url, data.session ? data.session.id : sessionId);
             } catch (e) {
                 iziToast.error({ message: 'Error al abrir las apuestas' });
             }
         };
 
-        window.openSessionExportModal = (url) => {
+        window.openSessionExportModal = (url, sessionId) => {
             const modal = document.getElementById('sessionExportModal');
             const frame = document.getElementById('sessionExportFrame');
-            frame.src = url;
+            const sep = url.includes('?') ? '&' : '?';
+            frame.src = url + sep + 'panel=1';
             modal.classList.remove('hidden');
+            if (sessionId != null && !getSessionHtmlDownloadedSet().has(String(sessionId))) {
+                markSessionHtmlDownloaded(sessionId);
+                const dlFrame = document.createElement('iframe');
+                dlFrame.style.display = 'none';
+                dlFrame.src = url + sep + 'download=1';
+                document.body.appendChild(dlFrame);
+                setTimeout(() => dlFrame.remove(), 60000);
+            }
         };
 
         window.closeSessionExportModal = () => {
@@ -5364,7 +5390,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const bannedBadge = isBanned ? '<span class="text-red-400 text-xs ml-2">🚫 BANEADO</span>' : '';
                         const bannedAtStr = u.banned_at ? formatDate(u.banned_at) : '';
                         const blockedAtStr = u.blocked_at ? formatDate(u.blocked_at) : '';
-                        const blockedLine = u.blocked_at ? `<p class="text-xs text-red-300 mt-1">🔒 Bloqueó el bot: ${blockedAtStr}</p>` : '';
+                        const blockedLine = u.blocked_at ? `<p class="text-xs text-red-300 mt-1">🔒 Bloqueó al bot: ${blockedAtStr}</p>` : '';
                         cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-pointer hover:bg-gray-700/60 transition user-card ${bannedClass}" data-userid="${u.telegram_id}" onclick="openBalanceModalWithFetch(${u.telegram_id}, '${escapeHTML(u.first_name || 'Sin nombre')}')">
                             <div class="flex justify-between items-start">
                                 <div>
