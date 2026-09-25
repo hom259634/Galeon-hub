@@ -379,6 +379,8 @@ function generateSessionHtml(session, bets, downloadUrl, showDownload = true) {
     const totalCup = (bets || []).reduce((s, b) => s + (parseFloat(b.cost_cup) || 0), 0);
     const totalUsd = (bets || []).reduce((s, b) => s + (parseFloat(b.cost_usd) || 0), 0);
     const vacio = !bets || bets.length === 0;
+    const betsCount = (bets || []).length;
+    const betsCountLabel = `${betsCount} ${betsCount === 1 ? 'apuesta' : 'apuestas'}`;
     const turnoTitle = ['Turno', turnEmoji(session.time_slot), turnPlainName(session.time_slot)].filter(Boolean).join(' ').trim();
 
     return `<!DOCTYPE html>
@@ -405,7 +407,7 @@ function generateSessionHtml(session, bets, downloadUrl, showDownload = true) {
 </head>
 <body>
     <h1>${lotteryEmoji(session.lottery)} ${escapeHTML(session.lottery)} — ${escapeHTML(turnoTitle)}</h1>
-    <p class="sub">📅 ${escapeHTML(session.date)} · ${(bets || []).length} apuestas</p>
+    <p class="sub">📅 ${escapeHTML(session.date)} · ${betsCountLabel}</p>
     ${vacio ? `<div class="empty">ℹ️ No hubo jugadas en esta sesión</div>` : `
     <div class="total">💰 Total: ${totalCup.toFixed(2)} CUP / ${totalUsd.toFixed(2)} USD</div>
     <div class="wrap">
@@ -5230,10 +5232,10 @@ app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
         return res.status(400).json({ error: 'ID de usuario inválido' });
     }
     if (isAdmin(telegramId)) {
-        return res.status(400).json({ error: 'No se pudo banear al usuario' });
+        return res.status(400).json({ error: 'No se pudo desbanear al usuario' });
     }
     if (!isAdmin(userId) && await hasAdminRoles(telegramId)) {
-        return res.status(400).json({ error: 'No se pudo banear al usuario' });
+        return res.status(400).json({ error: 'No se pudo desbanear al usuario' });
     }
 
     try {

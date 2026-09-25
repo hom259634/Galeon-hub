@@ -4985,6 +4985,32 @@ function supportMuteLabel(muted) {
     return muted ? '🔊 Desilenciar' : '🔇 Silenciar';
 }
 
+// Calcula los destinatarios de una notificación de soporte:
+// - Subadmin remitente (tiene rol pero no es superadmin) → solo superadmins (ADMIN_IDS).
+// - Usuario normal remitente → superadmins + subadmins (aprobadores de retiro/depósito y gestores de horario).
+// - Nunca se notifica al propio remitente.
+// - Nunca se notifica a personal baneado (is_banned).
+async function getSupportNotifyIds(senderUid) {
+    await ensureBotRolesCache();
+    const isSubadmin = hasAnyRole(senderUid) && !isAdmin(senderUid);
+    const candidates = isSubadmin
+        ? [...ADMIN_IDS]
+        : [...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers];
+    const ids = [...new Set(candidates.map(Number))].filter(id => id !== Number(senderUid));
+    if (ids.length === 0) return ids;
+    let banned = new Set();
+    try {
+        const { data } = await supabase
+            .from('users')
+            .select('telegram_id, is_banned')
+            .in('telegram_id', ids);
+        banned = new Set((data || []).filter(u => u.is_banned).map(u => Number(u.telegram_id)));
+    } catch (e) {
+        console.warn('Error verificando baneos de destinatarios de soporte:', e?.message || e);
+    }
+    return ids.filter(id => !banned.has(id));
+}
+
 // Teclado de las notificaciones de soporte: el botón de Responder (solo si el
 // mensaje aún no fue respondido, conservando su message_id) y/o el botón de
 // silenciar/desilenciar con la etiqueta del estado actual.
@@ -5176,7 +5202,7 @@ bot.on(message('text'), async (ctx) => {
             await ctx.reply('⛔ Sin acceso al soporte.');
             return;
         }
-        const supportNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers]);
+        const supportNotifyIds = new Set(await getSupportNotifyIds(uid));
         if (!supportUserMessages.has(uid)) supportUserMessages.set(uid, new Map());
         supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name });
         for (const adminId of supportNotifyIds) {
@@ -7078,7 +7104,7 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
         // Reenviar a todos los admins y subadmins
-        const supportNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.withdrawApprovers, ...botRolesCache.depositApprovers, ...botRolesCache.scheduleManagers]);
+        const supportNotifyIds = new Set(await getSupportNotifyIds(uid));
         if (!supportUserMessages.has(uid)) supportUserMessages.set(uid, new Map());
         supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name });
         for (const adminId of supportNotifyIds) {
@@ -7114,7 +7140,7 @@ bot.on(message('text'), async (ctx) => {
                 await ctx.reply('⛔ Sin acceso al soporte.');
                 return;
             }
-            const supportNotifyIds2 = new Set(ADMIN_IDS);
+            const supportNotifyIds2 = new Set(await getSupportNotifyIds(uid));
             if (!supportUserMessages.has(uid)) supportUserMessages.set(uid, new Map());
             supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name });
             for (const adminId of supportNotifyIds2) {
