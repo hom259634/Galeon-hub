@@ -4972,7 +4972,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const timeStr = formatTime12h(d.processed_at);
                         html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center" data-currency="${d.currency}">
                             <div>
-                                <span>${escapeHTML(d.user_name)} ${d.username ? '@'+escapeHTML(d.username) : ''}</span>
+                                <span>${escapeHTML(d.user_name)} ${d.username ? '@'+escapeHTML(d.username) : 'ID '+d.user_id}</span>
                                 <span class="text-gray-400 text-xs ml-2">${timeStr}</span>
                             </div>
                             <span class="${d.currency === 'USD' ? 'text-yellow-300' : 'text-cyan-300'} font-medium">${d.amount.toFixed(2)} ${d.currency}${cupLabel}</span>
@@ -5010,7 +5010,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const timeStr = formatTime12h(w.processed_at);
                         html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center" data-currency="${w.currency}">
                             <div>
-                                <span>${escapeHTML(w.user_name)} ${w.username ? '@'+escapeHTML(w.username) : ''}</span>
+                                <span>${escapeHTML(w.user_name)} ${w.username ? '@'+escapeHTML(w.username) : 'ID '+w.user_id}</span>
                                 <span class="text-gray-400 text-xs ml-2">${timeStr}</span>
                             </div>
                             <span class="${w.currency === 'USD' ? 'text-yellow-300' : 'text-pink-300'} font-medium">${w.amount.toFixed(2)} ${w.currency}${cupLabel}</span>
@@ -5051,7 +5051,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const amtColor = r.currency === 'USD' ? 'text-yellow-300' : 'text-gray-200';
                         const cupLabel = (r.currency === 'MLC' || r.currency === 'USDT' || r.currency === 'TRX') ? `<span class="text-gray-400 ml-1">(${r.amount_cup.toFixed(2)} CUP)</span>` : '';
                         html += `<tr class="border-b border-gray-700/50">
-                            <td class="py-2 pr-2">${escapeHTML(r.user_name)} ${r.username ? '@'+escapeHTML(r.username) : ''}</td>
+                            <td class="py-2 pr-2">${escapeHTML(r.user_name)} ${r.username ? '@'+escapeHTML(r.username) : 'ID '+r.user_id}</td>
                             <td class="py-2 pr-2 ${typeColor}">${typeIcon} ${r.type}</td>
                             <td class="py-2 pr-2 ${amtColor}">${r.amount.toFixed(2)} ${r.currency}${cupLabel}</td>
                             <td class="py-2 text-gray-400 text-xs">${timeStr}</td>
