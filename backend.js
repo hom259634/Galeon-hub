@@ -4732,6 +4732,7 @@ app.get('/api/admin/user/:targetUserId', async (req, res) => {
                 created_at: user.created_at,
                 is_banned: user.is_banned,
                 banned_at: user.banned_at,
+                support_muted: !!user.support_muted,
                 is_superadmin: isAdmin(targetUserId),
                 is_staff: await hasAdminRoles(targetUserId),
                 bonus_updated_by_admin: !!user.bonus_updated_by_admin,
@@ -4880,7 +4881,7 @@ app.get('/api/admin/users', async (req, res) => {
         // 1. Obtener todos los usuarios (incluyendo ref_by)
         const { data: users, error } = await supabase
             .from('users')
-            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by, is_banned, banned_at, blocked_at')
+            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by, is_banned, banned_at, blocked_at, support_muted')
             .order('first_name', { ascending: true });
 
         if (error) {
@@ -4931,6 +4932,7 @@ app.get('/api/admin/users', async (req, res) => {
             banned_at: u.banned_at,
             blocked_at: u.blocked_at,
             has_blocked_bot: !!u.blocked_at,
+            is_muted: !!u.support_muted,
             is_superadmin: isAdmin(u.telegram_id),
             is_staff: adminRoleUserIds.has(u.telegram_id)
         }));
@@ -5280,7 +5282,70 @@ app.post('/api/admin/users/:telegramId/unban', async (req, res) => {
     }
 });
 
-// Reiniciar usuario (lo deja como nuevo, con el bono de bienvenida actual)
+// Silenciar/desilenciar el soporte de un usuario desde el panel web
+app.post('/api/admin/users/:telegramId/support-mute', async (req, res) => {
+    const userId = req.verifiedTelegramId || req.body.userId;
+    if (!userId) return res.status(403).json({ error: 'No autorizado' });
+    if (!isAdmin(userId) && !(await hasRole(userId, 'user_manager'))) {
+        return res.status(403).json({ error: 'No tienes permisos' });
+    }
+    const telegramId = parseInt(req.params.telegramId);
+    if (isNaN(telegramId)) {
+        return res.status(400).json({ error: 'ID de usuario inválido' });
+    }
+    if (Number(userId) === telegramId) {
+        return res.status(400).json({ error: 'No se pudo cambiar el acceso al soporte' });
+    }
+    if (isAdmin(telegramId)) {
+        return res.status(400).json({ error: 'No se pudo cambiar el acceso al soporte' });
+    }
+    if (!isAdmin(userId) && await hasAdminRoles(telegramId)) {
+        return res.status(400).json({ error: 'No se pudo cambiar el acceso al soporte' });
+    }
+
+    try {
+        const { data: targetUser } = await supabase
+            .from('users')
+            .select('support_muted')
+            .eq('telegram_id', telegramId)
+            .maybeSingle();
+
+        const currentlyMuted = !!targetUser?.support_muted;
+        const newMuted = !currentlyMuted;
+
+        const { data, error } = await supabase
+            .from('users')
+            .update({ support_muted: newMuted, updated_at: new Date().toISOString() })
+            .eq('telegram_id', telegramId)
+            .select();
+
+        if (error) {
+            return res.status(500).json({ error: 'No se pudo cambiar el acceso al soporte.' });
+        }
+
+        if (!data || data.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        res.json({ success: true, support_muted: newMuted });
+
+        bot.telegram.sendMessage(telegramId,
+            newMuted ? '⛔ Sin acceso al soporte.' : '✅ Con acceso al soporte.',
+            { parse_mode: 'HTML' }
+        ).catch(e => console.error('Error notificando mute de soporte:', e));
+
+        // Sincronizar en tiempo real los botones de TODAS las notificaciones de
+        // soporte del usuario en TODOS los admins (misma cascada que el bot).
+        if (bot?.cascadeSupportMuteUi) {
+            await bot.cascadeSupportMuteUi(telegramId, newMuted, null).catch(e =>
+                console.error('Error sincronizando botones de soporte:', e)
+            );
+        }
+    } catch (e) {
+        console.error('Error cambiando mute de soporte:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
 app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
     const userId = req.verifiedTelegramId || req.body.userId;
     if (!userId) return res.status(403).json({ error: 'No autorizado' });

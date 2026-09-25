@@ -5037,6 +5037,39 @@ async function editSupportKeyboard(chatId, msgId, keyboard) {
     }
 }
 
+// Pie de una notificación de soporte YA RESPONDIDA: texto pequeño (monoespaciado
+// vía <code>) con la marca ✔ Respondido. Telegram no soporta colores reales ni
+// alineación a la derecha en el cuerpo del mensaje; la fila de espacios guía
+// empuja la etiqueta hacia el extremo derecho de la `burbuja`, imitando el
+// sello en la esquina inferior derecha.
+const SUPPORT_RESPONDIDO_SPACER = ' '.repeat(40);
+
+// Edita el TEXTO de una notificación de soporte ya respondida: conserva el HTML
+// original y añade al pie la marca "✔ Respondido" en el extremo derecho,
+// dejando únicamente el botón de silenciar/desilenciar. Si se perdió el cuerpo
+// original registrado (ej. el bot reinició y los Map quedaron vacíos), cae a
+// editar solo el teclado como comportamiento anterior.
+async function editSupportNotifAnswered(adminId, notifMsgId, targetUid, targetUserMsgId, muted) {
+    const userMsgMap = supportUserMessages.get(targetUid);
+    const entry = targetUserMsgId != null ? userMsgMap?.get(targetUserMsgId) : null;
+    const keyboard = buildSupportKeyboard(targetUid, { muted, showReply: false });
+    if (entry?.body) {
+        try {
+            await bot.telegram.editMessageText(adminId, notifMsgId, undefined,
+                `${entry.body}\n\n${SUPPORT_RESPONDIDO_SPACER}<code>✔ Respondido</code>`,
+                {
+                    parse_mode: 'HTML',
+                    reply_markup: keyboard
+                }
+            );
+            return;
+        } catch (e) {
+            console.warn(`Error editando texto de soporte (chat ${adminId}, msg ${notifMsgId}):`, e?.message || e);
+        }
+    }
+    await editSupportKeyboard(adminId, notifMsgId, keyboard);
+}
+
 async function getSupportMuted(uid) {
     try {
         const { data } = await supabase
@@ -5204,11 +5237,11 @@ bot.on(message('text'), async (ctx) => {
         }
         const supportNotifyIds = new Set(await getSupportNotifyIds(uid));
         if (!supportUserMessages.has(uid)) supportUserMessages.set(uid, new Map());
-        supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name });
+        const notifBody = `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}) <b>[BANEADO]</b>:\n\n${escapeHTML(text)}`;
+        supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name, body: notifBody });
         for (const adminId of supportNotifyIds) {
             try {
-                const sent = await bot.telegram.sendMessage(adminId,
-                    `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}) <b>[BANEADO]</b>:\n\n${escapeHTML(text)}`,
+                const sent = await bot.telegram.sendMessage(adminId, notifBody,
                     {
                         parse_mode: 'HTML',
                         reply_markup: buildSupportKeyboard(uid, { muted: false, showReply: true, userMsgId: ctx.message.message_id })
@@ -5273,7 +5306,7 @@ bot.on(message('text'), async (ctx) => {
                 const answeredAdminMap = answeredUserMap.get(targetUserMsgId);
                 for (const [adminId, msgId] of adminNotifyMap) {
                     answeredAdminMap.set(adminId, msgId);
-                    await editSupportKeyboard(adminId, msgId, buildSupportKeyboard(targetUserId, { muted, showReply: false }));
+                    await editSupportNotifAnswered(adminId, msgId, targetUserId, targetUserMsgId, muted);
                 }
                 userNotifyMap.delete(targetUserMsgId);
                 if (userNotifyMap.size === 0) supportNotifyMessageIds.delete(targetUserId);
@@ -7106,11 +7139,11 @@ bot.on(message('text'), async (ctx) => {
         // Reenviar a todos los admins y subadmins
         const supportNotifyIds = new Set(await getSupportNotifyIds(uid));
         if (!supportUserMessages.has(uid)) supportUserMessages.set(uid, new Map());
-        supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name });
+        const notifBody = `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}):\n\n${escapeHTML(text)}`;
+        supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name, body: notifBody });
         for (const adminId of supportNotifyIds) {
             try {
-                const sent = await bot.telegram.sendMessage(adminId,
-                    `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}):\n\n${escapeHTML(text)}`,
+                const sent = await bot.telegram.sendMessage(adminId, notifBody,
                     {
                         parse_mode: 'HTML',
                         reply_markup: buildSupportKeyboard(uid, { muted: false, showReply: true, userMsgId: ctx.message.message_id })
@@ -7142,11 +7175,11 @@ bot.on(message('text'), async (ctx) => {
             }
             const supportNotifyIds2 = new Set(await getSupportNotifyIds(uid));
             if (!supportUserMessages.has(uid)) supportUserMessages.set(uid, new Map());
-            supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name });
+            const notifBody2 = `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}):\n\n${escapeHTML(text)}`;
+            supportUserMessages.get(uid).set(ctx.message.message_id, { text, firstName: ctx.from.first_name, body: notifBody2 });
             for (const adminId of supportNotifyIds2) {
                 try {
-                    const sent = await bot.telegram.sendMessage(adminId,
-                    `📩 <b>Mensaje de soporte de</b> ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid}):\n\n${escapeHTML(text)}`,
+                    const sent = await bot.telegram.sendMessage(adminId, notifBody2,
                     {
                         parse_mode: 'HTML',
                         reply_markup: buildSupportKeyboard(uid, { muted: false, showReply: true, userMsgId: ctx.message.message_id })
@@ -7920,6 +7953,10 @@ async function updatePendingNotifications(key, statusText) {
 
 // Exponer funciones para que backend.js pueda refrescar el caché al asignar roles
 bot.refreshBotRolesCache = refreshBotRolesCache;
+
+// Exponer la cascada de mute de soporte para que backend.js pueda sincronizar en
+// tiempo real las notificaciones de soporte cuando cambia el estado desde la web.
+bot.cascadeSupportMuteUi = cascadeSupportMuteUi;
 
 // Capturar errores no manejados en handlers del bot para evitar que crasheen el proceso
 bot.catch((err) => {
