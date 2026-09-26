@@ -5341,7 +5341,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-blue-600 px-3 py-1 rounded-full text-sm" data-filter="referred">Refiriendo</button>
                         <button class="filter-btn bg-cyan-600 px-3 py-1 rounded-full text-sm" data-filter="withBets">Con jugadas</button>
                         <button class="filter-btn bg-orange-600 px-3 py-1 rounded-full text-sm" data-filter="onlyId">Solo con ID</button>
-                        <button class="filter-btn bg-indigo-600 px-3 py-1 rounded-full text-sm" data-filter="muted">Silenciados</button>
+                        <button class="filter-btn bg-red-300 text-red-900 px-3 py-1 rounded-full text-sm" data-filter="muted">Silenciados</button>
                         <button class="filter-btn bg-red-700 px-3 py-1 rounded-full text-sm" data-filter="banned">Baneados</button>
                         <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="deleted">Eliminados</button>
                         <button class="filter-btn bg-red-900 px-3 py-1 rounded-full text-sm" data-filter="blocked">Que bloquearon al bot</button>
@@ -5657,6 +5657,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const data = await res.json();
                     const muted = !!data.user?.support_muted;
                     const existing = document.getElementById('unmuteUserBtn');
+                    const flag = document.getElementById('mutedFlag');
+                    if (muted && !flag) {
+                        const p = document.createElement('p');
+                        p.id = 'mutedFlag';
+                        p.className = 'text-red-400 font-bold mb-3';
+                        p.textContent = '🔇 Este usuario está SILENCIADO';
+                        const balanceBox = modalBody.querySelector('.space-y-4');
+                        if (balanceBox) balanceBox.parentNode.insertBefore(p, balanceBox);
+                        else modalBody.appendChild(p);
+                    } else if (!muted && flag) {
+                        flag.remove();
+                    }
                     if (muted && !existing) {
                         const btn = document.createElement('button');
                         btn.id = 'unmuteUserBtn';
@@ -5724,6 +5736,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             modalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-4">Editar saldo de ${escapeHTML(name)} (ID: ${telegramId})</h4>
                 ${isBanned ? `<p class="text-red-400 font-bold mb-3">🚫 Este usuario está BANEADO</p>${bannedAt ? `<p class="text-white text-sm mb-3">🚫 Baneado: ${bannedAt}</p>` : ''}` : ''}
+                ${supportMuted ? `<p id="mutedFlag" class="text-red-400 font-bold mb-3">🔇 Este usuario está SILENCIADO</p>` : ''}
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm mb-1">CUP</label>
@@ -6331,6 +6344,7 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                 if (res.ok) {
                     iziToast.success({ message: 'Soporte desilenciado correctamente.' });
                     btn.remove();
+                    document.getElementById('mutedFlag')?.remove();
                 } else {
                     let errMsg = 'Error al desilenciar';
                     try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
