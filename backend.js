@@ -246,6 +246,13 @@ function escapeHTML(text) {
         .replace(/'/g, '&#039;');
 }
 
+// Avisos a admins: muestra el @ de Telegram como enlace clicable y, si el usuario
+// no tiene @, cae al ID numérico (comportamiento anterior).
+function userTagLink(username, telegramId) {
+    const label = username ? `@${escapeHTML(username)}` : String(telegramId);
+    return `<a href="tg://user?id=${telegramId}">${label}</a>`;
+}
+
 // ========== EXPORTACIÓN DE JUGADAS DE SESIÓN (HTML + ENLACE POR TOKEN ALEATORIO) ==========
 // Cada vez que se genera un enlace se crea un token aleatorio nuevo y se guarda en la BD,
 // de modo que solo el enlace más reciente de la sesión es válido.
@@ -2019,7 +2026,7 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
         try {
             const sentMsg = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
-                text: `📥 <b>Nueva solicitud de DEPÓSITO</b> (WebApp)\n👤 Usuario: ${escapeHTML(user.first_name || 'Usuario')} (${userId})\n🏦 Método: ${method.name} (${currency})\n💰 Monto: ${amount}\n📎 <a href="${publicUrl}">Ver captura</a>\n🆔 Solicitud: ${request.id}`,
+                text: `📥 <b>Nueva solicitud de DEPÓSITO</b> (WebApp)\n👤 Usuario: ${escapeHTML(user.first_name || 'Usuario')} (${userTagLink(user.username, userId)})\n🏦 Método: ${method.name} (${currency})\n💰 Monto: ${amount}\n📎 <a href="${publicUrl}">Ver captura</a>\n🆔 Solicitud: ${request.id}`,
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[
@@ -2168,7 +2175,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
             const accountEmoji = currency === 'USDT' || currency === 'TRX' ? '👝' : { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
             const sentMsg = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
-                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${escapeHTML(user.first_name || 'Usuario')} (${userId})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountEmoji} ${accountInfo}\n🆔 Solicitud: ${request.id}`,
+                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${escapeHTML(user.first_name || 'Usuario')} (${userTagLink(user.username, userId)})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountEmoji} ${accountInfo}\n🆔 Solicitud: ${request.id}`,
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[

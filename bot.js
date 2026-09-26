@@ -218,6 +218,13 @@ function escapeHTML(text) {
         .replace(/'/g, '&#039;');
 }
 
+// Avisos a admins: muestra el @ de Telegram como enlace clicable y, si el usuario
+// no tiene @, cae al ID numérico (comportamiento anterior).
+function userTagLink(username, telegramId) {
+    const label = username ? `@${escapeHTML(username)}` : String(telegramId);
+    return `<a href="tg://user?id=${telegramId}">${label}</a>`;
+}
+
 // ========== EXPORTACIÓN DE JUGADAS DE SESIÓN (ENLACE POR TOKEN ALEATORIO) ==========
 // Cada vez que se genera un enlace se crea un token aleatorio nuevo y se guarda en la BD,
 // de modo que solo el enlace más reciente de la sesión es válido.
@@ -5019,7 +5026,7 @@ function buildSupportKeyboard(targetUid, { muted, showReply, userMsgId } = {}) {
     const rows = [];
     if (showReply) {
         const replyCb = userMsgId != null ? `support_reply_${targetUid}_${userMsgId}` : `support_reply_${targetUid}`;
-        rows.push([Markup.button.callback('📩 Responder', replyCb), muteBtn]);
+        rows.push([muteBtn, Markup.button.callback('📩 Responder', replyCb)]);
     } else {
         rows.push([muteBtn]);
     }
@@ -6222,7 +6229,7 @@ bot.on(message('text'), async (ctx) => {
                         try {
                             const sent = await ctx.telegram.sendMessage(adminId,
                                 `📤 <b>Nueva solicitud de RETIRO</b>\n` +
-                                `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
+                                `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
                                 `💰 Monto: ${amount} ${currency}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                 `👝 Wallet: ${escapeHTML(existingWallet)} (Red: ${escapeHTML(existingNetwork)})\n` +
@@ -6319,7 +6326,7 @@ bot.on(message('text'), async (ctx) => {
                         try {
                             const sent = await ctx.telegram.sendMessage(adminId,
                                 `📤 <b>Nueva solicitud de RETIRO</b>\n` +
-                                `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
+                                `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
                                 `💰 Monto: ${amount} ${currency}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                 `${existingAccountCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Cuenta: ${escapeHTML(existingAccountCard)}` : ''}${existingAccountCard && existingAccountMobile ? '\n' : ''}${existingAccountMobile ? `📞 Confirmación: ${escapeHTML(existingAccountMobile)}` : ''}\n` +
@@ -6409,7 +6416,7 @@ bot.on(message('text'), async (ctx) => {
                             try {
                                 const sent = await ctx.telegram.sendMessage(adminId,
                                     `📤 <b>Nueva solicitud de RETIRO</b>\n` +
-                                    `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
+                                    `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
                                     `💰 Monto: ${amount} ${currency}\n` +
                                     `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                     `${existingCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Cuenta: ${escapeHTML(existingCard)}` : ''}${existingCard && existingMobile ? '\n' : ''}${existingMobile ? `📞 Confirmación: ${escapeHTML(existingMobile)}` : ''}\n` +
@@ -6614,7 +6621,7 @@ bot.on(message('text'), async (ctx) => {
                 try {
                     const sent = await bot.telegram.sendMessage(adminId,
                         `📤 <b>Nueva solicitud de RETIRO</b>\n` +
-                        `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
+                        `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
                         `💰 Monto: ${amount} ${currency}\n` +
                         `🏦 Método: ${escapeHTML(method.name)}\n` +
                         `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} ${escapeHTML(accountInfo)}\n` +
@@ -7228,7 +7235,7 @@ bot.on(message('photo'), async (ctx) => {
                     try {
                         const sent = await bot.telegram.sendMessage(adminId,
                             `📥 <b>Nueva solicitud de DEPÓSITO</b>\n` +
-                            `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${uid})\n` +
+                            `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
                             `🏦 Método: ${escapeHTML(method.name)} (${escapeHTML(method.currency)})\n` +
                             `💰 Monto: ${escapeHTML(amountText)}\n` +
                             `📎 <a href="${escapeHTML(request.screenshot_url)}">Ver captura</a>\n` +
