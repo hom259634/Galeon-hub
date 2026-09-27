@@ -5049,7 +5049,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const typeIcon = r.type === 'depósito' ? '📥' : '📤';
                         const typeColor = r.type === 'depósito' ? 'text-cyan-300' : 'text-pink-300';
                         const amtColor = r.currency === 'USD' ? 'text-yellow-300' : 'text-gray-200';
-                        const cupLabel = (r.currency === 'MLC' || r.currency === 'USDT' || r.currency === 'TRX') ? `<span class="text-gray-400 ml-1">(${r.amount_cup.toFixed(2)} CUP)</span>` : '';
+                        const cupLabel = r.currency !== 'CUP' ? `<span class="text-gray-400 ml-1">(${r.amount_cup.toFixed(2)} CUP)</span>` : '';
                         html += `<tr class="border-b border-gray-700/50">
                             <td class="py-2 pr-2">${escapeHTML(r.user_name)} ${r.username ? '@'+escapeHTML(r.username) : 'ID '+r.user_id}</td>
                             <td class="py-2 pr-2 ${typeColor}">${typeIcon} ${r.type}</td>
@@ -5341,7 +5341,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         <button class="filter-btn bg-blue-600 px-3 py-1 rounded-full text-sm" data-filter="referred">Refiriendo</button>
                         <button class="filter-btn bg-cyan-600 px-3 py-1 rounded-full text-sm" data-filter="withBets">Con jugadas</button>
                         <button class="filter-btn bg-orange-600 px-3 py-1 rounded-full text-sm" data-filter="onlyId">Solo con ID</button>
-                        <button class="filter-btn bg-red-300 text-red-900 px-3 py-1 rounded-full text-sm" data-filter="muted">Silenciados</button>
+                        <button class="filter-btn bg-red-600 px-3 py-1 rounded-full text-sm" data-filter="muted">Silenciados</button>
                         <button class="filter-btn bg-red-700 px-3 py-1 rounded-full text-sm" data-filter="banned">Baneados</button>
                         <button class="filter-btn bg-gray-700 px-3 py-1 rounded-full text-sm" data-filter="deleted">Eliminados</button>
                         <button class="filter-btn bg-red-900 px-3 py-1 rounded-full text-sm" data-filter="blocked">Que bloquearon al bot</button>
@@ -5394,7 +5394,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const bannedAtStr = u.banned_at ? formatDate(u.banned_at) : '';
                         const blockedAtStr = u.blocked_at ? formatDate(u.blocked_at) : '';
                         const blockedLine = u.blocked_at ? `<p class="text-xs text-red-300 mt-1">🔒 Bloqueó al bot: ${blockedAtStr}</p>` : '';
-                        const mutedLine = isMuted ? '<p class="text-xs text-indigo-300 mt-1">🔇 Sin acceso al soporte</p>' : '';
+                        const mutedAtStr = u.support_muted_at ? formatDate(u.support_muted_at) : '';
+                        const mutedLine = isMuted
+                            ? `<p class="text-xs text-indigo-300 mt-1">${mutedAtStr ? `🔇 Silenciado: ${mutedAtStr}` : '🔇 Sin acceso al soporte'}</p>`
+                            : '';
                         cardsHtml += `<div class="bg-gray-800/60 p-4 rounded-xl cursor-pointer hover:bg-gray-700/60 transition user-card ${bannedClass}" data-userid="${u.telegram_id}" onclick="openBalanceModalWithFetch(${u.telegram_id}, '${escapeHTML(u.first_name || 'Sin nombre')}')">
                             <div class="flex justify-between items-start">
                                 <div>
@@ -5880,7 +5883,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 function fmtAmount(amount, currency, amountCup) {
                     let text = `${parseFloat(amount).toFixed(2)} ${String(currency || '').toUpperCase()}`;
-                    if (amountCup != null && (currency === 'MLC' || currency === 'USDT' || currency === 'TRX')) {
+                    if (amountCup != null && currency !== 'CUP') {
                         text += ` <span class="text-gray-400">(${amountCup.toFixed(2)} CUP)</span>`;
                     }
                     return text;
