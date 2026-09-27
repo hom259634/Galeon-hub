@@ -5091,6 +5091,53 @@ async function getSupportMuted(uid) {
     }
 }
 
+// Cachea si la columna users.support_muted_at está disponible para no reintentar
+// en cada operación si la migración aún no se ha aplicado.
+let supportMutedAtColumn = true;
+
+// PostgREST devuelve code 42703 (undefined_column) cuando el campo no existe.
+function isMissingColumnError(error, column) {
+    if (!error) return false;
+    if (String(error.code || '') === '42703') return true;
+    const msg = String(error.message || '').toLowerCase();
+    return msg.includes(String(column).toLowerCase()) && msg.includes('does not exist');
+}
+
+// Aplica el estado de silencio del soporte y registra la fecha/hora del último
+// silencio en `support_muted_at` (se limpia al desilenciar, igual que banned_at).
+// Si la columna no existe, reintenta sin ella para que el silencio siga funcionando.
+async function setSupportMute(uid, muted) {
+    const now = new Date().toISOString();
+    const basePatch = { support_muted: muted, updated_at: now };
+
+    const applyPatch = async (patch) => {
+        const { data, error } = await supabase
+            .from('users')
+            .update(patch)
+            .eq('telegram_id', uid)
+            .select();
+        return { data, error };
+    };
+
+    if (supportMutedAtColumn) {
+        const first = await applyPatch({ ...basePatch, support_muted_at: muted ? now : null });
+        if (!first.error) {
+            return { success: true, data: first.data, withTimestamp: true };
+        }
+        if (!isMissingColumnError(first.error, 'support_muted_at')) {
+            return { success: false, error: first.error };
+        }
+        supportMutedAtColumn = false;
+        console.warn('users.support_muted_at no existe: el silencio se guardará sin fecha. Ejecuta: ALTER TABLE users ADD COLUMN support_muted_at timestamptz;');
+    }
+
+    const fallback = await applyPatch(basePatch);
+    if (fallback.error) {
+        return { success: false, error: fallback.error };
+    }
+    return { success: true, data: fallback.data, withTimestamp: false };
+}
+
 // Actualiza en TIEMPO REAL los botones de TODAS las notificaciones de soporte
 // del usuario (respondidas o no) en todos los admins, reflejando el estado de
 // mute actual. Los mensajes sin responder conservan el botón Responder; los ya
@@ -5145,10 +5192,12 @@ bot.action(/support_mute_(\d+)/, async (ctx) => {
         .maybeSingle();
     const currentlyMuted = !!targetUser?.support_muted;
     const newMuted = !currentlyMuted;
-    await supabase
-        .from('users')
-        .update({ support_muted: newMuted, updated_at: new Date() })
-        .eq('telegram_id', targetUid);
+    const muteResult = await setSupportMute(targetUid, newMuted);
+    if (!muteResult.success) {
+        console.error(`Error cambiando mute de soporte a ${targetUid}:`, muteResult.error?.message || muteResult.error);
+        await ctx.answerCbQuery('❌ No se pudo cambiar el silencio', { show_alert: true });
+        return;
+    }
     try {
         await bot.telegram.sendMessage(targetUid,
             newMuted ? '⛔ Sin acceso al soporte.' : '✅ Con acceso al soporte.');
@@ -7964,6 +8013,10 @@ bot.refreshBotRolesCache = refreshBotRolesCache;
 // Exponer la cascada de mute de soporte para que backend.js pueda sincronizar en
 // tiempo real las notificaciones de soporte cuando cambia el estado desde la web.
 bot.cascadeSupportMuteUi = cascadeSupportMuteUi;
+
+// Exponer el aplicador de silencio para que backend.js registre la fecha/hora del
+// último silencio con la misma lógica (y el mismo fallback) que usa el teclado.
+bot.setSupportMute = setSupportMute;
 
 // Capturar errores no manejados en handlers del bot para evitar que crasheen el proceso
 bot.catch((err) => {

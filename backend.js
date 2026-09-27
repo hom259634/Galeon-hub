@@ -4877,6 +4877,21 @@ app.post('/api/admin/pending-withdraws/:id/reject', requireAdmin, async (req, re
 
 // ========== NUEVO: GESTIÓN DE USUARIOS (ADMIN) ==========
 
+const ADMIN_USERS_FIELDS = 'telegram_id, first_name, username, cup, usd, bonus_cup, ref_by, is_banned, banned_at, blocked_at, support_muted';
+const ADMIN_USERS_FIELDS_WITH_MUTE_DATE = `${ADMIN_USERS_FIELDS}, support_muted_at`;
+
+// Cachea si la columna users.support_muted_at está disponible para no reintentar
+// en cada listado si la migración aún no se ha aplicado.
+let supportMutedAtColumn = true;
+
+// PostgREST devuelve code 42703 (undefined_column) cuando el campo no existe.
+function isMissingColumnError(error, column) {
+    if (!error) return false;
+    if (String(error.code || '') === '42703') return true;
+    const msg = String(error.message || '').toLowerCase();
+    return msg.includes(String(column).toLowerCase()) && msg.includes('does not exist');
+}
+
 // Obtener todos los usuarios (admin o user_manager) con campos extra para filtros
 app.get('/api/admin/users', async (req, res) => {
     const userId = req.verifiedTelegramId || req.query.userId;
@@ -4886,13 +4901,28 @@ app.get('/api/admin/users', async (req, res) => {
     }
     try {
         // 1. Obtener todos los usuarios (incluyendo ref_by)
-        const { data: users, error } = await supabase
+        let users = null;
+        const listRes = await supabase
             .from('users')
-            .select('telegram_id, first_name, username, cup, usd, bonus_cup, ref_by, is_banned, banned_at, blocked_at, support_muted')
+            .select(supportMutedAtColumn ? ADMIN_USERS_FIELDS_WITH_MUTE_DATE : ADMIN_USERS_FIELDS)
             .order('first_name', { ascending: true });
 
-        if (error) {
-            return res.status(500).json({ error: error.message });
+        if (listRes.error) {
+            if (!supportMutedAtColumn || !isMissingColumnError(listRes.error, 'support_muted_at')) {
+                return res.status(500).json({ error: listRes.error.message });
+            }
+            supportMutedAtColumn = false;
+            console.warn('users.support_muted_at no existe: se omite la fecha de último silencio. Ejecuta: ALTER TABLE users ADD COLUMN support_muted_at timestamptz;');
+            const retry = await supabase
+                .from('users')
+                .select(ADMIN_USERS_FIELDS)
+                .order('first_name', { ascending: true });
+            if (retry.error) {
+                return res.status(500).json({ error: retry.error.message });
+            }
+            users = retry.data;
+        } else {
+            users = listRes.data;
         }
 
         // 2. Obtener IDs de usuarios que tienen al menos una apuesta
@@ -4940,6 +4970,7 @@ app.get('/api/admin/users', async (req, res) => {
             blocked_at: u.blocked_at,
             has_blocked_bot: !!u.blocked_at,
             is_muted: !!u.support_muted,
+            support_muted_at: u.support_muted_at || null,
             is_superadmin: isAdmin(u.telegram_id),
             is_staff: adminRoleUserIds.has(u.telegram_id)
         }));
@@ -5320,13 +5351,24 @@ app.post('/api/admin/users/:telegramId/support-mute', async (req, res) => {
         const currentlyMuted = !!targetUser?.support_muted;
         const newMuted = !currentlyMuted;
 
-        const { data, error } = await supabase
-            .from('users')
-            .update({ support_muted: newMuted, updated_at: new Date().toISOString() })
-            .eq('telegram_id', telegramId)
-            .select();
+        let muteResult;
+        if (typeof bot?.setSupportMute === 'function') {
+            muteResult = await bot.setSupportMute(telegramId, newMuted);
+        } else {
+            console.warn('bot.setSupportMute no disponible: se aplica el silencio sin fecha de último silencio.');
+            const legacy = await supabase
+                .from('users')
+                .update({ support_muted: newMuted, updated_at: new Date().toISOString() })
+                .eq('telegram_id', telegramId)
+                .select();
+            muteResult = legacy.error
+                ? { success: false, error: legacy.error }
+                : { success: true, data: legacy.data };
+        }
 
-        if (error) {
+        const data = muteResult.data;
+
+        if (!muteResult.success) {
             return res.status(500).json({ error: 'No se pudo cambiar el acceso al soporte.' });
         }
 
@@ -5334,7 +5376,11 @@ app.post('/api/admin/users/:telegramId/support-mute', async (req, res) => {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
-        res.json({ success: true, support_muted: newMuted });
+        res.json({
+            success: true,
+            support_muted: newMuted,
+            support_muted_at: data[0]?.support_muted_at || null
+        });
 
         bot.telegram.sendMessage(telegramId,
             newMuted ? '⛔ Sin acceso al soporte.' : '✅ Con acceso al soporte.',
