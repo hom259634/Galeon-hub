@@ -1215,9 +1215,6 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
                     if (!existingTotals[num]) existingTotals[num] = { cup: 0, usd: 0 };
                     existingTotals[num].cup += cup;
                     existingTotals[num].usd += usd;
-                    if (!grouped[num]) grouped[num] = { cup: 0, usd: 0 };
-                    grouped[num].cup += cup;
-                    grouped[num].usd += usd;
                 }
             }
         } catch (e) {
@@ -1228,10 +1225,11 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
     const cupExceeders = [];
     const usdExceeders = [];
     for (const [num, totals] of Object.entries(grouped)) {
-        if (maxCup !== null && totals.cup > 0 && totals.cup > parseFloat(maxCup)) {
+        const ex = existingTotals[num] || { cup: 0, usd: 0 };
+        if (maxCup !== null && totals.cup > 0 && totals.cup + (ex.cup || 0) > parseFloat(maxCup)) {
             cupExceeders.push(num);
         }
-        if (maxUsd !== null && totals.usd > 0 && totals.usd > parseFloat(maxUsd)) {
+        if (maxUsd !== null && totals.usd > 0 && totals.usd + (ex.usd || 0) > parseFloat(maxUsd)) {
             usdExceeders.push(num);
         }
     }
