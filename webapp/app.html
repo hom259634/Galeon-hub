@@ -1241,19 +1241,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     if (!existingTotals[num]) existingTotals[num] = { cup: 0, usd: 0 };
                     existingTotals[num].cup += cup;
                     existingTotals[num].usd += usd;
-                    if (!grouped[num]) grouped[num] = { cup: 0, usd: 0 };
-                    grouped[num].cup += cup;
-                    grouped[num].usd += usd;
                 }
             }
 
             const cupExceeders = [];
             const usdExceeders = [];
             for (const [num, totals] of Object.entries(grouped)) {
-                if (maxCup !== null && totals.cup > 0 && totals.cup > parseFloat(maxCup)) {
+                const ex = existingTotals[num] || { cup: 0, usd: 0 };
+                if (maxCup !== null && totals.cup > 0 && totals.cup + (ex.cup || 0) > parseFloat(maxCup)) {
                     cupExceeders.push(num);
                 }
-                if (maxUsd !== null && totals.usd > 0 && totals.usd > parseFloat(maxUsd)) {
+                if (maxUsd !== null && totals.usd > 0 && totals.usd + (ex.usd || 0) > parseFloat(maxUsd)) {
                     usdExceeders.push(num);
                 }
             }
@@ -5642,6 +5640,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             unmutePollTarget = null;
         }
 
+        // Formato 12h (dd/mm/aaaa hh:mm AM/PM) para la fecha de último silencio.
+        function formatMutedAt(dateStr) {
+            if (!dateStr) return '';
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return '';
+            return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+        }
+
         // Sincroniza en tiempo real el botón "🔊 Desilenciar usuario" mientras el
         // modal está abierto: si otro admin silencia/desilencia desde el bot, el
         // botón aparece/desaparece solo (sin recargar el panel).
@@ -5659,8 +5665,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     if (!res.ok) return;
                     const data = await res.json();
                     const muted = !!data.user?.support_muted;
+                    const mutedAt = formatMutedAt(data.user?.support_muted_at);
                     const existing = document.getElementById('unmuteUserBtn');
                     const flag = document.getElementById('mutedFlag');
+                    const atLine = document.getElementById('mutedAtFlag');
                     if (muted && !flag) {
                         const p = document.createElement('p');
                         p.id = 'mutedFlag';
@@ -5671,6 +5679,20 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         else modalBody.appendChild(p);
                     } else if (!muted && flag) {
                         flag.remove();
+                    }
+                    if (muted && mutedAt) {
+                        let at = atLine;
+                        if (!at) {
+                            at = document.createElement('p');
+                            at.id = 'mutedAtFlag';
+                            at.className = 'text-white text-sm mb-3';
+                            const f = document.getElementById('mutedFlag');
+                            if (f) f.insertAdjacentElement('afterend', at);
+                            else modalBody.appendChild(at);
+                        }
+                        at.textContent = `🔇 Silenciado: ${mutedAt}`;
+                    } else if (atLine) {
+                        atLine.remove();
                     }
                     if (muted && !existing) {
                         const btn = document.createElement('button');
@@ -5712,6 +5734,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 const bonusVal = parseFloat(u.bonus_cup) || 0;
                 const banned = !!u.is_banned;
                 const supportMuted = !!u.support_muted;
+                const supportMutedAt = formatMutedAt(u.support_muted_at);
                 let bannedAt = '';
                 if (u.banned_at) {
                     const d = new Date(u.banned_at);
@@ -5719,14 +5742,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
                 const bonusUpdatedByAdmin = !!u.bonus_updated_by_admin;
                 const hasHadPrincipalBalance = !!u.hasHadPrincipalBalance;
-                openBalanceModal(telegramId, displayName, cupVal, usdVal, bonusVal, banned, bannedAt, u.username, !!u.is_superadmin, !!u.is_staff, bonusUpdatedByAdmin, hasHadPrincipalBalance, supportMuted);
+                openBalanceModal(telegramId, displayName, cupVal, usdVal, bonusVal, banned, bannedAt, u.username, !!u.is_superadmin, !!u.is_staff, bonusUpdatedByAdmin, hasHadPrincipalBalance, supportMuted, supportMutedAt);
             } catch (e) {
                 iziToast.error({ message: 'Error de conexión al cargar datos del usuario' });
                 adminModal.classList.add('hidden');
             }
         };
 
-        window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false, bannedAt = '', username = '', isTargetSuperadmin = false, isTargetStaff = false, bonusUpdatedByAdmin = false, hasHadPrincipalBalance = false, supportMuted = false) => {
+        window.openBalanceModal = (telegramId, name, cup, usd, bonus, isBanned = false, bannedAt = '', username = '', isTargetSuperadmin = false, isTargetStaff = false, bonusUpdatedByAdmin = false, hasHadPrincipalBalance = false, supportMuted = false, supportMutedAt = '') => {
             const canManage = true;
             const showBanButton = canManage;
             const showDeleteButton = canManage && (isAdmin || userRoles.includes('user_deleter'));
@@ -5739,7 +5762,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             modalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-4">Editar saldo de ${escapeHTML(name)} (ID: ${telegramId})</h4>
                 ${isBanned ? `<p class="text-red-400 font-bold mb-3">🚫 Este usuario está BANEADO</p>${bannedAt ? `<p class="text-white text-sm mb-3">🚫 Baneado: ${bannedAt}</p>` : ''}` : ''}
-                ${supportMuted ? `<p id="mutedFlag" class="text-red-400 font-bold mb-3">🔇 Este usuario está SILENCIADO</p>` : ''}
+                ${supportMuted ? `<p id="mutedFlag" class="text-red-400 font-bold mb-3">🔇 Este usuario está SILENCIADO</p>${supportMutedAt ? `<p id="mutedAtFlag" class="text-white text-sm mb-3">🔇 Silenciado: ${supportMutedAt}</p>` : ''}` : ''}
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm mb-1">CUP</label>
