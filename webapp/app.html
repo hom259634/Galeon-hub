@@ -682,7 +682,7 @@
 </div>
 
 <!-- MODAL para confirmar continuar con una edición que incluye números ya al máximo -->
-<div id="maxedEditModal" class="modal hidden" onclick="if(event.target===this) abortMaxedEdit()">
+<div id="maxedEditModal" class="modal hidden" onclick="if(event.target===this) dismissMaxedEdit()">
     <div class="modal-content" style="padding-top:22px;">
         <h3 class="text-lg font-bold text-white mb-4">4pu3$t4$ Qva®</h3>
         <p id="maxedEditText" class="text-sm text-gray-300 mt-4 mb-6" style="line-height:1.4; white-space:pre-line"></p>
@@ -1687,13 +1687,25 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         function abortMaxedEdit() {
             document.getElementById('maxedEditModal').classList.add('hidden');
             pendingBetPayload = null;
-            // Se sigue en modo edición: el texto y el botón "Guardar cambios" quedan
-            // como estaban para que el usuario ajuste la jugada a mano.
+            // "No": la edición se descarta entera y el usuario sale a Mis jugadas
+            // para ver cómo quedó la original. El reset va forzado porque, si no,
+            // `showSection` abriría el modal de "¿descartar la edición?" encima de
+            // este y dejaría al usuario encadenando modales.
             iziToast.info({ message: 'Tu apuesta no se modificó.' });
+            resetBetEditMode(true, true);
+            showSection('bets');
+        }
+
+        // Cerrar el aviso sin responder: deja la edición tal cual para corregir el
+        // texto a mano. Distinto de "No", que sí la descarta (y navega).
+        function dismissMaxedEdit() {
+            document.getElementById('maxedEditModal').classList.add('hidden');
+            pendingBetPayload = null;
         }
         window.showMaxedEditModal = showMaxedEditModal;
         window.acceptMaxedEdit = acceptMaxedEdit;
         window.abortMaxedEdit = abortMaxedEdit;
+        window.dismissMaxedEdit = dismissMaxedEdit;
 
         async function sendBetRequest(payload) {
             // Bloquear botón para evitar doble envío
@@ -4180,7 +4192,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             let html = '<div class="space-y-3">';
 
             if (visibleRoles.length > 0) {
-                html += `<div class="text-sm text-gray-400 mb-2">Tus permisos: ${visibleRoles.map(r => {
+                html += `<div class="text-sm text-gray-400 mb-2"><span class="font-semibold">Tus permisos:</span> ${visibleRoles.map(r => {
                     const p = privilegeLabels[r];
                     return p ? `${p.icon} ${p.label}` : r;
                 }).join(' · ')}</div>`;
