@@ -7154,10 +7154,12 @@ bot.on(message('text'), async (ctx) => {
                     const question = isSingleOne ? '¿Deseas apostárselo?' : '¿Deseas apostárselos?';
                     const admissibleLine = admissibleLines.length > 0 ? `\n\n${admissibleLines.join('\n')}` : '';
                     const omitLabel = betType === 'centena' ? '❌ No, omitirla(s)' : '❌ No, omitirlo(s)';
+                    // Telegram dibuja los botones de izquierda a derecha: el
+                    // "No" va a la izquierda y el "Sí, apostar" a la derecha.
                     await ctx.reply(`${limitCheck.error}${admissibleLine}\n${question}`, {
                         reply_markup: Markup.inlineKeyboard([
-                            [Markup.button.callback('✅ Sí, apostar', 'bet_override_accept'),
-                             Markup.button.callback(omitLabel, 'bet_override_reject')]
+                            [Markup.button.callback(omitLabel, 'bet_override_reject'),
+                             Markup.button.callback('✅ Sí, apostar', 'bet_override_accept')]
                         ]).reply_markup
                     });
                     return;

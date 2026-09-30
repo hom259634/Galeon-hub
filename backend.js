@@ -1279,6 +1279,45 @@ async function validateBetLimits(items, betType, priceData, { userId, sessionId,
     return { ok: true };
 }
 
+// --- Comparación de dos jugadas por número y moneda ---
+// Espejo de betNumOf/betCupOf/betUsdOf/betTotalsByNum/betTotalsEqual del cliente
+// (app.html). Sirve para detectar que una edición guardada es SEMÁNTICAMENTE igual
+// a la que ya estaba en la base de datos: se comparan los totales por número, no
+// el texto ni el orden de los items, para que un simple reformateo ("5x50x2" vs
+// "5x100") no se reporte como un cambio.
+function betNumOf(item, betType) {
+    return betType === 'parle' ? (normalizeParleValue(item.numero) || item.numero) : item.numero;
+}
+function betCupOf(item) {
+    return item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+}
+function betUsdOf(item) {
+    return item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+}
+function betTotalsByNum(items, betType) {
+    const totals = {};
+    if (!Array.isArray(items)) return totals;
+    for (const it of items) {
+        if (!it) continue;
+        const num = betNumOf(it, betType);
+        if (!totals[num]) totals[num] = { cup: 0, usd: 0 };
+        totals[num].cup += betCupOf(it) || 0;
+        totals[num].usd += betUsdOf(it) || 0;
+    }
+    return totals;
+}
+function betTotalsEqual(a, b) {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) {
+        const ca = Math.round((a[k]?.cup || 0) * 100);
+        const ua = Math.round((a[k]?.usd || 0) * 100);
+        const cb = Math.round((b[k]?.cup || 0) * 100);
+        const ub = Math.round((b[k]?.usd || 0) * 100);
+        if (ca !== cb || ua !== ub) return false;
+    }
+    return true;
+}
+
 // Recorta los montos de los números excedidos hasta el máximo permitido, teniendo
 // en cuenta apuestas previas (existingTotals). El monto admisible por número
 // (máximo − base) se reparte de forma EQUITATIVA entre las repeticiones de la
@@ -1449,6 +1488,108 @@ function admissibleLinesForNumbers(items, betType, exceedData) {
         if (parts.length > 0) lines.push(`⚠️ Monto admisible para ${article} ${typeLabel} ${num}: ${parts.join(' y ')}.`);
     }
     return lines;
+}
+
+// Números excedidos que NO admiten más monto porque OTRAS jugadas del mismo
+// usuario/sesión/tipo ya consumieron el tope completo (máximo − base = 0). Para
+// esos el recorte no deja hueco: la única salida en una edición es descartarlos
+// y aplicar el resto de los cambios de la jugada.
+// A diferencia de `alreadyMaxed` (que juzga el número entero), aquí el desglose es
+// POR MONEDA: un número puede estar al tope en CUP y aún tener hueco en USD, y en
+// ese caso solo se descarta su porción en CUP.
+// Devuelve { cup: [...], usd: [...] } con los números sin cupo libre por moneda.
+// `currentTotals` son los montos que la apuesta EN EDICIÓN ya tiene por número.
+// La apuesta editada queda fuera de `existingTotals`, así que sin sumarla un
+// número puede parecer que tiene hueco cuando en realidad ya está al tope
+// contando esa misma jugada (p. ej. esta apuesta 100 CUP + otras 350 CUP = 450
+// CUP, y el usuario intenta subirla a 300 CUP). Con el valor por defecto `{}`
+// el resultado es exactamente el de antes: la vista de "solo otras jugadas".
+function maxedExceeders(exceedData, currentTotals = {}) {
+    const empty = { cup: [], usd: [] };
+    if (!exceedData) return empty;
+    const maxCup = exceedData.maxCup;
+    const maxUsd = exceedData.maxUsd;
+    const existingTotals = exceedData.existingTotals || {};
+    const ownTotals = currentTotals || {};
+    const cupExceeders = exceedData.cupExceeders || [];
+    const usdExceeders = exceedData.usdExceeders || [];
+
+    const cup = [];
+    const usd = [];
+    const allNums = [...new Set([...cupExceeders, ...usdExceeders])];
+    for (const num of allNums) {
+        const base = existingTotals[num] || { cup: 0, usd: 0 };
+        const own = ownTotals[num] || { cup: 0, usd: 0 };
+        const baseCup = (base.cup || 0) + (own.cup || 0);
+        const baseUsd = (base.usd || 0) + (own.usd || 0);
+        if (maxCup !== null && maxCup !== undefined && cupExceeders.some(n => String(n) === String(num)) && baseCup >= parseFloat(maxCup)) {
+            cup.push(num);
+        }
+        if (maxUsd !== null && maxUsd !== undefined && usdExceeders.some(n => String(n) === String(num)) && baseUsd >= parseFloat(maxUsd)) {
+            usd.push(num);
+        }
+    }
+    return { cup, usd };
+}
+
+// Frases del aviso de números ya apostados a su máximo, una por moneda
+// (CUP primero, luego USD) y SIN emoji inicial, para poder reutilizarlas tanto
+// en el aviso preguntable (⚠️) como en el error que no pregunta (❌).
+function maxedSentences(betType, maxed, exceedData) {
+    const sentences = [];
+    // El sustantivo sale de `formatBetTypeLabel` para que este aviso use siempre
+    // el mismo término que los de límites y de monto admisible: "número" SOLO
+    // para fijo y corridos, "centena" para centena y "parlet" para parlete.
+    const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : formatBetTypeLabel(betType).toLowerCase();
+    const nounPlural = typeNoun === 'número' ? 'números' : typeNoun === 'centena' ? 'centenas' : `${typeNoun}s`;
+
+    const sortNums = (nums) => [...nums].sort((a, b) => {
+        const na = parseInt(a, 10);
+        const nb = parseInt(b, 10);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return String(a).localeCompare(String(b));
+    });
+
+    const sentenceFor = (nums, max, currency) => {
+        const list = sortNums(nums);
+        if (list.length === 0) return null;
+        const isPlural = list.length > 1;
+        const subject = isPlural
+            ? `${typeNoun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${joinListWithY(list)}`
+            : `${typeNoun === 'centena' ? 'La' : 'El'} ${typeNoun} ${list[0]}`;
+        const verb = isPlural ? 'fueron' : 'fue';
+        const participle = isPlural
+            ? `${typeNoun === 'centena' ? 'apostadas' : 'apostados'}`
+            : `${typeNoun === 'centena' ? 'apostada' : 'apostado'}`;
+        return `${subject} ya ${verb} ${participle} a su máximo permitido de ${parseFloat(max).toFixed(2)} ${currency}.`;
+    };
+
+    if (exceedData?.maxCup !== null && exceedData?.maxCup !== undefined) {
+        const s = sentenceFor(maxed.cup, exceedData.maxCup, 'CUP');
+        if (s) sentences.push(s);
+    }
+    if (exceedData?.maxUsd !== null && exceedData?.maxUsd !== undefined) {
+        const s = sentenceFor(maxed.usd, exceedData.maxUsd, 'USD');
+        if (s) sentences.push(s);
+    }
+    return sentences;
+}
+
+// Texto del aviso al editar cuando hay números ya apostados a su máximo.
+// Una frase por moneda (CUP primero, luego USD) y la pregunta una sola vez.
+function maxedNoticeText(betType, maxed, exceedData) {
+    const sentences = maxedSentences(betType, maxed, exceedData);
+    if (sentences.length === 0) return null;
+    return `${sentences.map(s => `⚠️ ${s}`).join(' ')}\n¿Deseas continuar con la edición?`;
+}
+
+// Aviso que NO pregunta: se usa cuando la edición no tiene nada que aplicar
+// porque lo único que se intentó fue apostar más a números ya al máximo. El
+// emoji va una sola vez, al principio, aunque haya frase de CUP y de USD.
+function maxedNoticeBlock(betType, maxed, exceedData) {
+    const sentences = maxedSentences(betType, maxed, exceedData);
+    if (sentences.length === 0) return '❌ No se pudo aplicar la edición.';
+    return `❌ ${sentences.join(' ')}`;
 }
 
 // ========== FUNCIONES DE PARSEO DE APUESTAS ==========
@@ -2518,15 +2659,111 @@ app.post('/api/bets', async (req, res) => {
         }
     }
 
+    // La apuesta en edición se lee ANTES de validar los máximos acumulados.
+    // Motivo: la apuesta editada queda EXCLUIDA de `existingTotals`, así que para
+    // saber si el usuario solo intentó apostar más a números que ya estaban al
+    // máximo hay que conocer el monto que esa misma jugada ya tiene. Con los datos
+    // cargados aquí, `maxedExceeders` y `betTotalsByNum` pueden sumar ambas partes.
+    // La misma apuesta se reutiliza más abajo para el reembolso y el UPDATE.
+    let existingBet = null;
+    if (betId) {
+        const { data: foundBet } = await supabase.from('bets').select('*').eq('id', betId).maybeSingle();
+        if (!foundBet) return res.status(404).json({ error: 'Jugada no encontrada' });
+        if (parseInt(foundBet.user_id) !== parseInt(userId)) return res.status(403).json({ error: 'No autorizado para editar esta jugada' });
+
+        // El tipo de la petición debe coincidir con el de la jugada guardada: el
+        // UPDATE de más abajo no cambia bet_type, así que un tipo distinto
+        // dejaría items parseados en un tipo que nunca se persiste.
+        if (betType !== foundBet.bet_type) {
+            return res.status(400).json({ error: 'No se puede editar: el tipo de apuesta no coincide con la jugada original' });
+        }
+
+        if (foundBet.session_id) {
+            const { data: session } = await supabase.from('lottery_sessions').select('status').eq('id', foundBet.session_id).maybeSingle();
+            if (!session || session.status !== 'open') return res.status(400).json({ error: 'No se puede editar: sesión cerrada' });
+            // Los límites acumulados se calculan contra la sesión del body: si no
+            // es la sesión de la jugada, se excluirían/aplicarían topes de otra sesión.
+            if (String(foundBet.session_id) !== String(sessionId)) {
+                return res.status(400).json({ error: 'No se puede editar: la jugada pertenece a otra sesión' });
+            }
+        }
+        existingBet = foundBet;
+    }
+
     // Validar máximos acumulados por número único
     const limitCheck = await validateBetLimits(parsed.items, betType, priceData, {
         userId,
         sessionId: sessionId || null,
         excludeBetId: betId || null
     });
+    // Números ya apostados al máximo (por OTRAS jugadas) que la edición no puede
+    // aumentar. En una edición no se bloquea: se pregunta y, al continuar, se
+    // descartan esos números y se aplican el resto de los cambios de la jugada.
+    let maxedOnEdit = null;
     if (!limitCheck.ok) {
-        if (limitCheck.confirmable) {
-            // Único error: números repetidos que exceden el máximo. La web pregunta
+        // Montos que la apuesta en edición ya tiene por número. La jugada queda
+        // fuera de `existingTotals`, así que "ya está al máximo" hay que
+        // juzgarlo sumando ambas partes: esta jugada + las otras.
+        const currentTotals = existingBet ? betTotalsByNum(existingBet.items, betType) : null;
+        // Vistas separadas a propósito: `maxed` solo mira OTRAS jugadas y es la
+        // que decide el aviso preguntable ⚠️ (sin cambios respecto a antes);
+        // `maxedOverall` cuenta también esta jugada y es la que nombra el error
+        // ❌ de "no hay nada que aplicar".
+        const maxed = maxedExceeders(limitCheck.exceedData);
+        const maxedOverall = maxedExceeders(limitCheck.exceedData, currentTotals);
+        const isEditMaxed = !!betId && (maxed.cup.length > 0 || maxed.usd.length > 0);
+
+        // El usuario solo intentó apostar más a uno o varios números que ya
+        // estaban al máximo. Al recortar, la jugada queda idéntica a la
+        // guardada (o se queda vacía): no hay nada que aplicar, así que se
+        // responde con el texto exacto y se sigue editando — sin modal, sin
+        // reembolso y sin tocar saldo. Va antes de cualquier aviso para no caer
+        // en el modal de "omitir / apostar", que aquí devolvería un "No hubo
+        // cambios" sin explicar el porqué.
+        if (betId && existingBet) {
+            const clampedNoop = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
+            const nothingToApply = (clampedNoop.totalCUP <= 0 && clampedNoop.totalUSD <= 0)
+                || betTotalsEqual(betTotalsByNum(clampedNoop.items, betType), betTotalsByNum(existingBet.items, betType));
+            if (nothingToApply) {
+                return res.status(400).json({
+                    error: maxedNoticeBlock(betType, maxedOverall, limitCheck.exceedData),
+                    code: 'EDIT_NOTHING_TO_APPLY'
+                });
+            }
+        }
+
+        if (isEditMaxed) {
+            maxedOnEdit = maxed;
+            if (req.body.confirmLimitOverride === true) {
+                // Confirmado: el recorte deja en 0 (y descarta) los números ya al
+                // máximo, y ajusta al máximo los que aún tienen cupo libre.
+                const numsBeforeClamp = new Set(parsed.items.map(it => String(betNumOf(it, betType))));
+                const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
+                if (clamped.totalCUP <= 0 && clamped.totalUSD <= 0) {
+                    // Red de seguridad: el atajo de arriba ya corta este caso
+                    // antes de ofrecer el modal. Si aun así se llegara aquí, la
+                    // apuesta NO se toca (aún no se reembolsó nada): solo avisar.
+                    return res.status(400).json({
+                        error: maxedNoticeBlock(betType, maxedOverall, limitCheck.exceedData),
+                        code: 'EDIT_NOTHING_TO_APPLY'
+                    });
+                }
+                maxedOnEdit.dropped = [...numsBeforeClamp]
+                    .filter(n => !clamped.items.some(it => String(betNumOf(it, betType)) === n));
+                parsed.items = clamped.items;
+                totalCUP = clamped.totalCUP;
+                totalUSD = clamped.totalUSD;
+                effectiveRawText = serializeItemsToText(parsed.items, betType);
+            } else {
+                return res.status(400).json({
+                    error: maxedNoticeText(betType, maxed, limitCheck.exceedData),
+                    code: 'MAXED_NUMBERS_ON_EDIT',
+                    maxedCup: maxed.cup,
+                    maxedUsd: maxed.usd
+                });
+            }
+        } else if (limitCheck.confirmable) {
+            // Apuesta nueva: números repetidos que exceden el máximo. La web pregunta
             // si se apuesta hasta el máximo permitido (recorte), se omiten los
             // números excedidos o se cancela.
             if (req.body.confirmLimitOverride === true) {
@@ -2587,14 +2824,23 @@ app.post('/api/bets', async (req, res) => {
     const safe = v => isNaN(parseFloat(v)) ? 0 : parseFloat(v);
 
     // Si se proporciona betId -> actualizar apuesta existente (reembolso + aplicar nueva)
+    // `existingBet` ya está cargado y validado más arriba (antes de los límites),
+    // porque su contenido es necesario para detectar que la edición no tiene
+    // nada que aplicar.
     if (betId) {
-        const { data: existingBet } = await supabase.from('bets').select('*').eq('id', betId).maybeSingle();
-        if (!existingBet) return res.status(404).json({ error: 'Jugada no encontrada' });
-        if (parseInt(existingBet.user_id) !== parseInt(userId)) return res.status(403).json({ error: 'No autorizado para editar esta jugada' });
-
-        if (existingBet.session_id) {
-            const { data: session } = await supabase.from('lottery_sessions').select('status').eq('id', existingBet.session_id).maybeSingle();
-            if (!session || session.status !== 'open') return res.status(400).json({ error: 'No se puede editar: sesión cerrada' });
+        // --- La edición no cambió nada: cortar ANTES de tocar saldo/comisión ---
+        // Al editar, la jugada se excluye de `existingTotals`, así que el monto
+        // admisible es el hueco libre de las OTRAS jugadas. Si ese hueco coincide con
+        // lo que esta jugada ya tenía, `clampItemsToMax` devuelve exactamente los
+        // mismos items. Antes esto se guardaba como si fuera una edición real
+        // (reembolso, recálculo de comisión, aviso al referido y UPDATE sin efecto).
+        if (betTotalsEqual(betTotalsByNum(parsed.items, betType), betTotalsByNum(existingBet.items, betType))) {
+            return res.json({
+                success: true,
+                noChanges: true,
+                bet: existingBet,
+                updatedUser: user
+            });
         }
 
         // --- Datos de la apuesta original y balances actuales del apostador ---
@@ -2822,10 +3068,20 @@ app.post('/api/bets', async (req, res) => {
             if (newCommissionData.referrer_cup > 0) {
                 commissionUpdatePayload.bonus_updated_by_admin = null;
             }
-            await supabase
+            const { error: editCommissionError } = await supabase
                 .from('users')
                 .update(commissionUpdatePayload)
                 .eq('telegram_id', newCommissionData.referrer_id);
+            if (editCommissionError) {
+                // Solo se registra: abortar aquí dejaría la comisión vieja revertida
+                // sin la nueva, y un reintento la revertiría dos veces.
+                console.error('Error acreditando comisión nueva en edición:', {
+                    betId,
+                    referrerId: newCommissionData.referrer_id,
+                    commission: newCommissionData.commission_amount,
+                    error: editCommissionError
+                });
+            }
         }
 
         // Revertir bono restante si el referidor quedó por debajo del umbral
@@ -2901,7 +3157,14 @@ app.post('/api/bets', async (req, res) => {
         }
 
         const updatedUser = await getOrCreateUser(parseInt(userId));
-        return res.json({ success: true, bet: updatedBet, updatedUser });
+        // Si el recorte descartó números ya apostados a su máximo, se devuelven
+        // para que la web lo diga explícitamente en el aviso de "Jugada editada".
+        return res.json({
+            success: true,
+            bet: updatedBet,
+            updatedUser,
+            droppedMaxedNums: (maxedOnEdit?.dropped || []).map(String)
+        });
     }
 
     // Flujo normal: crear nueva apuesta y guardar cost_usd/cost_cup
@@ -3012,10 +3275,18 @@ app.post('/api/bets', async (req, res) => {
                     if (newBonus !== (parseFloat(referrer.bonus_cup) || 0)) updatePayload.bonus_cup = newBonus;
                     if (newCup > (parseFloat(referrer.cup) || 0)) updatePayload.bonus_updated_by_admin = null;
 
-                    await supabase
+                    const { error: newCommissionError } = await supabase
                         .from('users')
                         .update(updatePayload)
                         .eq('telegram_id', referrerId);
+                    if (newCommissionError) {
+                        console.error('Error acreditando comisión en apuesta nueva:', {
+                            betId: bet.id,
+                            referrerId,
+                            commission: commissionCUP,
+                            error: newCommissionError
+                        });
+                    }
 
                     let notifyMessage = `🔄 Has recibido una referencia\n\n` +
                         `👤 De: ${escapeHTML(referrerName)}\n` +
@@ -3046,7 +3317,7 @@ app.post('/api/bets', async (req, res) => {
                         console.warn('Error notificando al referidor:', e.message);
                     }
 
-                    await supabase
+                    const { error: betCommissionError } = await supabase
                         .from('bets')
                         .update({
                             referrer_id: referrerId,
@@ -3056,6 +3327,14 @@ app.post('/api/bets', async (req, res) => {
                             referrer_bonus_before: bonusMovedCup
                         })
                         .eq('id', bet.id);
+                    if (betCommissionError) {
+                        console.error('Error registrando comisión en la apuesta nueva:', {
+                            betId: bet.id,
+                            referrerId,
+                            commission: commissionCUP,
+                            error: betCommissionError
+                        });
+                    }
                 }
             }
         }
@@ -4738,6 +5017,7 @@ app.get('/api/admin/user/:targetUserId', async (req, res) => {
                 is_banned: user.is_banned,
                 banned_at: user.banned_at,
                 support_muted: !!user.support_muted,
+                support_muted_at: user.support_muted_at || null,
                 is_superadmin: isAdmin(targetUserId),
                 is_staff: await hasAdminRoles(targetUserId),
                 bonus_updated_by_admin: !!user.bonus_updated_by_admin,
