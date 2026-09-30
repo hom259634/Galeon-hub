@@ -42,6 +42,18 @@
             transform: scale(1.02);
             box-shadow: 0 0 25px rgba(0, 255, 255, 0.6);
         }
+        /* Botón principal sin cambios pendientes: gris y sin reacción al hover */
+        .btn-idle {
+            background-image: none !important;
+            background-color: #4b5563;
+            color: #9ca3af;
+            box-shadow: none !important;
+            cursor: not-allowed;
+        }
+        .btn-idle:hover {
+            transform: none;
+            box-shadow: none !important;
+        }
         .neon-text {
             text-shadow: 0 0 5px #00ffff, 0 0 10px #00ffff, 0 0 20px #00ffff;
         }
@@ -669,6 +681,18 @@
     </div>
 </div>
 
+<!-- MODAL para confirmar continuar con una edición que incluye números ya al máximo -->
+<div id="maxedEditModal" class="modal hidden" onclick="if(event.target===this) abortMaxedEdit()">
+    <div class="modal-content" style="padding-top:22px;">
+        <h3 class="text-lg font-bold text-white mb-4">4pu3$t4$ Qva®</h3>
+        <p id="maxedEditText" class="text-sm text-gray-300 mt-4 mb-6" style="line-height:1.4; white-space:pre-line"></p>
+        <div class="flex gap-3">
+            <button onclick="abortMaxedEdit()" class="flex-1 bg-gray-600 py-2 rounded-lg">No, abortar</button>
+            <button onclick="acceptMaxedEdit()" class="flex-1 bg-green-600 py-2 rounded-lg">Sí, continuar</button>
+        </div>
+    </div>
+</div>
+
 <!-- MODAL para ver jugadas de una sesión cerrada (sin cerrar la Web App) -->
 <div id="sessionExportModal" class="modal hidden">
     <div style="position: fixed; inset: 0; display: flex; flex-direction: column; background: #1f2437; border: 1px solid #00ffff; border-radius: 16px; overflow: hidden; z-index: 1001;">
@@ -941,7 +965,12 @@
             }
 
             window.editingBetId = null;
-            if (submitBetBtn) submitBetBtn.innerHTML = defaultSubmitBetBtnHtml;
+            window._betEditBaseline = null;
+            if (submitBetBtn) {
+                submitBetBtn.innerHTML = defaultSubmitBetBtnHtml;
+                submitBetBtn.classList.remove('btn-idle');
+                applySaveButtonState();
+            }
             if (clearForm) {
                 if (betInput) betInput.value = '';
                 if (betPreview) betPreview.innerHTML = '';
@@ -951,6 +980,18 @@
                 if (betFormContainer) betFormContainer.classList.add('hidden');
             }
             return false;
+        }
+
+        // Estado del botón principal según haya cambios pendientes de guardar.
+        // Solo aplica en modo edición: en apuesta nueva el botón siempre está activo.
+        // Mientras no haya cambios el botón queda deshabilitado y en gris, así que
+        // pulsarlo no hace nada (no se avisa al usuario de que no cambió nada).
+        // El bloqueo por envío en curso tiene prioridad para evitar dobles guardados.
+        function applySaveButtonState() {
+            if (!submitBetBtn) return;
+            const idle = !!window.editingBetId && betInput.value === window._betEditBaseline;
+            submitBetBtn.disabled = !!window._betSubmitting || idle;
+            submitBetBtn.classList.toggle('btn-idle', idle);
         }
 
         // Mostrar el modal y almacenar la acción pendiente cuando el usuario intenta
@@ -1476,6 +1517,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         }
 
         betInput.addEventListener('input', function() {
+            applySaveButtonState();
             if (!selectedBetType) return;
             const rawText = this.value;
             const parsed = parseBetMessage(rawText, selectedBetType);
@@ -1524,7 +1566,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             // Validar máximos acumulados por número único
             const limitCheck = validateBetLimits(parsed.items, selectedBetType, price);
-            if (!limitCheck.ok && !limitCheck.confirmable) {
+            // En una EDICIÓN no se bloquea aquí: el servidor vuelve a calcular los
+            // límites con datos frescos y, si hay números ya al máximo, devuelve
+            // MAXED_NUMBERS_ON_EDIT para preguntar en vez de cortar la edición.
+            // (El `userBets` local puede estar desactualizado y dar falsos positivos.)
+            if (!limitCheck.ok && !limitCheck.confirmable && !window.editingBetId) {
                 iziToast.error({ message: limitCheck.error });
                 return;
             }
@@ -1620,9 +1666,40 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         window.acceptLimitOverride = acceptLimitOverride;
         window.rejectLimitOverride = rejectLimitOverride;
 
+        // ---- Aviso: la edición incluye números ya apostados a su máximo ----
+        // Al continuar, el servidor descarta esos números y aplica el resto de los
+        // cambios de la jugada (recortando a su máximo lo que aún tenga cupo libre).
+        function showMaxedEditModal(noticeText) {
+            const textEl = document.getElementById('maxedEditText');
+            if (textEl) textEl.textContent = noticeText;
+            document.getElementById('maxedEditModal').classList.remove('hidden');
+        }
+
+        function acceptMaxedEdit() {
+            document.getElementById('maxedEditModal').classList.add('hidden');
+            const payload = pendingBetPayload;
+            pendingBetPayload = null;
+            if (!payload) return;
+            payload.confirmLimitOverride = true;
+            sendBetRequest(payload);
+        }
+
+        function abortMaxedEdit() {
+            document.getElementById('maxedEditModal').classList.add('hidden');
+            pendingBetPayload = null;
+            // Se sigue en modo edición: el texto y el botón "Guardar cambios" quedan
+            // como estaban para que el usuario ajuste la jugada a mano.
+            iziToast.info({ message: 'Tu apuesta no se modificó.' });
+        }
+        window.showMaxedEditModal = showMaxedEditModal;
+        window.acceptMaxedEdit = acceptMaxedEdit;
+        window.abortMaxedEdit = abortMaxedEdit;
+
         async function sendBetRequest(payload) {
             // Bloquear botón para evitar doble envío
+            window._betSubmitting = true;
             submitBetBtn.disabled = true;
+            submitBetBtn.classList.remove('btn-idle');
             const isEditing = !!window.editingBetId;
             submitBetBtn.innerHTML = isEditing ? '<i class="fas fa-save mr-2"></i>Guardando...' : '<i class="fas fa-check-circle mr-2"></i>Registrando...';
 
@@ -1634,9 +1711,32 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 });
                 const data = await res.json();
                 if (res.ok) {
+                    // El backend detectó que el recorte al máximo dejó la jugada igual
+                    // que como ya estaba (p.ej. los números ya estaban en su tope). No
+                    // se guardó nada, así que se avisa y se sigue en modo edición para
+                    // que el usuario pueda intentar otra cantidad.
+                    if (data.noChanges) {
+                        iziToast.info({ message: 'ℹ No hubo cambios en tu apuesta.' });
+                        loadBets();
+                        return;
+                    }
                     const wasOmitted = payload.omitLimitOverride === true;
                     const overLimitPhrase = overLimitTypePhrase([selectedBetType]).replace(/^./, c => c.toLowerCase());
-                    iziToast.success({ title: isEditing ? '✅ Jugada editada' : '✅ Jugada registrada', message: (wasOmitted ? `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.` : '¡Buena suerte!') + ' 🍀' });
+                    // Al confirmar el aviso de "ya al máximo", el servidor descarta
+                    // esos números: decirlo explícito en vez de un "¡Buena suerte!" mudo.
+                    const droppedMaxed = Array.isArray(data.droppedMaxedNums) ? data.droppedMaxedNums.filter(n => n !== '' && n != null) : [];
+                    let successMsg = '¡Buena suerte!';
+                    if (wasOmitted) {
+                        successMsg = `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.`;
+                    } else if (droppedMaxed.length > 0) {
+                        const pluralDropped = droppedMaxed.length > 1;
+                        // Un solo número: artículo y sustantivo en singular, con el
+                        // mismo término que usa el backend ("número" solo para fijo y
+                        // corridos, "centena" y "parlet").
+                        const singularPhrase = overLimitTypePhrase([selectedBetType], { singular: true });
+                        successMsg = `Se guardaron los cambios y se omitió${pluralDropped ? 'ron' : ''} ${pluralDropped ? overLimitPhrase : singularPhrase} ${joinListWithY(droppedMaxed)} por estar ya en su máximo.`;
+                    }
+                    iziToast.success({ title: isEditing ? '✅ Jugada editada' : '✅ Jugada registrada', message: successMsg + ' 🍀' });
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
@@ -1644,7 +1744,20 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     resetBetEditMode(true, true);
                     showSection('home');
                 } else {
-                    if (data.code === 'LIMIT_EXCEED_CONFIRMABLE' && data.exceedData) {
+                    if (data.code === 'MAXED_NUMBERS_ON_EDIT') {
+                        // Edición con uno o más números ya apostados a su máximo:
+                        // preguntar si continúa (se descartan esos números y se
+                        // aplican el resto de los cambios) o aborta.
+                        pendingBetPayload = payload;
+                        showMaxedEditModal(data.error);
+                    } else if (data.code === 'EDIT_NOTHING_TO_APPLY') {
+                        // Lo único que se intentó fue apostar más a números que ya
+                        // estaban al máximo: la apuesta queda tal como estaba, así
+                        // que se avisa en rojo y se sigue editando para que el
+                        // usuario corrija el texto a mano.
+                        iziToast.error({ message: data.error });
+                        loadBets();
+                    } else if (data.code === 'LIMIT_EXCEED_CONFIRMABLE' && data.exceedData) {
                         pendingBetPayload = payload;
                         showLimitOverrideModal(data.error, data.exceedData);
                     } else {
@@ -1656,13 +1769,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 iziToast.error({ message: 'Error de conexión' });
             } finally {
                 // Restaurar botón siempre, incluso si hubo error
-                submitBetBtn.disabled = false;
+                window._betSubmitting = false;
                 if (!window.editingBetId) {
                     submitBetBtn.innerHTML = defaultSubmitBetBtnHtml; // "Registrar apuesta"
                 } else {
                     // Si seguía en modo edición (porque falló), volver a "Guardar cambios"
                     submitBetBtn.innerHTML = '<i class="fas fa-save mr-2"></i>Guardar cambios';
                 }
+                // Re-evalua el estado inactivo: si el texto volvió al de la jugada
+                // cargada (p.ej. tras un noChanges), el botón queda gris de nuevo.
+                applySaveButtonState();
             }
         }
 
@@ -2283,7 +2399,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             betInput.dispatchEvent(new Event('input'));
                             // marcar que estamos editando para que el submit incluya betId
                             window.editingBetId = bet.id;
+                            // Línea base: el texto tal como quedó cargado, para detectar
+                            // si el usuario lo modifica antes de habilitar el guardado.
+                            window._betEditBaseline = betInput.value;
                             submitBetBtn.innerHTML = '<i class="fas fa-save mr-2"></i>Guardar cambios';
+                            applySaveButtonState();
                             iziToast.info({ message: 'Jugada cargada para editar. Modifica y guarda los cambios.👇🏻' });
                         }, 500);
                     }
@@ -5275,13 +5395,24 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             return labels[key] || (key.charAt(0).toUpperCase() + key.slice(1));
         }
 
-        function overLimitTypePhrase(betTypes) {
+        // Sustantivo de un tipo de apuesta, con artículo. El término es el mismo que
+        // usa el backend: "número" SOLO para fijo y corridos, "centena" (femenino)
+        // y "parlet". `singular` fuerza el singular aunque se combinen varios tipos,
+        // que es lo que hace falta en "se omitió <algo> 38 por estar ya en su máximo".
+        // Las apuestas son de un solo tipo, así que los llamantes siempre pasan un
+        // array con un elemento; las combinaciones de 2 y 3 tipos son defensivas.
+        function overLimitTypePhrase(betTypes, { singular = false } = {}) {
             const unique = [...new Set((betTypes || []).map(t => String(t || '').toLowerCase()))];
             const withArticles = [];
             if (unique.includes('fijo') || unique.includes('corridos')) withArticles.push('números');
             if (unique.includes('centena')) withArticles.push('centenas');
             if (unique.includes('parle')) withArticles.push('parlets');
-            if (withArticles.length === 0) return 'números';
+            if (withArticles.length === 0) return singular ? 'el número' : 'números';
+            if (singular) {
+                const one = withArticles[0];
+                const noun = one.replace(/s$/, '');
+                return (one === 'centenas' ? 'la ' : 'el ') + noun;
+            }
             if (withArticles.length === 1) {
                 return withArticles[0] === 'centenas' ? 'Las centenas' : `Los ${withArticles[0]}`;
             }
@@ -5640,12 +5771,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             unmutePollTarget = null;
         }
 
-        // Formato 12h (dd/mm/aaaa hh:mm AM/PM) para la fecha de último silencio.
+        // Formato 12h (dd/mm/aaaa hh:mm AM/PM) para la fecha de último silencio,
+        // siempre en hora de Cuba (no la del navegador del admin).
         function formatMutedAt(dateStr) {
             if (!dateStr) return '';
             const d = new Date(dateStr);
             if (isNaN(d.getTime())) return '';
-            return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+            return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Havana' });
         }
 
         // Sincroniza en tiempo real el botón "🔊 Desilenciar usuario" mientras el
