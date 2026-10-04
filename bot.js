@@ -311,8 +311,7 @@ async function notifySessionExporters(session) {
         try {
             // El superadmin siempre recibe el botón; el subadmin solo si hay apuestas,
             // de lo contrario recibe el mensaje sin botón y con el aviso de que no hay apuestas.
-            const isSuper = ADMIN_IDS.includes(Number(adminId));
-            const showButton = isSuper || hasBets;
+            const showButton = hasBets;
 
             const text =
                 `📊 <b>Jugadas</b>\n\n` +
@@ -407,14 +406,15 @@ async function notifyDailyBetsReport() {
 
     const hasBets = await dayHasBets(reportDate);
 
+    const showButton = hasBets;
     const text =
         `📊 <b>Jugadas del día</b>\n\n` +
         `📅 ${readableDate}\n\n` +
-        (hasBets
+        (showButton
             ? `Pulsa el botón para ver el resumen del día.`
             : `📭 No hubo apuestas en este día.`);
 
-    const replyMarkup = hasBets
+    const replyMarkup = showButton
         ? Markup.inlineKeyboard([
             [Markup.button.url('👁️ Ver resumen del día', await buildDailyReportUrl(reportDate))]
         ]).reply_markup
@@ -1193,6 +1193,13 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
 
     function isPlausible(currency, value) {
         if (value == null || isNaN(value)) return false;
+        // Rangos absolutos en CUP para evitar confusiones con columnas (USD vs CUP)
+        if (currency === 'TRX') {
+            return value >= 100 && value <= 500; // rango razonable para TRX en CUP
+        }
+        if (currency === 'USDT') {
+            return value >= 600 && value <= 1000; // rango razonable para USDT en CUP
+        }
         const base = currency === 'USDT' ? dbUsdt : dbTrx;
         if (base != null && base > 0) {
             return value >= (base - 200) && value <= (base + 200);
@@ -1219,8 +1226,19 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
         for (const cand of (candidates || [])) {
             const val = normalizeNumber(cand);
             if (val == null || !isPlausible(currency, val)) continue;
-            const dist = base != null && base > 0 ? Math.abs(val - base) : 0;
+            const dist = (base != null && base > 0 && Math.abs(val - base) <= 200) ? Math.abs(val - base) : 0;
             if (dist < bestDist) { best = val; bestDist = dist; }
+            else if (best == null) {
+                best = val;
+                bestDist = Infinity;
+            }
+        }
+        if (best == null) {
+            for (const cand of (candidates || [])) {
+                const val = normalizeNumber(cand);
+                if (val == null || !isPlausible(currency, val)) continue;
+                if (best == null || val < best) best = val;
+            }
         }
         return best;
     }
@@ -1240,7 +1258,15 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
                 const key = cur.toLowerCase();
                 if (result[key] != null) continue;
                 if (!line.includes(cur)) continue;
-                result[key] = pickBest(cur, line.match(/\d[\d.,]*/g));
+                const cands = line.match(/\d[\d.,]*/g);
+                if (cur === 'TRX') {
+                    const cupCands = (cands || []).map(normalizeNumber).filter(v => v != null && v >= 100 && v <= 500);
+                    if (cupCands.length > 0) {
+                        result.trx = Math.max(...cupCands);
+                        continue;
+                    }
+                }
+                result[key] = pickBest(cur, cands);
             }
         }
         if (result.usdt != null && result.trx != null) return result;
@@ -1253,7 +1279,15 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
             const idx = flat.indexOf(cur);
             if (idx === -1) continue;
             const window = flat.substring(idx + cur.length, idx + cur.length + 300);
-            result[key] = pickBest(cur, window.match(/\d[\d.,]*/g));
+            const cands = window.match(/\d[\d.,]*/g);
+            if (cur === 'TRX') {
+                const cupCands = (cands || []).map(normalizeNumber).filter(v => v != null && v >= 100 && v <= 500);
+                if (cupCands.length > 0) {
+                    result.trx = Math.max(...cupCands);
+                    continue;
+                }
+            }
+            result[key] = pickBest(cur, cands);
         }
         if (result.usdt != null && result.trx != null) return result;
 
@@ -2773,12 +2807,16 @@ bot.use(async (ctx, next) => {
             // que toque /start. Si es un usuario completamente nuevo, se le da la
             // bienvenida con cualquier interacción.
             if (ctx.session?.isNewUser) {
+                const isCallback = ctx.updateType === 'callback_query';
+                const isUserMessage = ctx.updateType === 'message';
                 const msgText = ctx.message?.text || '';
-                // Updates sin texto (my_chat_member, etc.) no deben disparar la
-                // redirección ni la bienvenida; solo updates de mensaje/callback
-                // con contenido. Esto evita que el desbloqueo del bot (que llega
-                // antes de /start) enviar el aviso de "selecciona el botón Inicio".
-                if (!msgText) return next();
+                // Updates de servicio sin texto ni callback (my_chat_member, inline_query,
+                // etc.) no deben disparar la redirección ni la bienvenida. Solo se
+                // bloquean las interacciones reales del usuario: texto, botones
+                // (callback_query) y adjuntos (fotos/stickers/documentos).
+                // Esto evita que el desbloqueo del bot (que llega antes de /start)
+                // envíe el aviso de "selecciona el botón Inicio".
+                if (!msgText && !isCallback && !isUserMessage) return next();
                 if (!/^\/start(?:\s|$)/.test(msgText)) {
                     if (ctx.session?.isDeletedUser) {
                         try {
@@ -2790,11 +2828,14 @@ bot.use(async (ctx, next) => {
                         } catch (blockErr) {
                             console.error('Error enviando aviso a usuario re-registrado:', blockErr);
                         }
-                        if (ctx.updateType === 'callback_query') {
+                        if (isCallback) {
                             await ctx.answerCbQuery().catch(() => {});
                         }
                         return;
                     }
+                    // Un usuario nuevo (no eliminado) que pulsa un botón sí opera
+                    // con normalidad: solo se le da la bienvenida cuando escribe.
+                    if (isCallback) return next();
                     try {
                         await sendNewUserWelcome(ctx);
                     } catch (welcomeErr) {
