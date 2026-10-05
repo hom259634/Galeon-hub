@@ -1405,8 +1405,10 @@ function clampItemsToMax(items, betType, exceedData) {
 
 // Omite las porciones (por moneda) que exceden el máximo permitido. Devuelve los
 // items restantes y sus totales. Si no queda nada, totalCUP/totalUSD serán 0.
+// También devuelve omittedItems (lo que se quedó fuera) para poder redactar el
+// aviso en singular o plural según cuántos números se omitieron.
 function omitExceededNumbers(items, betType, exceedData) {
-    if (!exceedData) return { items, totalCUP: 0, totalUSD: 0 };
+    if (!exceedData) return { items, totalCUP: 0, totalUSD: 0, omittedItems: [] };
     const cupExceeded = new Set((exceedData.cupExceeders || []).map(String));
     const usdExceeded = new Set((exceedData.usdExceeders || []).map(String));
     const newItems = items.filter(item => {
@@ -1424,7 +1426,8 @@ function omitExceededNumbers(items, betType, exceedData) {
         totalCUP += it.cup !== undefined ? parseFloat(it.cup) : (it.currency === 'CUP' ? parseFloat(it.amount) : 0);
         totalUSD += it.usd !== undefined ? parseFloat(it.usd) : (it.currency === 'USD' ? parseFloat(it.amount) : 0);
     }
-    return { items: newItems, totalCUP, totalUSD };
+    const omittedItems = items.filter(item => !newItems.includes(item));
+    return { items: newItems, totalCUP, totalUSD, omittedItems };
 }
 
 // Devuelve una línea de "Monto admisible" por cada número excedido que aún se
@@ -1576,12 +1579,18 @@ function maxedSentences(betType, maxed, exceedData) {
     return sentences;
 }
 
-// Texto del aviso al editar cuando hay números ya apostados a su máximo.
-// Una frase por moneda (CUP primero, luego USD) y la pregunta una sola vez.
-function maxedNoticeText(betType, maxed, exceedData) {
+// Texto del aviso cuando hay números ya apostados a su máximo, tanto al editar
+// como al registrar una apuesta nueva. Una frase por moneda (CUP primero, luego
+// USD) y la pregunta una sola vez. La pregunta nombra el flujo —"edición" al
+// editar, "apuesta" al registrar— para que una apuesta nueva no hable de
+// editar algo que el usuario está creando ahora.
+function maxedNoticeText(betType, maxed, exceedData, { esEdicion = true } = {}) {
     const sentences = maxedSentences(betType, maxed, exceedData);
     if (sentences.length === 0) return null;
-    return `${sentences.map(s => `⚠️ ${s}`).join(' ')}\n¿Deseas continuar con la edición?`;
+    const pregunta = esEdicion
+        ? '¿Deseas continuar con la edición?'
+        : '¿Deseas continuar con la apuesta?';
+    return `${sentences.map(s => `⚠️ ${s}`).join(' ')}\n${pregunta}`;
 }
 
 // Aviso que NO pregunta: se usa cuando la edición no tiene nada que aplicar
@@ -2697,12 +2706,17 @@ app.post('/api/bets', async (req, res) => {
         sessionId: sessionId || null,
         excludeBetId: betId || null
     });
-    // Números ya apostados a su máximo que la edición no puede aumentar. En una
-    // edición no se bloquea: se pregunta y, al continuar, esos números se quedan
-    // en el tope (conservando el monto que la jugada ya tenía) y se aplican el
-    // resto de los cambios de la jugada.
-    let maxedOnEdit = null;
+    // Números ya apostados a su máximo que la jugada no puede aumentar. No se
+    // bloquean: se pregunta y, al continuar, esos números quedan en su tope
+    // (conservando el monto que ya tenían, o en 0 si no les cabe nada) y se
+    // aplica el resto de la jugada. Aplica igual al editar y al registrar una
+    // apuesta nueva.
+    let maxedFlow = null;
+    // Números que el usuario eligió omitir al confirmar el modal clásico. Se
+    // devuelven al cliente para que redacte el aviso en singular o plural.
+    let omittedNums = [];
     if (!limitCheck.ok) {
+        const esEdicion = !!betId;
         // Montos que la apuesta en edición ya tiene por número. La jugada queda
         // fuera de `existingTotals`, así que "ya está al máximo" hay que
         // juzgarlo sumando ambas partes: esta jugada + las otras.
@@ -2713,7 +2727,7 @@ app.post('/api/bets', async (req, res) => {
         // inadvertido y la edición caería en el modal clásico de "apostar hasta
         // el máximo" en vez de preguntar con el aviso ⚠️.
         const maxedOverall = maxedExceeders(limitCheck.exceedData, currentTotals);
-        const isEditMaxed = !!betId && (maxedOverall.cup.length > 0 || maxedOverall.usd.length > 0);
+        const hayMaxed = maxedOverall.cup.length > 0 || maxedOverall.usd.length > 0;
 
         // El usuario solo intentó apostar más a uno o varios números que ya
         // estaban al máximo. Al recortar, la jugada queda idéntica a la
@@ -2734,8 +2748,20 @@ app.post('/api/bets', async (req, res) => {
             }
         }
 
-        if (isEditMaxed) {
-            maxedOnEdit = maxedOverall;
+        // En una apuesta NUEVA, un número ya en su tope no puede tumbar la línea
+        // entera: los demás números de la jugada son válidos y el usuario debe
+        // poder registrarlos. Se pregunta con el mismo aviso ⚠️ y, al continuar,
+        // ese número se omite y se aplica el resto. Si el recorte no deja NADA
+        // aplicable (todos los números de la línea estaban en su tope), no hay
+        // nada que preguntar y sigue el error plano de siempre.
+        let isMaxedFlow = hayMaxed;
+        if (isMaxedFlow && !esEdicion) {
+            const prueba = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
+            isMaxedFlow = prueba.totalCUP > 0 || prueba.totalUSD > 0;
+        }
+
+        if (isMaxedFlow) {
+            maxedFlow = maxedOverall;
             if (req.body.confirmLimitOverride === true) {
                 // Confirmado: el recorte ajusta a `máximo − otras jugadas` cada
                 // número excedido. Para los que ya estaban en su tope eso es
@@ -2753,7 +2779,7 @@ app.post('/api/bets', async (req, res) => {
                         code: 'EDIT_NOTHING_TO_APPLY'
                     });
                 }
-                maxedOnEdit.dropped = [...numsBeforeClamp]
+                maxedFlow.dropped = [...numsBeforeClamp]
                     .filter(n => !clamped.items.some(it => String(betNumOf(it, betType)) === n));
                 parsed.items = clamped.items;
                 totalCUP = clamped.totalCUP;
@@ -2761,8 +2787,8 @@ app.post('/api/bets', async (req, res) => {
                 effectiveRawText = serializeItemsToText(parsed.items, betType);
             } else {
                 return res.status(400).json({
-                    error: maxedNoticeText(betType, maxedOverall, limitCheck.exceedData),
-                    code: 'MAXED_NUMBERS_ON_EDIT',
+                    error: maxedNoticeText(betType, maxedOverall, limitCheck.exceedData, { esEdicion }),
+                    code: esEdicion ? 'MAXED_NUMBERS_ON_EDIT' : 'MAXED_NUMBERS_ON_BET',
                     maxedCup: maxedOverall.cup,
                     maxedUsd: maxedOverall.usd
                 });
@@ -2784,12 +2810,19 @@ app.post('/api/bets', async (req, res) => {
                 effectiveRawText = serializeItemsToText(parsed.items, betType);
             } else if (req.body.omitLimitOverride === true) {
                 const omitted = omitExceededNumbers(parsed.items, betType, limitCheck.exceedData);
+                omittedNums = [...new Set(omitted.omittedItems.map(it => String(betNumOf(it, betType))))];
                 if (omitted.totalCUP <= 0 && omitted.totalUSD <= 0) {
                     const isCentena = betType === 'centena';
-                    const pluralArticle = isCentena ? 'todas las' : 'todos los';
-                    const pluralType = (betType === 'fijo' || betType === 'corridos') ? 'números' : isCentena ? 'centenas' : betType === 'parle' ? 'parlets' : betType;
-                    const adjective = isCentena ? 'apostadas' : 'apostados';
-                    return res.status(400).json({ error: `❌ Has omitido ${pluralArticle} ${pluralType} ${adjective}. Por lo cual la jugada queda cancelada.` });
+                    // Si la jugada se canceló por quedarle un solo número omitido,
+                    // el aviso va en singular; con varios (o ninguno, que no debería
+                    // pasar aquí) se mantiene el plural de siempre.
+                    const one = omitted.omittedItems.length === 1;
+                    const article = isCentena ? (one ? 'toda la' : 'todas las') : (one ? 'todo el' : 'todos los');
+                    const typeWord = (betType === 'fijo' || betType === 'corridos') ? (one ? 'número' : 'números')
+                        : isCentena ? (one ? 'centena' : 'centenas')
+                            : betType === 'parle' ? (one ? 'parlet' : 'parlets') : betType;
+                    const adjective = isCentena ? (one ? 'apostada' : 'apostadas') : (one ? 'apostado' : 'apostados');
+                    return res.status(400).json({ error: `❌ Has omitido ${article} ${typeWord} ${adjective}. Por lo cual la jugada queda cancelada.` });
                 }
                 parsed.items = omitted.items;
                 totalCUP = omitted.totalCUP;
@@ -3166,11 +3199,13 @@ app.post('/api/bets', async (req, res) => {
         const updatedUser = await getOrCreateUser(parseInt(userId));
         // Si el recorte descartó números ya apostados a su máximo, se devuelven
         // para que la web lo diga explícitamente en el aviso de "Jugada editada".
+        // omittedNums es lo mismo pero para lo que el usuario eligió omitir.
         return res.json({
             success: true,
             bet: updatedBet,
             updatedUser,
-            droppedMaxedNums: (maxedOnEdit?.dropped || []).map(String)
+            droppedMaxedNums: (maxedFlow?.dropped || []).map(String),
+            omittedNums
         });
     }
 
@@ -3347,7 +3382,7 @@ app.post('/api/bets', async (req, res) => {
         }
     }
     const updatedUser = await getOrCreateUser(parseInt(userId));
-    res.json({ success: true, bet, updatedUser });
+    res.json({ success: true, bet, updatedUser, omittedNums });
     });
 });
 
@@ -3805,9 +3840,20 @@ app.get('/api/admin/config', requireAdmin, async (req, res) => {
 app.put('/api/admin/config', requireAdmin, async (req, res) => {
     const { bonusCupDefault, referralRate } = req.body;
     if (bonusCupDefault !== undefined) {
+        // Mismo criterio que las tasas de cambio: no reescribir el bono si el admin confirma el valor actual.
+        // El epsilon absorbe ruido de coma flotante sin tapar un cambio real (el input va en pasos de 0.01).
+        const currentBonus = await getBonusCupDefault();
+        if (Math.abs(currentBonus - parseFloat(bonusCupDefault)) < 1e-9) {
+            return res.status(409).json({ error: 'Este valor ya está registrado.' });
+        }
         await supabase.from('app_config').upsert({ key: 'bonus_cup_default', value: bonusCupDefault.toString() }, { onConflict: 'key' });
     }
     if (referralRate !== undefined) {
+        // Misma regla que PUT /api/admin/referral-rate: no reescribir la comisión si no cambia.
+        const current = await getReferralCommissionRate();
+        if (Math.abs(current - parseFloat(referralRate)) < 1e-9) {
+            return res.status(409).json({ error: 'Esta comisión ya está registrada.' });
+        }
         await supabase.from('app_config').upsert({ key: 'referral_commission_rate', value: referralRate.toString() }, { onConflict: 'key' });
     }
     res.json({ success: true });
@@ -3947,6 +3993,12 @@ app.put('/api/admin/referral-rate', requireAdmin, async (req, res) => {
     const { rate } = req.body;
     if (rate === undefined || isNaN(parseFloat(rate)) || parseFloat(rate) < 0) {
         return res.status(400).json({ error: 'Tasa inválida' });
+    }
+    // La tasa se guarda como fracción (5% -> 0.05), misma unidad que recibe este endpoint.
+    // El epsilon absorbe ruido de coma flotante sin tapar un cambio real (0.01pp = 1e-4).
+    const current = await getReferralCommissionRate();
+    if (Math.abs(current - parseFloat(rate)) < 1e-9) {
+        return res.status(409).json({ error: 'Esta comisión ya está registrada.' });
     }
     await supabase
         .from('app_config')

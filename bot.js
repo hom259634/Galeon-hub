@@ -1993,8 +1993,10 @@ function clampItemsToMax(items, betType, exceedData) {
 
 // Omite las porciones (por moneda) que exceden el máximo permitido. Devuelve los
 // items restantes y sus totales. Si no queda nada, totalCUP/totalUSD serán 0.
+// También devuelve omittedItems (lo que se quedó fuera) para poder redactar el
+// aviso de cancelación en singular o plural según cuántos números se omitieron.
 function omitExceededNumbers(items, betType, exceedData) {
-    if (!exceedData) return { items, totalCUP: 0, totalUSD: 0 };
+    if (!exceedData) return { items, totalCUP: 0, totalUSD: 0, omittedItems: [] };
     const cupExceeded = new Set((exceedData.cupExceeders || []).map(String));
     const usdExceeded = new Set((exceedData.usdExceeders || []).map(String));
     const newItems = items.filter(item => {
@@ -2012,7 +2014,8 @@ function omitExceededNumbers(items, betType, exceedData) {
         totalCUP += it.cup !== undefined ? parseFloat(it.cup) : (it.currency === 'CUP' ? parseFloat(it.amount) : 0);
         totalUSD += it.usd !== undefined ? parseFloat(it.usd) : (it.currency === 'USD' ? parseFloat(it.amount) : 0);
     }
-    return { items: newItems, totalCUP, totalUSD };
+    const omittedItems = items.filter(item => !newItems.includes(item));
+    return { items: newItems, totalCUP, totalUSD, omittedItems };
 }
 
 // Devuelve una línea de "Monto admisible" por cada número excedido que aún se
@@ -3387,10 +3390,15 @@ bot.action('bet_override_reject', async (ctx) => {
                 delete ctx.session.sessionId;
             }
             const isCentena = betType === 'centena';
-            const pluralArticle = isCentena ? 'todas las' : 'todos los';
-            const pluralType = (betType === 'fijo' || betType === 'corridos') ? 'números' : isCentena ? 'centenas' : betType === 'parle' ? 'parlets' : betType;
-            const adjective = isCentena ? 'apostadas' : 'apostados';
-            const cancelledMsg = `❌ Has omitido ${pluralArticle} ${pluralType} ${adjective}. Por lo cual la jugada queda cancelada.`;
+            // Si quedó fuera un solo número, el aviso va en singular; con varios
+            // (o ninguno, que no debería pasar aquí) se mantiene el plural.
+            const one = omitted.omittedItems.length === 1;
+            const article = isCentena ? (one ? 'toda la' : 'todas las') : (one ? 'todo el' : 'todos los');
+            const typeWord = (betType === 'fijo' || betType === 'corridos') ? (one ? 'número' : 'números')
+                : isCentena ? (one ? 'centena' : 'centenas')
+                    : betType === 'parle' ? (one ? 'parlet' : 'parlets') : betType;
+            const adjective = isCentena ? (one ? 'apostada' : 'apostadas') : (one ? 'apostado' : 'apostados');
+            const cancelledMsg = `❌ Has omitido ${article} ${typeWord} ${adjective}. Por lo cual la jugada queda cancelada.`;
             try {
                 await ctx.editMessageText(cancelledMsg, { parse_mode: 'HTML', reply_markup: undefined });
             } catch (e) {
@@ -5840,6 +5848,13 @@ bot.on(message('text'), async (ctx) => {
             return;
         }
         const rate = percent / 100;
+        // El valor guardado es la fracción (5% -> 0.05). Si no cambia, avisar y seguir esperando
+        // el nuevo valor (no se borra session.adminAction, igual que las tasas de cambio).
+        const current = await getReferralCommissionRate();
+        if (Math.abs(current - rate) < 1e-9) {
+            await ctx.reply('❌ Esta comisión ya está registrada.');
+            return;
+        }
         await supabase
             .from('app_config')
             .upsert({ key: 'referral_commission_rate', value: rate.toString() }, { onConflict: 'key' });
