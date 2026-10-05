@@ -1325,7 +1325,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     return !(cupRoom || usdRoom);
                 };
                 const confirmable = allNums.length > 0 && allNums.some(n => !alreadyMaxed(n));
-                return { ok: false, error: `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`, confirmable };
+                // ¿Queda algo que aplicar a esta línea? Un número que NO excede el
+                // máximo se conserva entero, y uno que excede pero aún tiene cupo
+                // se recorta. Solo cuando TODOS los números de la línea estaban ya
+                // en su tope no queda nada: entonces la apuesta no se puede
+                // registrar de ninguna forma y sí conviene cortar aquí. Si queda
+                // algo, deja decidir al servidor, que es quien tiene los límites
+                // frescos (este `userBets` local puede estar desactualizado).
+                const sinExceder = Object.keys(grouped).some(n => !cupExceeders.includes(n) && !usdExceeders.includes(n));
+                const aplicaAlgo = confirmable || sinExceder;
+                return { ok: false, error: `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`, confirmable, aplicaAlgo };
             }
             return { ok: true };
         }
@@ -1566,11 +1575,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             // Validar máximos acumulados por número único
             const limitCheck = validateBetLimits(parsed.items, selectedBetType, price);
-            // En una EDICIÓN no se bloquea aquí: el servidor vuelve a calcular los
-            // límites con datos frescos y, si hay números ya al máximo, devuelve
-            // MAXED_NUMBERS_ON_EDIT para preguntar en vez de cortar la edición.
-            // (El `userBets` local puede estar desactualizado y dar falsos positivos.)
-            if (!limitCheck.ok && !limitCheck.confirmable && !window.editingBetId) {
+            // En una EDICIÓN no se bloquea aquí, y en una apuesta nueva tampoco si
+            // queda algo aplicable: el servidor vuelve a calcular los límites con
+            // datos frescos y decide entre el aviso ⚠️ (un número ya está en su
+            // tope pero hay otros con cupo), el modal clásico de omitir/apostar o
+            // el error plano. (El `userBets` local puede estar desactualizado y
+            // dar falsos positivos.) Solo se corta cuando ningún número de la
+            // línea tiene cupo, porque así no hay nada que registrar.
+            if (!limitCheck.ok && !limitCheck.aplicaAlgo && !window.editingBetId) {
                 iziToast.error({ message: limitCheck.error });
                 return;
             }
@@ -1606,6 +1618,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         });
 
         let pendingBetPayload = null;
+        // 'edit' o 'bet': de qué flujo salió el aviso ⚠️ de números al máximo, para
+        // que "No, abortar" sepa si hay algo que descartar o solo cerrar.
+        let pendingMaxedFlow = null;
 
         function limitOverrideAdmissible(exceedData) {
             const parts = [];
@@ -1666,9 +1681,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         window.acceptLimitOverride = acceptLimitOverride;
         window.rejectLimitOverride = rejectLimitOverride;
 
-        // ---- Aviso: la edición incluye números ya apostados a su máximo ----
-        // Al continuar, el servidor descarta esos números y aplica el resto de los
-        // cambios de la jugada (recortando a su máximo lo que aún tenga cupo libre).
+        // ---- Aviso: la jugada incluye números ya apostados a su máximo ----
+        // Al continuar, el servidor descarta esos números y aplica el resto de la
+        // jugada (recortando a su máximo lo que aún tenga cupo libre). El mismo
+        // modal sirve al editar y al registrar una apuesta nueva; lo que cambia es
+        // qué hace "No, abortar" (solo hay algo que descartar si se editaba).
         function showMaxedEditModal(noticeText) {
             const textEl = document.getElementById('maxedEditText');
             if (textEl) textEl.textContent = noticeText;
@@ -1679,6 +1696,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             document.getElementById('maxedEditModal').classList.add('hidden');
             const payload = pendingBetPayload;
             pendingBetPayload = null;
+            pendingMaxedFlow = null;
             if (!payload) return;
             payload.confirmLimitOverride = true;
             sendBetRequest(payload);
@@ -1687,20 +1705,26 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
         function abortMaxedEdit() {
             document.getElementById('maxedEditModal').classList.add('hidden');
             pendingBetPayload = null;
-            // "No": la edición se descarta entera y el usuario sale a Mis jugadas
-            // para ver cómo quedó la original. El reset va forzado porque, si no,
-            // `showSection` abriría el modal de "¿descartar la edición?" encima de
-            // este y dejaría al usuario encadenando modales.
+            // Apostando no hay nada que descartar: la jugada ni siquiera se ha
+            // registrado todavía, así que solo se cierra el aviso y el usuario se
+            // queda en el formulario para corregir el texto a mano.
+            const eraApuestaNueva = pendingMaxedFlow === 'bet';
+            pendingMaxedFlow = null;
+            if (eraApuestaNueva) {
+                iziToast.info({ message: 'No se registró tu apuesta.' });
+                return;
+            }
             iziToast.info({ message: 'Tu apuesta no se modificó.' });
             resetBetEditMode(true, true);
             showSection('bets');
         }
 
-        // Cerrar el aviso sin responder: deja la edición tal cual para corregir el
-        // texto a mano. Distinto de "No", que sí la descarta (y navega).
+        // Cerrar el aviso sin responder: deja la jugada tal cual para corregir el
+        // texto a mano. Distinto de "No", que sí descarta (y navega) al editar.
         function dismissMaxedEdit() {
             document.getElementById('maxedEditModal').classList.add('hidden');
             pendingBetPayload = null;
+            pendingMaxedFlow = null;
         }
         window.showMaxedEditModal = showMaxedEditModal;
         window.acceptMaxedEdit = acceptMaxedEdit;
@@ -1737,16 +1761,29 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     // Al confirmar el aviso de "ya al máximo", el servidor descarta
                     // esos números: decirlo explícito en vez de un "¡Buena suerte!" mudo.
                     const droppedMaxed = Array.isArray(data.droppedMaxedNums) ? data.droppedMaxedNums.filter(n => n !== '' && n != null) : [];
+                    // Igual que droppedMaxed, pero para lo que se omitió al elegir
+                    // "No, omitir" en el modal clásico. Sin esto había que asumir el
+                    // plural y se escribía "Se omitieron los números..." aunque
+                    // hubiera quedado fuera uno solo.
+                    const omittedNums = Array.isArray(data.omittedNums) ? data.omittedNums.filter(n => n !== '' && n != null) : [];
                     let successMsg = '¡Buena suerte!';
                     if (wasOmitted) {
-                        successMsg = `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.`;
+                        if (omittedNums.length === 1) {
+                            const singularPhrase = overLimitTypePhrase([selectedBetType], { singular: true });
+                            successMsg = `Se omitió ${singularPhrase} ${omittedNums[0]} por exceder el máximo permitido.`;
+                        } else {
+                            successMsg = `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.`;
+                        }
                     } else if (droppedMaxed.length > 0) {
                         const pluralDropped = droppedMaxed.length > 1;
                         // Un solo número: artículo y sustantivo en singular, con el
                         // mismo término que usa el backend ("número" solo para fijo y
                         // corridos, "centena" y "parlet").
                         const singularPhrase = overLimitTypePhrase([selectedBetType], { singular: true });
-                        successMsg = `Se guardaron los cambios y se omitió${pluralDropped ? 'ron' : ''} ${pluralDropped ? overLimitPhrase : singularPhrase} ${joinListWithY(droppedMaxed)} por estar ya en su máximo.`;
+                        // Al registrar una apuesta nueva no "se guardaron cambios":
+                        // la jugada se está creando ahora.
+                        const prefijo = isEditing ? 'Se guardaron los cambios y' : 'Se registró la apuesta y';
+                        successMsg = `${prefijo} se omitió${pluralDropped ? 'ron' : ''} ${pluralDropped ? overLimitPhrase : singularPhrase} ${joinListWithY(droppedMaxed)} por estar ya en su máximo.`;
                     }
                     iziToast.success({ title: isEditing ? '✅ Jugada editada' : '✅ Jugada registrada', message: successMsg + ' 🍀' });
                     currentUser = data.updatedUser;
@@ -1756,11 +1793,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     resetBetEditMode(true, true);
                     showSection('home');
                 } else {
-                    if (data.code === 'MAXED_NUMBERS_ON_EDIT') {
-                        // Edición con uno o más números ya apostados a su máximo:
+                    if (data.code === 'MAXED_NUMBERS_ON_EDIT' || data.code === 'MAXED_NUMBERS_ON_BET') {
+                        // La jugada incluye uno o más números ya apostados a su máximo:
                         // preguntar si continúa (se descartan esos números y se
-                        // aplican el resto de los cambios) o aborta.
+                        // aplican el resto). Mismo modal para editar y para apostar;
+                        // lo que cambia es el texto de la pregunta ("edición" o
+                        // "apuesta") y qué hace "No, abortar".
                         pendingBetPayload = payload;
+                        pendingMaxedFlow = data.code === 'MAXED_NUMBERS_ON_BET' ? 'bet' : 'edit';
                         showMaxedEditModal(data.error);
                     } else if (data.code === 'EDIT_NOTHING_TO_APPLY') {
                         // Lo único que se intentó fue apostar más a números que ya
