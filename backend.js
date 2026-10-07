@@ -2817,7 +2817,7 @@ app.post('/api/bets', async (req, res) => {
                     // el aviso va en singular; con varios (o ninguno, que no debería
                     // pasar aquí) se mantiene el plural de siempre.
                     const one = omitted.omittedItems.length === 1;
-                    const article = isCentena ? (one ? 'toda la' : 'todas las') : (one ? 'todo el' : 'todos los');
+                    const article = isCentena ? (one ? 'la' : 'todas las') : (one ? 'el' : 'todos los');
                     const typeWord = (betType === 'fijo' || betType === 'corridos') ? (one ? 'número' : 'números')
                         : isCentena ? (one ? 'centena' : 'centenas')
                             : betType === 'parle' ? (one ? 'parlet' : 'parlets') : betType;
@@ -3569,7 +3569,25 @@ app.get('/api/user/:userId/bets', async (req, res) => {
         .select('*')
         .eq('user_id', userId)
         .order('placed_at', { ascending: false });
-    res.json(data || []);
+    const bets = data || [];
+
+    // La apuesta solo guarda session_id; para poder mostrar el turno (y su emoji)
+    // junto al nombre de la lotería hay que leerlo de la sesión. Una sola consulta
+    // con los session_id distintos del usuario, nunca una por apuesta. Se trocea
+    // por si el historial tiene muchos session_id: una lista enorme en el `in`
+    // podría pasar del límite de longitud de la petición y romper la pantalla.
+    const sessionIds = [...new Set(bets.map(b => b.session_id).filter(Boolean))];
+    const slotBySession = {};
+    const SESSION_CHUNK = 500;
+    for (let i = 0; i < sessionIds.length; i += SESSION_CHUNK) {
+        const { data: sessions } = await supabase
+            .from('lottery_sessions')
+            .select('id, time_slot')
+            .in('id', sessionIds.slice(i, i + SESSION_CHUNK));
+        (sessions || []).forEach(s => { slotBySession[s.id] = s.time_slot; });
+    }
+
+    res.json(bets.map(b => ({ ...b, time_slot: b.session_id != null ? (slotBySession[b.session_id] ?? null) : null })));
 });
 
 // --- Verificar si el usuario tiene un retiro pendiente ---
