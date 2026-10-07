@@ -2337,7 +2337,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 html += `<div class="bg-gray-800/50 p-4 rounded-xl bet-item mb-3" onclick="showBetDetail(${b.id})">
                     <div class="flex justify-between items-center">
                         <div>
-                            <span class="font-bold text-base">🎰 ${escapeHTML(b.lottery)} - ${escapeHTML(formatBetTypeLabel(b.bet_type))}</span>
+                            <span class="font-bold text-base">${turnEmoji(b.time_slot)} ${escapeHTML(b.lottery)} - ${escapeHTML(formatBetTypeLabel(b.bet_type))}</span>
                             <p class="text-xs text-gray-400">${date}</p>
                         </div>
                         <div class="text-right">
@@ -2411,7 +2411,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             betDetailModalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-2">Detalles de la jugada</h4>
-                <p class="text-sm text-gray-300 mb-1">🎰 ${escapeHTML(bet.lottery)} - ${escapeHTML(formatBetTypeLabel(bet.bet_type))}</p>
+                <p class="text-sm text-gray-300 mb-1">${turnEmoji(bet.time_slot)} ${escapeHTML(bet.lottery)} - ${escapeHTML(formatBetTypeLabel(bet.bet_type))}</p>
                 <p class="text-xs text-gray-400 mb-3">${fmtCuba(toCubaTs(bet.placed_at), true)}${fueEditada(bet) ? `<span class="block mt-0.5 text-cyan-400/90">✏️ Editada: ${fmtCuba(toCubaTs(bet.updated_at), false)}</span>` : ''}</p>
                 
                 <div class="mb-3">
@@ -5447,6 +5447,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             return labels[key] || (key.charAt(0).toUpperCase() + key.slice(1));
         }
 
+        // Emoji de la sesión (turno) a mostrar delante del nombre de la lotería en
+        // "Mis jugadas". Espejo de turnEmoji() de backend.js; el fallback 🎰 es el
+        // emoji que se usaba antes de conocer el turno.
+        function turnEmoji(slot) {
+            const s = String(slot || '').toLowerCase();
+            if (s.includes('mañana')) return '🌅';
+            if (s.includes('tarde')) return '☀️';
+            if (s.includes('noche')) return '🌙';
+            return '🎰';
+        }
+
         // Sustantivo de un tipo de apuesta, con artículo. El término es el mismo que
         // usa el backend: "número" SOLO para fijo y corridos, "centena" (femenino)
         // y "parlet". `singular` fuerza el singular aunque se combinen varios tipos,
@@ -6273,7 +6284,8 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                         approvedDeposits.forEach((d, i) => {
                             const date = new Date(d.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                             let cupLabel = '';
-                            if (d.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(d.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
+                            if (d.currency === 'USD') cupLabel = ` <span class="text-gray-400">(${(parseFloat(d.amount) * exchangeRates.rate).toFixed(2)} CUP)</span>`;
+                            else if (d.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(d.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
                             else if (d.currency === 'USDT') cupLabel = ` <span class="text-gray-400">(${(parseFloat(d.amount) * exchangeRates.rate_usdt).toFixed(2)} CUP)</span>`;
                             else if (d.currency === 'TRX') cupLabel = ` <span class="text-gray-400">(${(parseFloat(d.amount) * exchangeRates.rate_trx).toFixed(2)} CUP)</span>`;
                             depositsHtml += `
@@ -6297,7 +6309,8 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                         approvedWithdraws.forEach((w, i) => {
                             const date = new Date(w.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                             let cupLabel = '';
-                            if (w.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(w.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
+                            if (w.currency === 'USD') cupLabel = ` <span class="text-gray-400">(${(parseFloat(w.amount) * exchangeRates.rate).toFixed(2)} CUP)</span>`;
+                            else if (w.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(w.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
                             else if (w.currency === 'USDT') cupLabel = ` <span class="text-gray-400">(${(parseFloat(w.amount) * exchangeRates.rate_usdt).toFixed(2)} CUP)</span>`;
                             else if (w.currency === 'TRX') cupLabel = ` <span class="text-gray-400">(${(parseFloat(w.amount) * exchangeRates.rate_trx).toFixed(2)} CUP)</span>`;
                             withdrawsHtml += `
@@ -6375,7 +6388,8 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                                 allRej.forEach((r, i) => {
                                     const date = new Date(r.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
                                     let cupLabel = '';
-                                    if (r.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
+                                    if (r.currency === 'USD') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate).toFixed(2)} CUP)</span>`;
+                                    else if (r.currency === 'MLC') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_mlc).toFixed(2)} CUP)</span>`;
                                     else if (r.currency === 'USDT') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_usdt).toFixed(2)} CUP)</span>`;
                                     else if (r.currency === 'TRX') cupLabel = ` <span class="text-gray-400">(${(parseFloat(r.amount) * exchangeRates.rate_trx).toFixed(2)} CUP)</span>`;
                                     bodyHtml += `<div class="bg-gray-800/40 p-2 rounded text-sm flex justify-between items-center">
