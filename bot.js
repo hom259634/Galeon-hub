@@ -507,7 +507,7 @@ function formatBotDisplayName(name) {
     return display.endsWith('®') ? display : display + '®';
 }
 
-// Emoji del turno (sesión) a mostrar delante del nombre de la lotería en
+// Emoji del turno (sesión) a mostrar detrás del nombre de la lotería en
 // "Mis jugadas". Espejo de turnEmoji() de backend.js; si no se conoce el turno
 // no se pone ningún emoji (el mensaje queda como siempre).
 function turnEmoji(slot) {
@@ -520,7 +520,7 @@ function turnEmoji(slot) {
 
 async function buildLastBetsText(bets) {
     // La apuesta solo guarda session_id: hay que leer el turno de la sesión para
-    // poder anteponer su emoji al nombre de la lotería. Una sola consulta con los
+    // poder colocar su emoji detrás del nombre de la lotería. Una sola consulta con los
     // session_id distintos, nunca una por apuesta.
     const sessionIds = [...new Set((bets || []).map(b => b.session_id).filter(Boolean))];
     const slotBySession = {};
@@ -552,7 +552,7 @@ async function buildLastBetsText(bets) {
         const usd = (parseFloat(b.cost_usd) || 0).toFixed(2);
 
         text += `<b>${i + 1}.</b>\n` +
-            `<pre>Lotería    : ${turn}${turn ? ' ' : ''}${lottery}\nTipo       : ${betType}\nJugada:\n${rawText}\nMonto      : ${cup} CUP / ${usd} USD\nRegistrada : ${created}` +
+            `<pre>Lotería    : ${lottery}${turn ? ' ' + turn : ''}\nTipo       : ${betType}\nJugada:\n${rawText}\nMonto      : ${cup} CUP / ${usd} USD\nRegistrada : ${created}` +
             (edited ? `\nEditada    : ${edited}` : '') +
             `</pre>\n`;
     });
@@ -609,7 +609,7 @@ async function safeEdit(ctx, text, keyboard = null) {
 function clearPendingFlow(session) {
     const pendingKeys = [
         'supportReplyTo', 'supportReplyMessageId',
-        'awaitingBet', 'betType', 'lottery', 'sessionId', 'pendingBetOverride',
+        'awaitingBet', 'betType', 'lottery', 'sessionId', 'pendingBetOverride', 'pendingMaxedOverride',
         'awaitingDepositPhoto', 'awaitingDepositAmount', 'depositMethod', 'depositPhotoBuffer',
         'awaitingWithdrawAmount', 'withdrawMethod', 'withdrawAmount', 'withdrawCurrency',
         'awaitingWithdrawWallet', 'withdrawWallet',
@@ -2106,6 +2106,98 @@ function admissibleLinesForNumbers(items, betType, exceedData) {
     return lines;
 }
 
+// Números excedidos que NO admiten más monto porque el tope ya se consumió
+// entero: máximo − (otras jugadas + esta apuesta en edición) = 0. Para esos el
+// recorte no deja hueco, así que hay que preguntarle al usuario y, al continuar,
+// descartar el número y aplicar el resto de la jugada. Espejo de la función de
+// backend.js.
+// A diferencia de `alreadyMaxed` (que juzga el número entero), aquí el desglose es
+// POR MONEDA: un número puede estar al tope en CUP y aún tener hueco en USD, y en
+// ese caso solo se descarta su porción en CUP.
+// Devuelve { cup: [...], usd: [...] } con los números sin cupo libre por moneda.
+function maxedExceeders(exceedData, currentTotals = {}) {
+    const empty = { cup: [], usd: [] };
+    if (!exceedData) return empty;
+    const maxCup = exceedData.maxCup;
+    const maxUsd = exceedData.maxUsd;
+    const existingTotals = exceedData.existingTotals || {};
+    const ownTotals = currentTotals || {};
+    const cupExceeders = exceedData.cupExceeders || [];
+    const usdExceeders = exceedData.usdExceeders || [];
+
+    const cup = [];
+    const usd = [];
+    const allNums = [...new Set([...cupExceeders, ...usdExceeders])];
+    for (const num of allNums) {
+        const base = existingTotals[num] || { cup: 0, usd: 0 };
+        const own = ownTotals[num] || { cup: 0, usd: 0 };
+        const baseCup = (base.cup || 0) + (own.cup || 0);
+        const baseUsd = (base.usd || 0) + (own.usd || 0);
+        if (maxCup !== null && maxCup !== undefined && cupExceeders.some(n => String(n) === String(num)) && baseCup >= parseFloat(maxCup)) {
+            cup.push(num);
+        }
+        if (maxUsd !== null && maxUsd !== undefined && usdExceeders.some(n => String(n) === String(num)) && baseUsd >= parseFloat(maxUsd)) {
+            usd.push(num);
+        }
+    }
+    return { cup, usd };
+}
+
+// Frases del aviso de números ya apostados a su máximo, una por moneda
+// (CUP primero, luego USD) y SIN emoji inicial. Espejo de backend.js.
+function maxedSentences(betType, maxed, exceedData) {
+    const sentences = [];
+    // El sustantivo sale de `formatBetTypeLabel` para que este aviso use siempre
+    // el mismo término que los de límites y de monto admisible: "número" SOLO
+    // para fijo y corridos, "centena" para centena y "parlet" para parlete.
+    const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : formatBetTypeLabel(betType).toLowerCase();
+    const nounPlural = typeNoun === 'número' ? 'números' : typeNoun === 'centena' ? 'centenas' : `${typeNoun}s`;
+
+    const sortNums = (nums) => [...nums].sort((a, b) => {
+        const na = parseInt(a, 10);
+        const nb = parseInt(b, 10);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return String(a).localeCompare(String(b));
+    });
+
+    const sentenceFor = (nums, max, currency) => {
+        const list = sortNums(nums);
+        if (list.length === 0) return null;
+        const isPlural = list.length > 1;
+        const subject = isPlural
+            ? `${typeNoun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${joinListWithY(list)}`
+            : `${typeNoun === 'centena' ? 'La' : 'El'} ${typeNoun} ${list[0]}`;
+        const verb = isPlural ? 'fueron' : 'fue';
+        const participle = isPlural
+            ? `${typeNoun === 'centena' ? 'apostadas' : 'apostados'}`
+            : `${typeNoun === 'centena' ? 'apostada' : 'apostado'}`;
+        return `${subject} ya ${verb} ${participle} a su máximo permitido de ${parseFloat(max).toFixed(2)} ${currency}.`;
+    };
+
+    if (exceedData?.maxCup !== null && exceedData?.maxCup !== undefined) {
+        const s = sentenceFor(maxed.cup, exceedData.maxCup, 'CUP');
+        if (s) sentences.push(s);
+    }
+    if (exceedData?.maxUsd !== null && exceedData?.maxUsd !== undefined) {
+        const s = sentenceFor(maxed.usd, exceedData.maxUsd, 'USD');
+        if (s) sentences.push(s);
+    }
+    return sentences;
+}
+
+// Texto del aviso cuando hay números ya apostados a su máximo y al menos otro
+// número aprovechable. Una frase por moneda (CUP primero, luego USD) y la
+// pregunta. Espejo de backend.js; en el bot siempre es apuesta nueva, así que el
+// llamador pasa { esEdicion: false } para que pregunte por "la apuesta".
+function maxedNoticeText(betType, maxed, exceedData, { esEdicion = true } = {}) {
+    const sentences = maxedSentences(betType, maxed, exceedData);
+    if (sentences.length === 0) return null;
+    const pregunta = esEdicion
+        ? '¿Deseas continuar con la edición?'
+        : '¿Deseas continuar con la apuesta?';
+    return `${sentences.map(s => `⚠️ ${s}`).join(' ')}\n${pregunta}`;
+}
+
 // ========== COLOCAR LA JUGADA Y CONFIRMAR ==========
 // Debita saldos, registra la apuesta, procesa la comisión de referido y confirma.
 // Se usa tanto en el flujo normal como al confirmar el recorte al máximo permitido.
@@ -2396,7 +2488,18 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         ? overLimitTypePhrase([betType], { singular: true })
         : overLimitTypePhrase([betType]));
     const exceedVerb = overLimitSingular ? 'excedía' : 'excedían';
-    if (overLimitOpts.clamped) {
+    if (overLimitOpts.droppedMaxed && overLimitOpts.droppedMaxed.length > 0) {
+        // Mismo aviso que la web al confirmar el ⚠️ de números ya al máximo: se
+        // registra la apuesta y se dice qué números quedaron fuera por su tope.
+        const pluralDropped = overLimitOpts.droppedMaxed.length > 1;
+        const singularPhrase = overLimitTypePhrase([betType], { singular: true });
+        // En medio de la frase el sustantivo va en minúscula; el verbo concuerda
+        // ("se omitió" / "se omitieron"). Mismo texto que el toast de la web.
+        const droppedPhrase = pluralDropped
+            ? overLimitTypePhrase([betType]).replace(/^./, c => c.toLowerCase())
+            : singularPhrase;
+        confirmMsg += `\n\n🚫 Se registró la apuesta y ${pluralDropped ? 'se omitieron' : 'se omitió'} ${droppedPhrase} ${joinListWithY(overLimitOpts.droppedMaxed)} por estar ya en su máximo.`;
+    } else if (overLimitOpts.clamped) {
         const adjustVerb = overLimitSingular ? 'se ajustó' : 'se ajustaron';
         confirmMsg += `\n\nℹ️ ${overLimitPhrase} que ${exceedVerb} el máximo ${adjustVerb} al monto permitido.`;
     }
@@ -3453,6 +3556,72 @@ bot.action('bet_override_reject', async (ctx) => {
     } catch (e) {
         console.error('Error en bet_override_reject:', e);
         await ctx.reply('❌ La apuesta fue cancelada.', getMainKeyboard(ctx)).catch(() => {});
+    }
+});
+
+// --- Confirmación de apuesta nueva con números ya al máximo (MAXED_NUMBERS_ON_BET) ---
+// Espejo de la web: al continuar se descartan los números que ya estaban en su
+// tope y se aplica el resto de la jugada; al abortar no se registra nada.
+bot.action('bet_maxed_accept', async (ctx) => {
+    try {
+        await ctx.answerCbQuery().catch(() => {});
+        const pending = ctx.session?.pendingMaxedOverride;
+        if (!pending) {
+            await safeEdit(ctx, '⏳ Esta confirmación ya no está disponible. Por favor, envía tu jugada de nuevo.', null);
+            return;
+        }
+        const { betType, rawText, items, sessionId, exceedData } = pending;
+        if (!sessionId) {
+            await safeEdit(ctx, '❌ No se encontró la sesión de juego activa. Por favor inicia de nuevo con 🎲 Jugar.', getMainKeyboard(ctx));
+            if (ctx.session) delete ctx.session.pendingMaxedOverride;
+            return;
+        }
+
+        const clamped = clampItemsToMax(items, betType, exceedData);
+        if (clamped.totalCUP <= 0 && clamped.totalUSD <= 0) {
+            await safeEdit(ctx, '❌ Después del recorte no queda monto válido en la jugada. La apuesta fue cancelada.', getMainKeyboard(ctx));
+            if (ctx.session) delete ctx.session.pendingMaxedOverride;
+            return;
+        }
+        const numOf = (it) => betType === 'parle' ? (normalizeParleValue(it.numero) || it.numero) : it.numero;
+        const beforeNums = [...new Set(items.map(it => String(numOf(it))))];
+        const afterNums = new Set(clamped.items.map(it => String(numOf(it))));
+        const droppedMaxed = beforeNums.filter(n => !afterNums.has(n));
+
+        const uid = ctx.from.id;
+        const user = ctx.dbUser || { cup: 0, usd: 0, bonus_cup: 0 };
+        if (ctx.session) ctx.session.pendingMaxedOverride = null;
+
+        await placeBetAndConfirm(ctx, {
+            uid,
+            user,
+            betType,
+            playSessionId: sessionId,
+            rawText,
+            items: clamped.items,
+            totalCUP: clamped.totalCUP,
+            totalUSD: clamped.totalUSD,
+            session: ctx.session,
+            clamped: true,
+            droppedMaxed,
+            exceededNums: exceededNumsInItems(items, betType, exceedData)
+        });
+        // Eliminar el mensaje del aviso (la jugada ya se confirmó arriba).
+        try { await ctx.deleteMessage(); } catch (e) {}
+    } catch (e) {
+        console.error('Error en bet_maxed_accept:', e);
+        await ctx.reply('❌ Ocurrió un error al procesar la apuesta. Intenta de nuevo.', getMainKeyboard(ctx)).catch(() => {});
+    }
+});
+
+bot.action('bet_maxed_abort', async (ctx) => {
+    try {
+        await ctx.answerCbQuery().catch(() => {});
+        if (ctx.session) ctx.session.pendingMaxedOverride = null;
+        await safeEdit(ctx, '❌ No se registró tu apuesta.', getMainKeyboard(ctx));
+    } catch (e) {
+        console.error('Error en bet_maxed_abort:', e);
+        await ctx.reply('❌ No se registró tu apuesta.', getMainKeyboard(ctx)).catch(() => {});
     }
 });
 
@@ -7279,6 +7448,39 @@ bot.on(message('text'), async (ctx) => {
                 excludeBetId: null
             });
             if (!limitCheck.ok) {
+                // Números ya apostados a su máximo con al menos otro número
+                // aprovechable: mismo aviso ⚠️ que la web. Al continuar se descartan
+                // los que ya estaban en su tope y se aplica el resto de la jugada.
+                // Va antes del modal clásico para que, si hay un número al tope, el
+                // aviso sea el de "ya en su máximo" y no el de recorte/omisión.
+                const maxedOverall = maxedExceeders(limitCheck.exceedData, null);
+                const hayMaxed = maxedOverall.cup.length > 0 || maxedOverall.usd.length > 0;
+                let isMaxedFlow = hayMaxed;
+                if (isMaxedFlow) {
+                    // Solo preguntar si el recorte deja algo aplicable; si todos los
+                    // números de la línea estaban en su tope, sigue el error plano.
+                    const prueba = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
+                    isMaxedFlow = prueba.totalCUP > 0 || prueba.totalUSD > 0;
+                }
+                if (isMaxedFlow) {
+                    session.pendingMaxedOverride = {
+                        betType,
+                        rawText,
+                        items: parsed.items,
+                        sessionId: playSessionId,
+                        lottery: session.lottery || null,
+                        exceedData: limitCheck.exceedData
+                    };
+                    // Telegram dibuja los botones de izquierda a derecha: el
+                    // "No" va a la izquierda y el "Sí, continuar" a la derecha.
+                    await ctx.reply(maxedNoticeText(betType, maxedOverall, limitCheck.exceedData, { esEdicion: false }), {
+                        reply_markup: Markup.inlineKeyboard([
+                            [Markup.button.callback('❌ No, abortar', 'bet_maxed_abort'),
+                             Markup.button.callback('✅ Sí, continuar', 'bet_maxed_accept')]
+                        ]).reply_markup
+                    });
+                    return;
+                }
                 if (limitCheck.confirmable) {
                     // Único error: números repetidos que exceden el máximo → preguntar
                     // si se apuesta hasta el máximo permitido (recorte) o se cancela.
