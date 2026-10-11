@@ -2198,6 +2198,15 @@ function maxedNoticeText(betType, maxed, exceedData, { esEdicion = true } = {}) 
     return `${sentences.map(s => `⚠️ ${s}`).join(' ')}\n${pregunta}`;
 }
 
+// Aviso que NO pregunta (❌): se usa cuando todos los números de la línea ya
+// están apostados a su máximo, así que no queda nada aplicable. Espejo de
+// backend.js.
+function maxedNoticeBlock(betType, maxed, exceedData) {
+    const sentences = maxedSentences(betType, maxed, exceedData);
+    if (sentences.length === 0) return '❌ No se pudo aplicar la apuesta.';
+    return `❌ ${sentences.join(' ')}`;
+}
+
 // ========== COLOCAR LA JUGADA Y CONFIRMAR ==========
 // Debita saldos, registra la apuesta, procesa la comisión de referido y confirma.
 // Se usa tanto en el flujo normal como al confirmar el recorte al máximo permitido.
@@ -7496,7 +7505,11 @@ bot.on(message('text'), async (ctx) => {
                     const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
                     const admissibleLines = admissibleLinesForNumbers(parsed.items, betType, limitCheck.exceedData);
                     const isSingleOne = admissibleLines.length === 1 && /:\s*1\.00 (CUP|USD)\.$/.test(admissibleLines[0]);
-                    const question = isSingleOne ? '¿Deseas apostárselo?' : '¿Deseas apostárselos?';
+                    // El pronombre concuerda con el sustantivo: "apostárselo(s)" para
+                    // número/parlet y "apostársela(s)" para centena.
+                    const question = isSingleOne
+                        ? (betType === 'centena' ? '¿Deseas apostársela?' : '¿Deseas apostárselo?')
+                        : (betType === 'centena' ? '¿Deseas apostárselas?' : '¿Deseas apostárselos?');
                     const admissibleLine = admissibleLines.length > 0 ? `\n\n${admissibleLines.join('\n')}` : '';
                     const omitLabel = betType === 'centena' ? '❌ No, omitirla(s)' : '❌ No, omitirlo(s)';
                     // Telegram dibuja los botones de izquierda a derecha: el
@@ -7507,6 +7520,13 @@ bot.on(message('text'), async (ctx) => {
                              Markup.button.callback('✅ Sí, apostar', 'bet_override_accept')]
                         ]).reply_markup
                     });
+                    return;
+                }
+                // Todos los números excedidos están ya en su tope: no queda nada
+                // aplicable, así que el aviso correcto es el de "ya fue apostado a
+                // su máximo permitido" y no el genérico de "excede el monto máximo".
+                if (hayMaxed) {
+                    await ctx.reply(maxedNoticeBlock(betType, maxedOverall, limitCheck.exceedData), getMainKeyboard(ctx));
                     return;
                 }
                 await ctx.reply(limitCheck.error, getMainKeyboard(ctx));

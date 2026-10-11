@@ -2842,6 +2842,12 @@ app.post('/api/bets', async (req, res) => {
                 });
             }
         } else {
+            // Ningún número excedido tiene cupo libre: todos están ya apostados a
+            // su tope, así que el aviso correcto es el de "ya fue apostado a su
+            // máximo permitido" y no el genérico de "excede el monto máximo".
+            if (hayMaxed) {
+                return res.status(400).json({ error: maxedNoticeBlock(betType, maxedOverall, limitCheck.exceedData) });
+            }
             return res.status(400).json({ error: limitCheck.error });
         }
     }
