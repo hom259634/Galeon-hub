@@ -1334,7 +1334,18 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 // frescos (este `userBets` local puede estar desactualizado).
                 const sinExceder = Object.keys(grouped).some(n => !cupExceeders.includes(n) && !usdExceeders.includes(n));
                 const aplicaAlgo = confirmable || sinExceder;
-                return { ok: false, error: `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`, confirmable, aplicaAlgo };
+                // Cuando no queda nada aplicable, todos los números excedidos están
+                // ya en su tope: el aviso pasa a ser el de "ya fue apostado a su
+                // máximo permitido" en vez del genérico de "excede el monto máximo".
+                let error;
+                if (!aplicaAlgo) {
+                    const sentences = maxedSentences(betType, { cup: cupExceeders, usd: usdExceeders }, { maxCup, maxUsd });
+                    if (sentences.length > 0) error = `❌ ${sentences.join(' ')}`;
+                }
+                if (!error) {
+                    error = `❌ ${label} ${joinListWithY(allNums)} ${verb} el monto máximo de apuesta permitido de ${maxParts.join(' y ')}.`;
+                }
+                return { ok: false, error, confirmable, aplicaAlgo };
             }
             return { ok: true };
         }
@@ -1653,7 +1664,11 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     admissibleHtml = text;
                     isSingleOne = iso;
                 }
-                const question = isSingleOne ? '¿Deseas apostárselo?' : '¿Deseas apostárselos?';
+                // El pronombre concuerda con el sustantivo: "apostárselo(s)" para
+                // número/parlet y "apostársela(s)" para centena.
+                const question = isSingleOne
+                    ? (selectedBetType === 'centena' ? '¿Deseas apostársela?' : '¿Deseas apostárselo?')
+                    : (selectedBetType === 'centena' ? '¿Deseas apostárselas?' : '¿Deseas apostárselos?');
                 const admissibleLine = admissibleHtml ? `<br><br>${admissibleHtml}` : '';
                 textEl.innerHTML = `${errorText}${admissibleLine}<br>${question}`;
             }
@@ -1752,7 +1767,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     // se guardó nada, así que se avisa y se sigue en modo edición para
                     // que el usuario pueda intentar otra cantidad.
                     if (data.noChanges) {
-                        iziToast.info({ message: 'ℹ No hubo cambios en tu apuesta.' });
+                        iziToast.info({ message: 'ℹ️ No hubo cambios en tu apuesta.' });
                         loadBets();
                         return;
                     }
@@ -1770,7 +1785,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     if (wasOmitted) {
                         if (omittedNums.length === 1) {
                             const singularPhrase = overLimitTypePhrase([selectedBetType], { singular: true });
-                            successMsg = `Se omitió ${singularPhrase} ${omittedNums[0]} por exceder el máximo permitido.`;
+                            successMsg = `Se omitió ${singularPhrase} ${omittedNums[0]} por exceder el monto máximo permitido.`;
                         } else {
                             successMsg = `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.`;
                         }
@@ -2411,6 +2426,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             ` : '';
 
             const turn = turnEmoji(bet.time_slot);
+            const singleItem = bet.items && bet.items.length === 1;
+            const itemsLabel = bet.bet_type === 'centena' ? (singleItem ? '💯 Centena jugada:' : '💯 Centenas jugadas:') : bet.bet_type === 'parle' ? (singleItem ? '🔗 Parlet jugado:' : '🔗 Parlets jugados:') : bet.bet_type === 'fijo' ? (singleItem ? '🎯 Número jugado:' : '🎯 Números jugados:') : bet.bet_type === 'corridos' ? (singleItem ? '🏃 Número jugado:' : '🏃 Números jugados:') : (singleItem ? '📝 Número jugado:' : '📝 Números jugados:');
 
             betDetailModalBody.innerHTML = `
                 <h4 class="text-xl font-bold mb-2">Detalles de la jugada</h4>
@@ -2418,7 +2435,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 <p class="text-xs text-gray-400 mb-3">${fmtCuba(toCubaTs(bet.placed_at), true)}${fueEditada(bet) ? `<span class="block mt-0.5 text-cyan-400/90">✏️ Editada: ${fmtCuba(toCubaTs(bet.updated_at), false)}</span>` : ''}</p>
                 
                 <div class="mb-3">
-                    <p class="font-semibold mb-1">${bet.bet_type === 'centena' ? '💯 Centenas jugadas:' : bet.bet_type === 'parle' ? '🔗 Parlets jugados:' : bet.bet_type === 'fijo' ? '🎯 Números jugados:' : bet.bet_type === 'corridos' ? '🏃 Números jugados:' : '📝 Números jugados:'}</p>
+                    <p class="font-semibold mb-1">${itemsLabel}</p>
                     ${itemsHtml}
                 </div>
                 
@@ -5197,6 +5214,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
                 // Denegaciones
                 const rej = data.rejected || [];
+                let rejCUP = 0, rejUSD = 0;
+                rej.forEach(r => {
+                    const amt = parseFloat(r.amount) || 0;
+                    if (r.currency === 'USD') rejUSD += amt;
+                    else if (r.currency === 'CUP') rejCUP += amt;
+                    else rejCUP += parseFloat(r.amount_cup) || 0;
+                });
                 html += `<div class="mb-4">
                     <button onclick="toggleSection(this)" class="w-full text-left bg-gray-800/40 hover:bg-gray-700/40 p-3 rounded-xl flex items-center justify-between transition">
                         <span class="text-red-400 font-semibold flex items-center"><i class="fas fa-ban mr-2"></i> Denegaciones (${rej.length})</span>
@@ -5206,6 +5230,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 if (rej.length === 0) {
                     html += '<p class="text-gray-500 text-sm">No hay denegaciones de depósitos ni retiros.</p>';
                 } else {
+                    const rejCounts = {};
+                    for (const r of rej) rejCounts[r.currency] = (rejCounts[r.currency] || 0) + 1;
+                    html += `<div class="flex flex-wrap gap-1 mb-3">
+                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="rejections" data-filter="all" onclick="filterCurrency('rejections','all')">Todos</button>`;
+                    for (const cur of allCurrencies) {
+                        const cnt = rejCounts[cur] || 0;
+                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="rejections" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('rejections','${cur}')">${cur}</button>`;
+                    }
+                    html += `</div>`;
                     html += `<div class="max-h-64 overflow-y-auto">
                         <table class="w-full text-sm">
                             <thead>
@@ -5216,14 +5249,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                     <th class="pb-2">Fecha</th>
                                 </tr>
                             </thead>
-                            <tbody>`;
+                            <tbody id="rejectionsList">`;
                     rej.forEach((r, i) => {
                         const timeStr = formatTime12h(r.processed_at);
                         const typeIcon = r.type === 'depósito' ? '📥' : '📤';
                         const typeColor = r.type === 'depósito' ? 'text-cyan-300' : 'text-pink-300';
                         const amtColor = r.currency === 'USD' ? 'text-yellow-300' : 'text-gray-200';
                         const cupLabel = r.currency !== 'CUP' ? `<span class="text-gray-400 ml-1">(${r.amount_cup.toFixed(2)} CUP)</span>` : '';
-                        html += `<tr class="border-b border-gray-700/50">
+                        html += `<tr class="border-b border-gray-700/50" data-currency="${r.currency}">
                             <td class="py-2 pr-2">${escapeHTML(r.user_name)} ${r.username ? '@'+escapeHTML(r.username) : 'ID '+r.user_id}</td>
                             <td class="py-2 pr-2 ${typeColor}">${typeIcon} ${r.type}</td>
                             <td class="py-2 pr-2 ${amtColor}">${r.amount.toFixed(2)} ${r.currency}${cupLabel}</td>
@@ -5231,6 +5264,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         </tr>`;
                     });
                     html += `</tbody></table></div>`;
+                    html += `<div id="rejectionsEmpty" class="hidden text-gray-400 text-sm text-center py-4"></div>`;
+                    html += `<p class="text-xs text-gray-400 mt-1 whitespace-nowrap">Total denegado: ${rejCUP.toFixed(2)} CUP / ${rejUSD.toFixed(2)} USD</p>`;
                 }
                 html += `</div></div>`;
 
@@ -5326,12 +5361,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 }
                 clicked.classList.add('active', 'bg-emerald-600');
             }
-            const listId = section === 'deposits' ? 'depositsList' : 'withdrawalsList';
-            const emptyId = section === 'deposits' ? 'depositsEmpty' : 'withdrawalsEmpty';
+            const listId = section === 'deposits' ? 'depositsList' : section === 'withdrawals' ? 'withdrawalsList' : 'rejectionsList';
+            const emptyId = section === 'deposits' ? 'depositsEmpty' : section === 'withdrawals' ? 'withdrawalsEmpty' : 'rejectionsEmpty';
+            const rowSelector = section === 'rejections' ? 'tr' : 'div';
             const currencyNames = { CUP: 'CUP', USD: 'USD', USDT: 'USDT', TRX: 'TRX', MLC: 'MLC' };
-            const sectionNames = { deposits: 'depósitos aprobados', withdrawals: 'retiros aprobados' };
+            const sectionNames = { deposits: 'depósitos aprobados', withdrawals: 'retiros aprobados', rejections: 'denegaciones' };
             let visibleCount = 0;
-            document.querySelectorAll(`#${listId} > div`).forEach(item => {
+            document.querySelectorAll(`#${listId} > ${rowSelector}`).forEach(item => {
                 if (item.id === emptyId) return;
                 if (currency === 'all' || item.dataset.currency === currency) {
                     item.style.display = '';
@@ -5487,6 +5523,45 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 return `${first} y ${withArticles[1]}`;
             }
             return 'Los números, centenas y parlets';
+        }
+
+        // Frases del aviso de números ya apostados a su máximo, una por moneda
+        // (CUP primero, luego USD) y SIN emoji inicial. Espejo de backend.js.
+        function maxedSentences(betType, maxed, exceedData) {
+            const sentences = [];
+            const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : formatBetTypeLabel(betType).toLowerCase();
+            const nounPlural = typeNoun === 'número' ? 'números' : typeNoun === 'centena' ? 'centenas' : `${typeNoun}s`;
+
+            const sortNums = (nums) => [...nums].sort((a, b) => {
+                const na = parseInt(a, 10);
+                const nb = parseInt(b, 10);
+                if (!isNaN(na) && !isNaN(nb)) return na - nb;
+                return String(a).localeCompare(String(b));
+            });
+
+            const sentenceFor = (nums, max, currency) => {
+                const list = sortNums(nums);
+                if (list.length === 0) return null;
+                const isPlural = list.length > 1;
+                const subject = isPlural
+                    ? `${typeNoun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${joinListWithY(list)}`
+                    : `${typeNoun === 'centena' ? 'La' : 'El'} ${typeNoun} ${list[0]}`;
+                const verb = isPlural ? 'fueron' : 'fue';
+                const participle = isPlural
+                    ? `${typeNoun === 'centena' ? 'apostadas' : 'apostados'}`
+                    : `${typeNoun === 'centena' ? 'apostada' : 'apostado'}`;
+                return `${subject} ya ${verb} ${participle} a su máximo permitido de ${parseFloat(max).toFixed(2)} ${currency}.`;
+            };
+
+            if (exceedData?.maxCup !== null && exceedData?.maxCup !== undefined) {
+                const s = sentenceFor(maxed.cup, exceedData.maxCup, 'CUP');
+                if (s) sentences.push(s);
+            }
+            if (exceedData?.maxUsd !== null && exceedData?.maxUsd !== undefined) {
+                const s = sentenceFor(maxed.usd, exceedData.maxUsd, 'USD');
+                if (s) sentences.push(s);
+            }
+            return sentences;
         }
 
         // Añadir las funciones renderManageUsersView, searchUserByNameOrId y openBalanceModal
