@@ -1726,10 +1726,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             const eraApuestaNueva = pendingMaxedFlow === 'bet';
             pendingMaxedFlow = null;
             if (eraApuestaNueva) {
-                iziToast.info({ message: 'No se registró tu apuesta.' });
+                iziToast.info({ message: '❌ Tu apuesta no se registró.' });
                 return;
             }
-            iziToast.info({ message: 'Tu apuesta no se modificó.' });
+            iziToast.info({ message: 'ℹ️ Tu apuesta no se modificó.' });
             resetBetEditMode(true, true);
             showSection('bets');
         }
@@ -1773,23 +1773,37 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     }
                     const wasOmitted = payload.omitLimitOverride === true;
                     const overLimitPhrase = overLimitTypePhrase([selectedBetType]).replace(/^./, c => c.toLowerCase());
+                    // Sustantivo con artículo y mayúscula inicial, igual que el bot
+                    // (placeBetAndConfirm capitaliza el comienzo de la frase).
+                    const capPhrase = (singular) => overLimitTypePhrase([selectedBetType], { singular })
+                        .replace(/^./, c => c.toUpperCase());
                     // Al confirmar el aviso de "ya al máximo", el servidor descarta
                     // esos números: decirlo explícito en vez de un "¡Buena suerte!" mudo.
                     const droppedMaxed = Array.isArray(data.droppedMaxedNums) ? data.droppedMaxedNums.filter(n => n !== '' && n != null) : [];
                     // Igual que droppedMaxed, pero para lo que se omitió al elegir
-                    // "No, omitir" en el modal clásico. Sin esto había que asumir el
-                    // plural y se escribía "Se omitieron los números..." aunque
-                    // hubiera quedado fuera uno solo.
+                    // "No, omitir" en el modal clásico. Solo se usa para decidir si
+                    // el aviso va en singular o plural (el número ya no se lista).
                     const omittedNums = Array.isArray(data.omittedNums) ? data.omittedNums.filter(n => n !== '' && n != null) : [];
+                    // Números recortados al máximo permitido (modal clásico "apostar
+                    // hasta el máximo"). Mismo aviso que el bot ("se ajustó al monto
+                    // permitido"); solo se usa para el singular/plural.
+                    const clampedNums = Array.isArray(data.clampedNums) ? data.clampedNums.filter(n => n !== '' && n != null) : [];
                     let successMsg = '¡Buena suerte!';
+                    // Si la jugada quedó con omisiones o recortes, el toast pierde el
+                    // 🍀 de éxito: ya no es un "buena suerte" limpio.
+                    let hayOmision = false;
                     if (wasOmitted) {
-                        if (omittedNums.length === 1) {
-                            const singularPhrase = overLimitTypePhrase([selectedBetType], { singular: true });
-                            successMsg = `Se omitió ${singularPhrase} ${omittedNums[0]} por exceder el monto máximo permitido.`;
-                        } else {
-                            successMsg = `Se omitieron ${overLimitPhrase} que excedían el máximo permitido.`;
-                        }
+                        // Mismo texto que el bot (placeBetAndConfirm, rama omitted):
+                        // voz pasiva, concordando verbo y sustantivo en número y género.
+                        hayOmision = true;
+                        const singular = omittedNums.length === 1;
+                        const exceedVerb = singular ? 'excedía' : 'excedían';
+                        const omitVerb = singular
+                            ? (selectedBetType === 'centena' ? 'fue omitida' : 'fue omitido')
+                            : (selectedBetType === 'centena' ? 'fueron omitidas' : 'fueron omitidos');
+                        successMsg = `🚫 ${capPhrase(singular)} que ${exceedVerb} el monto máximo ${omitVerb}.`;
                     } else if (droppedMaxed.length > 0) {
+                        hayOmision = true;
                         const pluralDropped = droppedMaxed.length > 1;
                         // Un solo número: artículo y sustantivo en singular, con el
                         // mismo término que usa el backend ("número" solo para fijo y
@@ -1799,8 +1813,16 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         // la jugada se está creando ahora.
                         const prefijo = isEditing ? 'Se guardaron los cambios y' : 'Se registró la apuesta y';
                         successMsg = `${prefijo} se omitió${pluralDropped ? 'ron' : ''} ${pluralDropped ? overLimitPhrase : singularPhrase} ${joinListWithY(droppedMaxed)} por estar ya en su máximo.`;
+                    } else if (data.clamped && clampedNums.length > 0) {
+                        // Mismo aviso que el bot (placeBetAndConfirm, rama clamped): la
+                        // jugada se registró recortada al máximo permitido.
+                        hayOmision = true;
+                        const singular = clampedNums.length === 1;
+                        const exceedVerb = singular ? 'excedía' : 'excedían';
+                        const adjustVerb = singular ? 'se ajustó' : 'se ajustaron';
+                        successMsg = `ℹ️ ${capPhrase(singular)} que ${exceedVerb} el máximo ${adjustVerb} al monto permitido.`;
                     }
-                    iziToast.success({ title: isEditing ? '✅ Jugada editada' : '✅ Jugada registrada', message: successMsg + ' 🍀' });
+                    iziToast.success({ title: isEditing ? '✅ Jugada editada' : '✅ Jugada registrada', message: successMsg + (hayOmision ? '' : ' 🍀') });
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
@@ -5115,7 +5137,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Depósitos</p>
-                                <p class="text-sm font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.deposit_usd.toFixed(2)} USD</span></p>
+                                <p class="text-sm font-bold text-green-300">${t.deposit_cup.toFixed(2)} CUP <span class="text-white">/</span> <span class="text-yellow-300">${t.deposit_usd.toFixed(2)} USD</span></p>
                             </div>
                         </div>`;
                     }
@@ -5127,7 +5149,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             </div>
                             <div class="bg-gray-800/60 p-3 rounded-xl text-center flex-1">
                                 <p class="text-xs text-gray-400">💰 Total Retiros</p>
-                                <p class="text-sm font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-yellow-300">/ ${t.withdraw_usd.toFixed(2)} USD</span></p>
+                                <p class="text-sm font-bold text-red-300">${t.withdraw_cup.toFixed(2)} CUP <span class="text-white">/</span> <span class="text-yellow-300">${t.withdraw_usd.toFixed(2)} USD</span></p>
                             </div>
                         </div>`;
                     }
@@ -6460,8 +6482,22 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                             const rejCount = rejDep.length + rejWd.length;
                             const allRej = [...rejDep.map(d => ({ ...d, _type: 'Depósito' })), ...rejWd.map(w => ({ ...w, _type: 'Retiro' }))].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                             let bodyHtml = '';
+                            let rejTotalsHtml = '';
                             if (allRej.length === 0) bodyHtml = '<p class="text-gray-400">No tiene denegaciones.</p>';
                             else {
+                                let rejCUP = 0, rejUSD = 0;
+                                allRej.forEach(r => {
+                                    const amt = parseFloat(r.amount) || 0;
+                                    if (r.currency === 'USD') rejUSD += amt;
+                                    else if (r.currency === 'CUP') rejCUP += amt;
+                                    else {
+                                        const rate = r.currency === 'MLC' ? exchangeRates.rate_mlc
+                                                   : r.currency === 'USDT' ? exchangeRates.rate_usdt
+                                                   : r.currency === 'TRX' ? exchangeRates.rate_trx : 0;
+                                        rejCUP += amt * rate;
+                                    }
+                                });
+                                rejTotalsHtml = `<p class="text-xs text-gray-400 mt-1 whitespace-nowrap">Total denegado: ${rejCUP.toFixed(2)} CUP / ${rejUSD.toFixed(2)} USD</p>`;
                                 bodyHtml = '<div class="space-y-1">';
                                 allRej.forEach((r, i) => {
                                     const date = new Date(r.created_at).toLocaleString('es-CU', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
@@ -6482,7 +6518,10 @@ const date = new Date(b.placed_at).toLocaleString('es-CU', { day: 'numeric', mon
                                     <span class="text-red-400 font-semibold flex items-center"><i class="fas fa-ban mr-2"></i> Denegaciones (${rejCount})</span>
                                     <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                                 </button>
-                                <div class="mt-2 max-h-96 overflow-y-auto${allRej.length === 0 ? ' hidden' : ''}">${bodyHtml}</div>
+                                <div class="mt-2${allRej.length === 0 ? ' hidden' : ''}">
+                                    <div class="max-h-96 overflow-y-auto">${bodyHtml}</div>
+                                    ${rejTotalsHtml}
+                                </div>
                             </div>`;
                         })()}
                     `;
