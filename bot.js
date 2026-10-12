@@ -2305,14 +2305,21 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         if (session) delete session.pendingBetOverride;
         return false;
     }
-    const { data: stillOpen, error: openErr } = await supabase
+    const { data: sessionRow, error: openErr } = await supabase
         .from('lottery_sessions')
-        .select('id')
+        .select('id, lottery, status')
         .eq('id', playSessionId)
-        .eq('status', 'open')
         .maybeSingle();
-    if (openErr || !stillOpen) {
-        await ctx.reply('❌ La sesión de juego ya se cerró. Ya no se aceptan apuestas.', getMainKeyboard(ctx));
+    if (openErr || !sessionRow || sessionRow.status !== 'open') {
+        // Misma redacción que el guardia de horario (bot.js, flujo awaitingBet).
+        // La lotería se toma de la sesión de apuesta o, si faltara, de la propia
+        // sesión de juego en la BD: así el aviso oficial se arma siempre y no hay
+        // un texto distinto de reserva.
+        const scheduleMsg = buildScheduleUnavailableMessage(session?.lottery || sessionRow?.lottery);
+        await ctx.reply(
+            scheduleMsg || '⏰ <b>Horario no disponible</b>\n\n🔄 Por favor, intenta dentro del horario o elige otra lotería. ¡Te esperamos!',
+            { parse_mode: 'HTML', reply_markup: getMainKeyboard(ctx).reply_markup }
+        );
         if (session) delete session.pendingBetOverride;
         return false;
     }
@@ -2962,6 +2969,26 @@ function getAllowedHours(lotteryKey) {
         }
     };
     return schedules[lotteryKey];
+}
+
+// Aviso de "fuera de horario" para una lotería. Se usa tanto en el guardia de
+// horario del flujo de apuesta como al detectar una sesión ya cerrada, para que
+// el usuario reciba la misma redacción en ambos casos. Devuelve null si la
+// lotería no tiene horario configurado.
+function buildScheduleUnavailableMessage(lotteryName) {
+    const region = regionMap[lotteryName];
+    if (!region) return null;
+    const schedule = getAllowedHours(region.key);
+    if (!schedule) return null;
+    let hoursText = '';
+    for (const slot of schedule.slots) {
+        const startStr = moment().tz(TIMEZONE).hours(Math.floor(slot.start)).minutes((slot.start % 1) * 60).format('h:mm A');
+        const endStr = moment().tz(TIMEZONE).hours(Math.floor(slot.end)).minutes((slot.end % 1) * 60).format('h:mm A');
+        hoursText += `${slot.name}: ${startStr} - ${endStr}\n`;
+    }
+    return `⏰ <b>Horario no disponible para ${schedule.emoji} ${schedule.name}</b>\n\n` +
+        `📅 Los horarios permitidos (hora de Cuba) son:\n${hoursText}\n` +
+        `🔄 Por favor, intenta dentro del horario o elige otra lotería. ¡Te esperamos!`;
 }
 
 // ========== MIDDLEWARE MEJORADO (AHORA PASA EL CONTEXTO A GETUSER) ==========
@@ -3627,10 +3654,10 @@ bot.action('bet_maxed_abort', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
         if (ctx.session) ctx.session.pendingMaxedOverride = null;
-        await safeEdit(ctx, '❌ No se registró tu apuesta.', getMainKeyboard(ctx));
+        await safeEdit(ctx, '❌ Tu apuesta no se registró.', getMainKeyboard(ctx));
     } catch (e) {
         console.error('Error en bet_maxed_abort:', e);
-        await ctx.reply('❌ No se registró tu apuesta.', getMainKeyboard(ctx)).catch(() => {});
+        await ctx.reply('❌ Tu apuesta no se registró.', getMainKeyboard(ctx)).catch(() => {});
     }
 });
 
@@ -7363,17 +7390,7 @@ bot.on(message('text'), async (ctx) => {
                     return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
                 });
                 if (!isAllowed) {
-                    let hoursText = '';
-                    for (const slot of schedule.slots) {
-                        const startStr = moment().tz(TIMEZONE).hours(Math.floor(slot.start)).minutes((slot.start % 1) * 60).format('h:mm A');
-                        const endStr = moment().tz(TIMEZONE).hours(Math.floor(slot.end)).minutes((slot.end % 1) * 60).format('h:mm A');
-                        hoursText += `${slot.name}: ${startStr} - ${endStr}\n`;
-                    }
-                    const errorMsg = 
-                        `⏰ <b>Horario no disponible para ${schedule.emoji} ${schedule.name}</b>\n\n` +
-                        `📅 Los horarios permitidos (hora de Cuba) son:\n${hoursText}\n` +
-                        `🔄 Por favor, intenta dentro del horario o elige otra lotería. ¡Te esperamos!`;
-                    await ctx.reply(errorMsg, { parse_mode: 'HTML', reply_markup: getMainKeyboard(ctx).reply_markup });
+                    await ctx.reply(buildScheduleUnavailableMessage(betLottery), { parse_mode: 'HTML', reply_markup: getMainKeyboard(ctx).reply_markup });
                     delete session.awaitingBet;
                     delete session.betType;
                     delete session.sessionId;

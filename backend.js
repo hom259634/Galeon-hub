@@ -1318,6 +1318,25 @@ function betTotalsEqual(a, b) {
     return true;
 }
 
+// Números de la jugada que excedieron el máximo y por lo tanto van a recortarse
+// u omitirse. Se cruza exceedData con los items reales porque exceedData puede
+// traer números de otras apuestas. Espejo de bot.js; lo usan los avisos de
+// recorte/omisión para saber si van en singular o en plural.
+function exceededNumsInItems(items, betType, exceedData) {
+    if (!exceedData) return [];
+    const exceeded = new Set([
+        ...(exceedData.cupExceeders || []),
+        ...(exceedData.usdExceeders || [])
+    ].map(String));
+    if (exceeded.size === 0) return [];
+    const seen = new Set();
+    for (const item of items || []) {
+        const key = String(betNumOf(item, betType));
+        if (exceeded.has(key)) seen.add(key);
+    }
+    return [...seen];
+}
+
 // Recorta los montos de los números excedidos hasta el máximo permitido, teniendo
 // en cuenta apuestas previas (existingTotals). El monto admisible por número
 // (máximo − base) se reparte de forma EQUITATIVA entre las repeticiones de la
@@ -2715,6 +2734,11 @@ app.post('/api/bets', async (req, res) => {
     // Números que el usuario eligió omitir al confirmar el modal clásico. Se
     // devuelven al cliente para que redacte el aviso en singular o plural.
     let omittedNums = [];
+    // Recorte al máximo permitido (modal clásico "apostar hasta el máximo",
+    // o el ⚠️ de números ya al máximo). Se devuelve al cliente para que muestre
+    // el mismo aviso que el bot: "se ajustó al monto permitido".
+    let clampApplied = false;
+    let clampedNums = [];
     if (!limitCheck.ok) {
         const esEdicion = !!betId;
         // Montos que la apuesta en edición ya tiene por número. La jugada queda
@@ -2781,6 +2805,8 @@ app.post('/api/bets', async (req, res) => {
                 }
                 maxedFlow.dropped = [...numsBeforeClamp]
                     .filter(n => !clamped.items.some(it => String(betNumOf(it, betType)) === n));
+                clampApplied = true;
+                clampedNums = exceededNumsInItems(parsed.items, betType, limitCheck.exceedData);
                 parsed.items = clamped.items;
                 totalCUP = clamped.totalCUP;
                 totalUSD = clamped.totalUSD;
@@ -2804,6 +2830,8 @@ app.post('/api/bets', async (req, res) => {
                 if (clamped.totalCUP <= 0 && clamped.totalUSD <= 0) {
                     return res.status(400).json({ error: '❌ Después del recorte no queda monto válido en la jugada. La apuesta fue cancelada.' });
                 }
+                clampApplied = true;
+                clampedNums = exceededNumsInItems(parsed.items, betType, limitCheck.exceedData);
                 parsed.items = clamped.items;
                 totalCUP = clamped.totalCUP;
                 totalUSD = clamped.totalUSD;
@@ -3085,9 +3113,12 @@ app.post('/api/bets', async (req, res) => {
                         }
                     } catch (e) {}
                 } else {
-                    // Sin migración, solo aviso genérico
+                    // Sin migración, solo aviso genérico. Si la comisión se acreditó
+                    // al bono (destination === 'bonus_cup'), hablamos de "bono";
+                    // si fue al saldo principal, se mantiene "saldo".
+                    const balanceWord = destination === 'bonus_cup' ? 'bono' : 'saldo';
                     try {
-                        const genericMsg = `ℹ️ Tu referido <b>${escapeHTML(bettorName)}</b> ha editado el monto de una apuesta. Tu saldo actual ha cambiado. Por favor, consulta.`;
+                        const genericMsg = `ℹ️ Tu referido <b>${escapeHTML(bettorName)}</b> ha editado el monto de una apuesta. Tu ${balanceWord} actual ha cambiado. Por favor, consulta.`;
                         if (bot && bot.telegram) {
                             await bot.telegram.sendMessage(newReferrerId, genericMsg, { parse_mode: 'HTML' });
                         } else {
@@ -3211,7 +3242,9 @@ app.post('/api/bets', async (req, res) => {
             bet: updatedBet,
             updatedUser,
             droppedMaxedNums: (maxedFlow?.dropped || []).map(String),
-            omittedNums
+            omittedNums,
+            clamped: clampApplied,
+            clampedNums
         });
     }
 
@@ -3388,7 +3421,15 @@ app.post('/api/bets', async (req, res) => {
         }
     }
     const updatedUser = await getOrCreateUser(parseInt(userId));
-    res.json({ success: true, bet, updatedUser, omittedNums });
+    res.json({
+        success: true,
+        bet,
+        updatedUser,
+        droppedMaxedNums: (maxedFlow?.dropped || []).map(String),
+        omittedNums,
+        clamped: clampApplied,
+        clampedNums
+    });
     });
 });
 
