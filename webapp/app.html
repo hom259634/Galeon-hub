@@ -1789,13 +1789,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     // permitido"); solo se usa para el singular/plural.
                     const clampedNums = Array.isArray(data.clampedNums) ? data.clampedNums.filter(n => n !== '' && n != null) : [];
                     let successMsg = '¡Buena suerte!';
-                    // Si la jugada quedó con omisiones o recortes, el toast pierde el
-                    // 🍀 de éxito: ya no es un "buena suerte" limpio.
-                    let hayOmision = false;
                     if (wasOmitted) {
                         // Mismo texto que el bot (placeBetAndConfirm, rama omitted):
                         // voz pasiva, concordando verbo y sustantivo en número y género.
-                        hayOmision = true;
                         const singular = omittedNums.length === 1;
                         const exceedVerb = singular ? 'excedía' : 'excedían';
                         const omitVerb = singular
@@ -1803,7 +1799,6 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             : (selectedBetType === 'centena' ? 'fueron omitidas' : 'fueron omitidos');
                         successMsg = `🚫 ${capPhrase(singular)} que ${exceedVerb} el monto máximo ${omitVerb}.`;
                     } else if (droppedMaxed.length > 0) {
-                        hayOmision = true;
                         const pluralDropped = droppedMaxed.length > 1;
                         // Un solo número: artículo y sustantivo en singular, con el
                         // mismo término que usa el backend ("número" solo para fijo y
@@ -1816,13 +1811,12 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     } else if (data.clamped && clampedNums.length > 0) {
                         // Mismo aviso que el bot (placeBetAndConfirm, rama clamped): la
                         // jugada se registró recortada al máximo permitido.
-                        hayOmision = true;
                         const singular = clampedNums.length === 1;
                         const exceedVerb = singular ? 'excedía' : 'excedían';
                         const adjustVerb = singular ? 'se ajustó' : 'se ajustaron';
                         successMsg = `ℹ️ ${capPhrase(singular)} que ${exceedVerb} el máximo ${adjustVerb} al monto permitido.`;
                     }
-                    iziToast.success({ title: isEditing ? '✅ Jugada editada' : '✅ Jugada registrada', message: successMsg + (hayOmision ? '' : ' 🍀') });
+                    iziToast.success({ title: isEditing ? '✅ Jugada editada' : '✅ Jugada registrada', message: successMsg + ' 🍀' });
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
@@ -2527,7 +2521,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 
                 if (res.ok) {
                     const data = await res.json();
-                    iziToast.success({ message: 'Jugada cancelada y saldo reembolsado' });
+                    iziToast.success({ message: '❌ Jugada cancelada y saldo reembolsado.' });
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
@@ -5172,10 +5166,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const depCounts = {};
                     for (const d of data.deposits) depCounts[d.currency] = (depCounts[d.currency] || 0) + 1;
                     html += `<div class="flex flex-wrap gap-1 mb-3">
-                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="all" onclick="filterCurrency('deposits','all')">Todos</button>`;
+                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="all" data-count="${data.deposits.length}" onclick="filterCurrency('deposits','all')">Todos (${data.deposits.length})</button>`;
                     for (const cur of allCurrencies) {
                         const cnt = depCounts[cur] || 0;
-                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('deposits','${cur}')">${cur}</button>`;
+                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('deposits','${cur}')">${cur} (${cnt})</button>`;
                     }
                     html += `</div>`;
                     html += `<div id="depositsList" class="max-h-96 overflow-y-auto space-y-1">`;
@@ -5210,10 +5204,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const wdCounts = {};
                     for (const w of data.withdrawals) wdCounts[w.currency] = (wdCounts[w.currency] || 0) + 1;
                     html += `<div class="flex flex-wrap gap-1 mb-3">
-                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="all" onclick="filterCurrency('withdrawals','all')">Todos</button>`;
+                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="all" data-count="${data.withdrawals.length}" onclick="filterCurrency('withdrawals','all')">Todos (${data.withdrawals.length})</button>`;
                     for (const cur of allCurrencies) {
                         const cnt = wdCounts[cur] || 0;
-                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('withdrawals','${cur}')">${cur}</button>`;
+                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('withdrawals','${cur}')">${cur} (${cnt})</button>`;
                     }
                     html += `</div>`;
                     html += `<div id="withdrawalsList" class="max-h-96 overflow-y-auto space-y-1">`;
@@ -5255,10 +5249,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     const rejCounts = {};
                     for (const r of rej) rejCounts[r.currency] = (rejCounts[r.currency] || 0) + 1;
                     html += `<div class="flex flex-wrap gap-1 mb-3">
-                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="rejections" data-filter="all" onclick="filterCurrency('rejections','all')">Todos</button>`;
+                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="rejections" data-filter="all" data-count="${rej.length}" onclick="filterCurrency('rejections','all')">Todos (${rej.length})</button>`;
                     for (const cur of allCurrencies) {
                         const cnt = rejCounts[cur] || 0;
-                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="rejections" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('rejections','${cur}')">${cur}</button>`;
+                        html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="rejections" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('rejections','${cur}')">${cur} (${cnt})</button>`;
                     }
                     html += `</div>`;
                     html += `<div class="max-h-64 overflow-y-auto">
@@ -5372,8 +5366,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             });
             document.querySelectorAll(`[data-section="${section}"]`).forEach(b => {
                 const f = b.dataset.filter;
-                if (f === 'all') b.textContent = 'Todos';
-                else b.textContent = f;
+                if (f === 'all') b.textContent = `Todos (${b.dataset.count || 0})`;
+                else b.textContent = `${f} (${b.dataset.count || 0})`;
             });
             const clicked = document.querySelector(`[data-section="${section}"][data-filter="${currency}"]`);
             if (clicked) {
