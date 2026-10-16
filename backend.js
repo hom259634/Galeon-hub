@@ -142,10 +142,12 @@ async function requireAdminOrRole(req, res, next, allowedRoles = []) {
 // ========== SEGUIMIENTO DE NOTIFICACIONES (para reflejar decisiones web ↔ bot) ==========
 const pendingNotifications = new Map(); // key: "deposit_{id}" o "withdraw_{id}" -> [{chatId, messageId}]
 
-async function updatePendingNotifications(key, statusText) {
+async function updatePendingNotifications(key, statusText, excludeChatId) {
     const entries = pendingNotifications.get(key);
     if (!entries) return;
     for (const { chatId, messageId } of entries) {
+        // No editar la notificación del admin que ejecutó la acción (p. ej. el que rechazó).
+        if (excludeChatId != null && Number(chatId) === Number(excludeChatId)) continue;
         try {
             await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
                 chat_id: chatId,
@@ -762,7 +764,7 @@ async function buildRealBalanceDebitPlan(user, amount, currency, rateUSDOverride
 }
 
 // ========== FUNCIÓN GETORCREATEUSER CON MANEJO DE ERROR DE COLUMNA ==========
-async function getOrCreateUser(telegramId, firstName = '', username = null) {
+async function getOrCreateUser(telegramId, firstName = '', username = null, syncUsername = false) {
     try {
         let isNewUser = false;
         let { data: user, error: selectError } = await supabase
@@ -829,7 +831,18 @@ async function getOrCreateUser(telegramId, firstName = '', username = null) {
             }
         } else {
             const updates = {};
-            if (username && user.username !== username) {
+            // Sincroniza el @username SOLO cuando la fuente es autoritativa
+            // (syncUsername = true, p. ej. /api/auth con el initData de Telegram).
+            // Sin ese flag, los endpoints que llaman getOrCreateUser(id) sin
+            // username (depósitos, apuestas, transferencias...) borrarían el @.
+            //  - Autoritativo: sincroniza en AMBOS sentidos (cambio y eliminación).
+            //  - No autoritativo: comportamiento viejo, solo actualiza si llega un @.
+            if (syncUsername) {
+                const incoming = (typeof username === 'string' && username.trim() !== '') ? username : null;
+                if ((user.username || null) !== incoming) {
+                    updates.username = incoming;
+                }
+            } else if (username && user.username !== username) {
                 updates.username = username;
             }
             if (firstName && user.first_name !== firstName) {
@@ -841,6 +854,8 @@ async function getOrCreateUser(telegramId, firstName = '', username = null) {
                         .from('users')
                         .update(updates)
                         .eq('telegram_id', telegramId);
+                    // Reflejar el cambio en el objeto devuelto para esta misma request.
+                    Object.assign(user, updates);
                 } catch (e) {
                     console.error('Error actualizando perfil:', e);
                 }
@@ -1945,7 +1960,7 @@ app.post('/api/auth', async (req, res) => {
         console.error('Error verificando deleted_users en /api/auth:', e);
     }
 
-    const user = await getOrCreateUser(tgUser.id, tgUser.first_name, tgUser.username);
+    const user = await getOrCreateUser(tgUser.id, tgUser.first_name, tgUser.username, true);
     if (user && user.is_banned) {
         return res.status(403).json({ error: 'Tu cuenta ha sido baneada.' });
     }
@@ -2198,8 +2213,8 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[
-                        { text: '✅ Aprobar', callback_data: `approve_deposit_${request.id}` },
-                        { text: '❌ Rechazar', callback_data: `reject_deposit_${request.id}` }
+                        { text: '❌ Rechazar', callback_data: `reject_deposit_${request.id}` },
+                        { text: '✅ Aprobar', callback_data: `approve_deposit_${request.id}` }
                     ]]
                 }
             });
@@ -2347,8 +2362,8 @@ app.post('/api/withdraw-requests', async (req, res) => {
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[
-                        { text: '✅ Aprobar', callback_data: `approve_withdraw_${request.id}` },
-                        { text: '❌ Rechazar', callback_data: `reject_withdraw_${request.id}` }
+                        { text: '❌ Rechazar', callback_data: `reject_withdraw_${request.id}` },
+                        { text: '✅ Aprobar', callback_data: `approve_withdraw_${request.id}` }
                     ]]
                 }
             });
@@ -4954,11 +4969,15 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
                 : `${request.amount} ${currencyNorm}`;
             const creditCurrency = currencyNorm === 'USD' ? 'USD' : 'CUP';
             const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
+            // Depósitos en una moneda distinta de CUP/USD (USDT, TRX, MLC): el monto
+            // se sigue acreditando en CUP, pero el texto dice "saldo principal" en
+            // vez de "saldo CUP".
+            const destinationLabel = (currencyNorm !== 'CUP' && currencyNorm !== 'USD') ? 'principal' : creditCurrency;
 
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
                 `💰 Monto depositado: ${depositedAmountText}\n` +
-                `${currencySymbol} ${Math.round(creditedAmount * 100) / 100 === 1.00 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+                `${currencySymbol} ${Math.round(creditedAmount * 100) / 100 === 1.00 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${destinationLabel}.\n`;
 
             if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -4977,7 +4996,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
                 { parse_mode: 'HTML' }
             );
 
-            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
+            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`, userId);
         } catch (e) {}
     })();
 });
@@ -5010,7 +5029,7 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
         } catch (e) {
             console.error('Error notificando rechazo de depósito:', e);
         }
-        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
+        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`, userId);
     })();
 });
 
@@ -5245,7 +5264,7 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
         );
     } catch (e) {}
 
-    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`);
+    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`, userId);
     res.json({ success: true });
 });
 
@@ -5273,7 +5292,7 @@ app.post('/api/admin/pending-withdraws/:id/reject', requireAdmin, async (req, re
         );
     } catch (e) {}
 
-    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`);
+    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`, userId);
     res.json({ success: true });
 });
 
@@ -6593,11 +6612,15 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
                 : `${request.amount} ${currencyNorm}`;
             const creditCurrency = currencyNorm === 'USD' ? 'USD' : 'CUP';
             const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
+            // Depósitos en una moneda distinta de CUP/USD (USDT, TRX, MLC): el monto
+            // se sigue acreditando en CUP, pero el texto dice "saldo principal" en
+            // vez de "saldo CUP".
+            const destinationLabel = (currencyNorm !== 'CUP' && currencyNorm !== 'USD') ? 'principal' : creditCurrency;
 
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
                 `💰 Monto depositado: ${depositedAmountText}\n` +
-                `${currencySymbol} ${Math.round(creditedAmount * 100) / 100 === 1.00 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${creditCurrency}.\n`;
+                `${currencySymbol} ${Math.round(creditedAmount * 100) / 100 === 1.00 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditCurrency} a tu saldo ${destinationLabel}.\n`;
 
             if (currencyNorm === 'USD') {
                 text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -6607,7 +6630,7 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
             }
             text += `\n\n¡Gracias por confiar en nosotros!`;
             if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, text, { parse_mode: 'HTML' });
-            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
+            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`, userId);
         } catch (e) {}
     })();
 });
@@ -6629,7 +6652,7 @@ app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
         try {
             if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`, { parse_mode: 'HTML' });
         } catch (e) {}
-        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
+        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`, userId);
     })();
 });
 
@@ -6692,7 +6715,7 @@ app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
             `✅ <b>Retiro aprobado</b>\n\n💰 Monto retirado: ${request.amount} ${request.currency}\n💵 ${(debitPlan.cupDebit === 0 && debitPlan.usdDebit === 1) ? 'Se debitó' : 'Se debitaron'} ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
-    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`);
+    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`, userId);
     res.json({ success: true });
 });
 
@@ -6713,7 +6736,7 @@ app.post('/api/admin/pending-withdraws-role/:id/reject', async (req, res) => {
             `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
-    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`);
+    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`, userId);
     res.json({ success: true });
 });
 

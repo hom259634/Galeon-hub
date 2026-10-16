@@ -561,12 +561,16 @@ async function buildLastBetsText(bets) {
     return text;
 }
 
-function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, creditedCurrency, includeUsdFollowup = false, bonusMovedCup = 0, showBonusMovedNotice = false }) {
+function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, creditedCurrency, isPrincipal = false, includeUsdFollowup = false, bonusMovedCup = 0, showBonusMovedNotice = false }) {
     const currencySymbol = creditedCurrency === 'CUP' ? '🇨🇺' : '💵';
+    // Depósitos en una moneda distinta de CUP/USD (USDT, TRX, MLC): el monto se
+    // sigue acreditando en CUP, pero el texto dice "saldo principal" en vez de
+    // "saldo CUP".
+    const destinationLabel = isPrincipal ? 'principal' : creditedCurrency;
     let text =
         `✅ <b>Depósito aprobado</b>\n\n` +
         `💰 Monto depositado: ${depositedAmountText}\n` +
-        `${currencySymbol} ${Math.round(creditedAmount * 100) / 100 === 1.00 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${creditedCurrency}.\n`;
+        `${currencySymbol} ${Math.round(creditedAmount * 100) / 100 === 1.00 ? 'Se acreditó' : 'Se acreditaron'} ${creditedAmount.toFixed(2)} ${creditedCurrency} a tu saldo ${destinationLabel}.\n`;
 
     if (includeUsdFollowup) {
         text += `ℹ️ Con tu saldo USD también puedes transferir en CUP; además retirar en CUP, USDT, TRX o MLC según los métodos disponibles.\n`;
@@ -1552,14 +1556,22 @@ async function getUser(telegramId, firstName = '', username = null, ctx = null) 
 
         if (user) {
             const updates = {};
-            if (username && user.username !== username) {
-                updates.username = username;
+            // Sincroniza el @username en AMBOS sentidos: si el usuario cambia su @
+            // se guarda el nuevo, y si lo elimina en Telegram se limpia en la BD.
+            // Antes la condición exigía un username entrante (username && ...), así
+            // que al quitarse el @ se quedaba el valor viejo para siempre y todos
+            // los paneles seguían mostrando ese @. Ahora los sitios que caen al ID
+            // cuando no hay @ pasan a mostrar el ID real.
+            if ((user.username || null) !== (username || null)) {
+                updates.username = username || null;
             }
             if (firstName && user.first_name !== firstName) {
                 updates.first_name = firstName;
             }
             if (Object.keys(updates).length > 0) {
                 await supabase.from('users').update(updates).eq('telegram_id', telegramId);
+                // Reflejar el cambio en el objeto devuelto para esta misma request.
+                Object.assign(user, updates);
             }
             // Migrar bono a saldo principal solo si el usuario ya tuvo depósito aprobado
             try {
@@ -2971,6 +2983,36 @@ function getAllowedHours(lotteryKey) {
     return schedules[lotteryKey];
 }
 
+// Indica si para Georgia ya estamos en la fase del turno Noche (la última
+// jugada del día) o pasada ella: la próxima oportunidad es mañana.
+function isGeorgiaNightPhase() {
+    const schedule = getAllowedHours('georgia');
+    const night = schedule?.slots?.find(s => s.name.includes('Noche'));
+    if (!night) return false;
+    const now = moment.tz(TIMEZONE);
+    return (now.hours() * 60 + now.minutes()) >= Math.round(night.start * 60);
+}
+
+// Última línea del aviso de horario no disponible. El texto "vuelve mañana" se
+// usa solo para el turno Noche de Georgia (solo esta lotería); el resto conserva
+// el original. Cubre el cierre automático (pasada la hora) y el manual. Mantiene
+// el emoji inicial.
+function scheduleUnavailableLastLine(lotteryKey) {
+    return (lotteryKey === 'georgia' && isGeorgiaNightPhase())
+        ? '🔄 Por favor, vuelve mañana dentro del horario permitido. ¡Te esperamos!'
+        : '🔄 Por favor, intenta dentro del horario o elige otra lotería. ¡Te esperamos!';
+}
+
+// Última línea del aviso "no hay una sesión abierta", que aparece cuando la
+// sesión del turno está cerrada (p. ej. cierre manual del admin) dentro del
+// horario permitido. Para el turno Noche de Georgia también indica que vuelva
+// mañana; el resto conserva el texto original. Mantiene el emoji inicial.
+function noOpenSessionLastLine(lotteryKey) {
+    return (lotteryKey === 'georgia' && isGeorgiaNightPhase())
+        ? '🔄 Por favor, vuelve mañana dentro del horario permitido. ¡Te esperamos!'
+        : '🔄 Por favor, espera a que se abra una sesión o elige otra lotería. ¡Estamos contigo!';
+}
+
 // Aviso de "fuera de horario" para una lotería. Se usa tanto en el guardia de
 // horario del flujo de apuesta como al detectar una sesión ya cerrada, para que
 // el usuario reciba la misma redacción en ambos casos. Devuelve null si la
@@ -2988,7 +3030,7 @@ function buildScheduleUnavailableMessage(lotteryName) {
     }
     return `⏰ <b>Horario no disponible para ${schedule.emoji} ${schedule.name}</b>\n\n` +
         `📅 Los horarios permitidos (hora de Cuba) son:\n${hoursText}\n` +
-        `🔄 Por favor, intenta dentro del horario o elige otra lotería. ¡Te esperamos!`;
+        scheduleUnavailableLastLine(region.key);
 }
 
 // ========== MIDDLEWARE MEJORADO (AHORA PASA EL CONTEXTO A GETUSER) ==========
@@ -3352,7 +3394,7 @@ bot.action(/lot_(.+)/, async (ctx) => {
             const errorMsg = 
                 `⏰ <b>Horario no disponible para ${schedule.emoji} ${schedule.name}</b>\n\n` +
                 `📅 Los horarios permitidos (hora de Cuba) son:\n${hoursText}\n` +
-                `🔄 Por favor, intenta dentro del horario o elige otra lotería. ¡Te esperamos!`;
+                scheduleUnavailableLastLine(lotteryKey);
 
             await safeEdit(ctx, errorMsg, playLotteryKbd());
             return;
@@ -3383,7 +3425,7 @@ bot.action(/lot_(.+)/, async (ctx) => {
             const errorMsg = 
                 `❌ <b>No hay una sesión abierta en este momento para ${schedule.emoji} ${schedule.name}</b>\n\n` +
                 `📅 Horarios de juego (hora de Cuba):\n${hoursText}\n` +
-                `🔄 Por favor, espera a que se abra una sesión o elige otra lotería. ¡Estamos contigo!`;
+                noOpenSessionLastLine(lotteryKey);
             await safeEdit(ctx, errorMsg, playLotteryKbd());
             return;
         }
@@ -3654,7 +3696,8 @@ bot.action('bet_maxed_abort', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
         if (ctx.session) ctx.session.pendingMaxedOverride = null;
-        await safeEdit(ctx, '❌ Tu apuesta no se registró.', getMainKeyboard(ctx));
+        try { await ctx.deleteMessage(); } catch (e) {}
+        await ctx.reply('❌ Tu apuesta no se registró.', getMainKeyboard(ctx)).catch(() => {});
     } catch (e) {
         console.error('Error en bet_maxed_abort:', e);
         await ctx.reply('❌ Tu apuesta no se registró.', getMainKeyboard(ctx)).catch(() => {});
@@ -6632,7 +6675,7 @@ bot.on(message('text'), async (ctx) => {
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
-                                        [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`), Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
+                                        [Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`), Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`)]
                                     ]).reply_markup
                                 }
                             );
@@ -6729,7 +6772,7 @@ bot.on(message('text'), async (ctx) => {
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
-                                        [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`), Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
+                                        [Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`), Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`)]
                                     ]).reply_markup
                                 }
                             );
@@ -6819,8 +6862,8 @@ bot.on(message('text'), async (ctx) => {
                                 {
                                     parse_mode: 'HTML',
                                     reply_markup: Markup.inlineKeyboard([
-                                        [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`),
-                                         Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
+                                        [Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`),
+                                         Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`)]
                                     ]).reply_markup
                                 }
                             );
@@ -7024,8 +7067,8 @@ bot.on(message('text'), async (ctx) => {
                         {
                             parse_mode: 'HTML',
                             reply_markup: Markup.inlineKeyboard([
-                                [Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`),
-                                 Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`)]
+                                [Markup.button.callback('❌ Rechazar', `reject_withdraw_${request.id}`),
+                                 Markup.button.callback('✅ Aprobar', `approve_withdraw_${request.id}`)]
                             ]).reply_markup
                         }
                     );
@@ -7674,8 +7717,8 @@ bot.on(message('photo'), async (ctx) => {
                             {
                                 parse_mode: 'HTML',
                                 reply_markup: Markup.inlineKeyboard([
-                                    [Markup.button.callback('✅ Aprobar', `approve_deposit_${request.id}`),
-                                     Markup.button.callback('❌ Rechazar', `reject_deposit_${request.id}`)]
+                                    [Markup.button.callback('❌ Rechazar', `reject_deposit_${request.id}`),
+                                     Markup.button.callback('✅ Aprobar', `approve_deposit_${request.id}`)]
                                 ]).reply_markup
                             }
                         );
@@ -7683,7 +7726,9 @@ bot.on(message('photo'), async (ctx) => {
                     } catch (e) {}
                 }
                 if (depEntries.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(depKey, depEntries);
-                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\n💰 Monto: ${escapeHTML(amountText)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n\n\n¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
+                // Mostrar la moneda en mayúsculas (ej: "1 mlc" -> "1 MLC") sin alterar el número.
+                const amountDisplay = String(amountText).replace(/[a-zA-Z]+/g, (m) => m.toUpperCase());
+                await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\n💰 Monto: ${escapeHTML(amountDisplay)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n\n\n¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
             } catch (e) {
                 console.error(e);
                 await ctx.reply('❌ Error al procesar la solicitud. Por favor, intenta más tarde o contacta a soporte.', getMainKeyboard(ctx));
@@ -7814,6 +7859,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                         depositedAmountText: `${request.amount} ${request.currency}`,
                         creditedAmount: depositCurrency === 'USD' ? depositAmount : amountCUP,
                         creditedCurrency: depositCurrency === 'USD' ? 'USD' : 'CUP',
+                        isPrincipal: depositCurrency !== 'CUP' && depositCurrency !== 'USD',
                         includeUsdFollowup: depositCurrency === 'USD',
                         bonusMovedCup,
                         showBonusMovedNotice: isFirstDeposit && (parseFloat(user.bonus_cup) || 0) > 0
@@ -7821,7 +7867,7 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
-            updatePendingNotifications(`deposit_${requestId}`, `✅ <b>Depósito #${requestId} aprobado</b> por un administrador.`);
+            updatePendingNotifications(`deposit_${requestId}`, `✅ <b>Depósito #${requestId} aprobado</b> por un administrador.`, ctx.from.id);
         })();
     } catch (e) {
         console.error(e);
@@ -7861,7 +7907,7 @@ bot.action(/reject_deposit_(\d+)/, async (ctx) => {
                     { parse_mode: 'HTML' }
                 );
             } catch (e) {}
-            updatePendingNotifications(`deposit_${requestId}`, `❌ <b>Depósito #${requestId} rechazado</b> por un administrador.`);
+            updatePendingNotifications(`deposit_${requestId}`, `❌ <b>Depósito #${requestId} rechazado</b> por un administrador.`, ctx.from.id);
         })();
     } catch (e) {
         console.error(e);
@@ -7925,7 +7971,7 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             { parse_mode: 'HTML' }
         );
 
-        updatePendingNotifications(`withdraw_${requestId}`, `✅ <b>Retiro #${requestId} aprobado</b> por un administrador.`);
+        updatePendingNotifications(`withdraw_${requestId}`, `✅ <b>Retiro #${requestId} aprobado</b> por un administrador.`, ctx.from.id);
         try {
             await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
             await ctx.reply('✅ Retiro aprobado y saldo debitado correctamente.');
@@ -7959,7 +8005,7 @@ bot.action(/reject_withdraw_(\d+)/, async (ctx) => {
             `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`,
             { parse_mode: 'HTML' }
         ).catch(() => {});
-        updatePendingNotifications(`withdraw_${requestId}`, `❌ <b>Retiro #${requestId} rechazado</b> por un administrador.`);
+        updatePendingNotifications(`withdraw_${requestId}`, `❌ <b>Retiro #${requestId} rechazado</b> por un administrador.`, ctx.from.id);
         ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
         await ctx.reply('❌ Retiro rechazado.');
         await ctx.answerCbQuery();
@@ -8375,10 +8421,13 @@ bot.on('edited_message', async (ctx) => {
 });
 
 // ========== ACTUALIZAR NOTIFICACIONES PENDIENTES (reflejar decisión web ↔ bot) ==========
-async function updatePendingNotifications(key, statusText) {
+// `excludeChatId`: si se indica, no se edita la notificación de ese admin
+// (p. ej. el que acaba de ejecutar la acción, para que no le llegue el aviso).
+async function updatePendingNotifications(key, statusText, excludeChatId) {
     const entries = bot.pendingNotifications?.get(key);
     if (!entries) return;
     for (const { chatId, messageId } of entries) {
+        if (excludeChatId != null && Number(chatId) === Number(excludeChatId)) continue;
         try {
             await bot.telegram.editMessageText(chatId, messageId, undefined, statusText, {
                 parse_mode: 'HTML',
