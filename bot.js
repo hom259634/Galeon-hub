@@ -563,9 +563,8 @@ async function buildLastBetsText(bets) {
 
 function buildDepositApprovedMessage({ depositedAmountText, creditedAmount, creditedCurrency, isPrincipal = false, includeUsdFollowup = false, bonusMovedCup = 0, showBonusMovedNotice = false }) {
     const currencySymbol = creditedCurrency === 'CUP' ? '🇨🇺' : '💵';
-    // Depósitos en una moneda distinta de CUP/USD (USDT, TRX, MLC): el monto se
-    // sigue acreditando en CUP, pero el texto dice "saldo principal" en vez de
-    // "saldo CUP".
+    // Cualquier depósito que no sea en USD (CUP, USDT, TRX, MLC): el monto se
+    // acredita en CUP, pero el texto dice "saldo principal" en vez de "saldo CUP".
     const destinationLabel = isPrincipal ? 'principal' : creditedCurrency;
     let text =
         `✅ <b>Depósito aprobado</b>\n\n` +
@@ -2207,7 +2206,7 @@ function maxedNoticeText(betType, maxed, exceedData, { esEdicion = true } = {}) 
     const pregunta = esEdicion
         ? '¿Deseas continuar con la edición?'
         : '¿Deseas continuar con la apuesta?';
-    return `${sentences.map(s => `⚠️ ${s}`).join(' ')}\n${pregunta}`;
+    return `${sentences.map(s => `⚠️ ${s}`).join(' ')}\n\n${pregunta}`;
 }
 
 // Aviso que NO pregunta (❌): se usa cuando todos los números de la línea ya
@@ -2488,12 +2487,12 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
     // Al omitir/recortar números excedidos se muestran solo las jugadas que
     // quedaron, para que la confirmación coincida con lo realmente registrado.
     let shownJugadas = rawText;
-    let confirmMsg = `✅ <b>Jugada registrada</b>\n\n` +
+    let confirmMsg = `✅ <b>Jugada registrada</b> 🍀\n\n` +
         `🎰 Lotería: ${escapeHTML(session?.lottery || 'N/D')}\n` +
         `🔢 Tipo: ${escapeHTML(formatBetTypeLabel(betType))}\n` +
         `📋 Jugadas:\n<code>${escapeHTML(shownJugadas)}</code>\n` +
         `💰 Costo: ${totalCUP.toFixed(2)} CUP / ${totalUSD.toFixed(2)} USD\n\n` +
-        `¡Buena suerte! 🍀`;
+        `¡Buena suerte!`;
     if (typeof bonusUsed !== 'undefined' && bonusUsed > 0) {
         const remainingBonus = bonusBalance - bonusUsed;
         const esUnSoloCup = Math.abs(bonusUsed - 1) < 1e-6;
@@ -2655,7 +2654,7 @@ function serializeItemsToText(items, betType) {
             byAmount[a].push(String(it.numero));
         }
         for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
-            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} cup`);
+            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} CUP`);
         }
     }
     if (usdItems.length > 0) {
@@ -2666,7 +2665,7 @@ function serializeItemsToText(items, betType) {
             byAmount[a].push(String(it.numero));
         }
         for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
-            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} usd`);
+            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} USD`);
         }
     }
     return lines.join('\n');
@@ -2983,32 +2982,61 @@ function getAllowedHours(lotteryKey) {
     return schedules[lotteryKey];
 }
 
+// Hora actual de Cuba en minutos desde medianoche.
+function cubaNowMinutes() {
+    const now = moment.tz(TIMEZONE);
+    return now.hours() * 60 + now.minutes();
+}
+
 // Indica si para Georgia ya estamos en la fase del turno Noche (la última
 // jugada del día) o pasada ella: la próxima oportunidad es mañana.
 function isGeorgiaNightPhase() {
     const schedule = getAllowedHours('georgia');
     const night = schedule?.slots?.find(s => s.name.includes('Noche'));
     if (!night) return false;
-    const now = moment.tz(TIMEZONE);
-    return (now.hours() * 60 + now.minutes()) >= Math.round(night.start * 60);
+    return cubaNowMinutes() >= Math.round(night.start * 60);
+}
+
+// Indica si ya cerró la última lotería del día (hoy: Georgia Noche, 11:15 p. m.
+// de Cuba). A partir de ahí ninguna lotería admite jugadas hasta mañana, así que
+// "elige otra lotería" deja de tener sentido para cualquiera de ellas.
+function isAfterLastClose() {
+    let lastEnd = null;
+    for (const key of ['florida', 'georgia', 'newyork']) {
+        const schedule = getAllowedHours(key);
+        for (const slot of schedule?.slots || []) {
+            if (lastEnd === null || slot.end > lastEnd) lastEnd = slot.end;
+        }
+    }
+    if (lastEnd === null) return false;
+    return cubaNowMinutes() >= Math.round(lastEnd * 60);
+}
+
+// ¿El aviso debe invitar a volver mañana? Sí en el turno Noche de Georgia (la
+// última jugada del día de esa lotería) y, en general, pasada la última hora de
+// cierre del día (11:15 p. m. de Cuba): en ese momento ya no queda ninguna
+// lotería disponible hasta mañana.
+function shouldComeBackTomorrow(lotteryKey) {
+    return (lotteryKey === 'georgia' && isGeorgiaNightPhase()) || isAfterLastClose();
 }
 
 // Última línea del aviso de horario no disponible. El texto "vuelve mañana" se
-// usa solo para el turno Noche de Georgia (solo esta lotería); el resto conserva
-// el original. Cubre el cierre automático (pasada la hora) y el manual. Mantiene
-// el emoji inicial.
+// usa para el turno Noche de Georgia y para cualquier lotería pasada la última
+// hora de cierre del día; el resto conserva el original. Cubre el cierre
+// automático (pasada la hora) y el manual. Mantiene el emoji inicial.
 function scheduleUnavailableLastLine(lotteryKey) {
-    return (lotteryKey === 'georgia' && isGeorgiaNightPhase())
+    return shouldComeBackTomorrow(lotteryKey)
         ? '🔄 Por favor, vuelve mañana dentro del horario permitido. ¡Te esperamos!'
         : '🔄 Por favor, intenta dentro del horario o elige otra lotería. ¡Te esperamos!';
 }
 
 // Última línea del aviso "no hay una sesión abierta", que aparece cuando la
 // sesión del turno está cerrada (p. ej. cierre manual del admin) dentro del
-// horario permitido. Para el turno Noche de Georgia también indica que vuelva
-// mañana; el resto conserva el texto original. Mantiene el emoji inicial.
+// horario permitido. Para el turno Noche de Georgia —y pasada la última hora de
+// cierre— también indica que vuelva mañana; el resto conserva el texto original.
+// Mantiene el emoji inicial.
 function noOpenSessionLastLine(lotteryKey) {
-    return (lotteryKey === 'georgia' && isGeorgiaNightPhase())
+    return shouldComeBackTomorrow(lotteryKey)
         ? '🔄 Por favor, vuelve mañana dentro del horario permitido. ¡Te esperamos!'
         : '🔄 Por favor, espera a que se abra una sesión o elige otra lotería. ¡Estamos contigo!';
 }
@@ -3483,35 +3511,35 @@ bot.action(/type_(.+)/, async (ctx) => {
             instructions = `🎯 <b>FIJO</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada jugada. Puedes poner varios números de 2 DÍGITOS separados por espacios o comas en la misma línea.\n` +
-                `<b>Formato:</b> <code>12 con 5 cup</code> o <code>79 10 34*20 cup</code>\n` +
+                `<b>Formato:</b> <code>12 con 5 CUP</code> o <code>79 10 34*20 CUP</code>\n` +
                 `También puedes usar <b>D</b> (decena) o <b>T</b> (terminal):\n` +
-                `- <code>D2 con 5 cup</code> significa 20, 21, ..., 29 con 5 cup cada uno.\n` +
-                `- <code>T5 con 5 cup</code> significa 05, 15, ..., 95 con 5 cup cada uno.\n\n` +
-                `Ejemplos:\n12 con 5 cup\n34*2 usd\n79 10 34 con 50 cup\nD2 con 5 cup\nT5*1 usd\n\n` +
+                `- <code>D2 con 5 CUP</code> significa 20, 21, ..., 29 con 5 CUP cada uno.\n` +
+                `- <code>T5 con 5 CUP</code> significa 05, 15, ..., 95 con 5 CUP cada uno.\n\n` +
+                `Ejemplos:\n12 con 5 CUP\n34*2 USD\n79 10 34 con 50 CUP\nD2 con 5 CUP\nT5*1 USD\n\n` +
                 `💭 <b>Escribe tus jugadas (una o varias líneas):</b>`;
             break;
         case 'corridos':
             instructions = `🏃 <b>CORRIDOS</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada número de 2 DÍGITOS, o varios separados.\n` +
-                `<b>Formato:</b> <code>17 con 5 cup</code> o <code>32 33*10 cup</code>\n\n` +
-                `Ejemplos:\n17 con 5 cup\n32 33*10 cup\n62 con 1 usd\n\nD5 con 1 usd\nT9*20 cup\n\n` +
+                `<b>Formato:</b> <code>17 con 5 CUP</code> o <code>32 33*10 CUP</code>\n\n` +
+                `Ejemplos:\n17 con 5 CUP\n32 33*10 CUP\n62 con 1 USD\n\nD5 con 1 USD\nT9*20 CUP\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'centena':
             instructions = `💯 <b>CENTENA</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada número de 3 DÍGITOS, o varios separados.\n` +
-                `<b>Formato:</b> <code>517 con 8 cup</code> o <code>419 123*10 cup</code>\n\n` +
-                `Ejemplos:\n517 con 8 cup\n419 123*10 cup\n234 con 0.5 usd\n\n` +
+                `<b>Formato:</b> <code>517 con 8 CUP</code> o <code>419 123*10 CUP</code>\n\n` +
+                `Ejemplos:\n517 con 8 CUP\n419 123*10 CUP\n234 con 0.5 USD\n\n` +
                 `💭 <b>Escribe tus jugadas:</b>`;
             break;
         case 'parle':
             instructions = `🔗 <b>PARLET</b> - ${regionMap[lottery]?.emoji || '🎰'} ${escapeHTML(lottery)}\n\n` +
                 priceInfo +
                 `Escribe una línea por cada combinación de dos números de 2 DÍGITOS, separados por "x"; o varias combinaciones separadas.\n` +
-                `<b>Formato:</b> <code>17x32 con 5 cup</code> o <code>21x93 54x95*2 cup</code>\n\n` +
-                `Ejemplos:\n17x32 con 5 cup\n21x93 54x95 con 2 cup\n32x62*0.5 usd\n\n` +
+                `<b>Formato:</b> <code>17x32 con 5 CUP</code> o <code>21x93 54x95*2 CUP</code>\n\n` +
+                `Ejemplos:\n17x32 con 5 CUP\n21x93 54x95 con 2 CUP\n32x62*0.5 USD\n\n` +
                 `💭 <b>Escribe tus parlets:</b>`;
             break;
     }
@@ -3776,7 +3804,7 @@ bot.action(/^dep_(\d+)$/, async (ctx) => {
         `Confirmar / Red: <code>${escapeHTML(method.confirm)}</code>\n` +
         `${minLine}` +
         `${extraInstructions}\n\n` +
-        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usd</code>, etc).`,
+        `📥 <b>Por favor, envía el monto transferido</b> con la moneda (ej: <code>500 CUP</code> o <code>10 USD</code>, etc).`,
         null
     );
 });
@@ -6398,7 +6426,7 @@ bot.on(message('text'), async (ctx) => {
 
         const parsed = parseAmountWithCurrency(amountText);
         if (!parsed) {
-            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 cup o 10 usdt, etc).', getMainKeyboard(ctx));
+            await ctx.reply('❌ Formato inválido. Debes escribir el monto seguido de la moneda (ej: 500 CUP o 10 USDT, etc).', getMainKeyboard(ctx));
             return;
         }
 
@@ -6668,7 +6696,7 @@ bot.on(message('text'), async (ctx) => {
                             const sent = await ctx.telegram.sendMessage(adminId,
                                 `📤 <b>Nueva solicitud de RETIRO</b>\n` +
                                 `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
-                                `💰 Monto: ${amount} ${currency}\n` +
+                                `💰 Monto: ${amount} ${String(currency).toUpperCase()}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                 `👝 Wallet: ${escapeHTML(existingWallet)} (Red: ${escapeHTML(existingNetwork)})\n` +
                                 `🆔 Solicitud: ${request.id}`,
@@ -6686,7 +6714,7 @@ bot.on(message('text'), async (ctx) => {
 
                     await ctx.reply(
                         `✅ <b>Solicitud de retiro enviada</b>\n` +
-                        `💰 Monto: ${amount} ${currency}\n` +
+                        `💰 Monto: ${amount} ${String(currency).toUpperCase()}\n` +
                         `👝 Wallet: ${escapeHTML(existingWallet)}\n` +
                         `🔗 Red: ${escapeHTML(existingNetwork)}\n` +
                         `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor, espera a que sea aprobada.`,
@@ -6711,7 +6739,7 @@ bot.on(message('text'), async (ctx) => {
                 session.awaitingWithdrawWallet = true; // Nuevo estado para pedir wallet
                 delete session.awaitingWithdrawAmount;
                 await ctx.reply(
-                    `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
+                    `✅ Monto aceptado: ${amount} ${String(currency).toUpperCase()} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
                     `Por favor, escribe tu <b>dirección de wallet</b> para recibir el retiro.\n` +
                     `(Ejemplo: TXYZ... o 0x... según la red)`,
                     { parse_mode: 'HTML' }
@@ -6765,7 +6793,7 @@ bot.on(message('text'), async (ctx) => {
                             const sent = await ctx.telegram.sendMessage(adminId,
                                 `📤 <b>Nueva solicitud de RETIRO</b>\n` +
                                 `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
-                                `💰 Monto: ${amount} ${currency}\n` +
+                                `💰 Monto: ${amount} ${String(currency).toUpperCase()}\n` +
                                 `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                 `${existingAccountCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Cuenta: ${escapeHTML(existingAccountCard)}` : ''}${existingAccountCard && existingAccountMobile ? '\n' : ''}${existingAccountMobile ? `📞 Confirmación: ${escapeHTML(existingAccountMobile)}` : ''}\n` +
                                 `🆔 Solicitud: ${request.id}`,
@@ -6784,7 +6812,7 @@ bot.on(message('text'), async (ctx) => {
                     const cardEmoji = { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
                     await ctx.reply(
                         `✅ <b>Solicitud de retiro enviada</b>\n` +
-                        `💰 Monto: ${amount} ${currency}\n` +
+                        `💰 Monto: ${amount} ${String(currency).toUpperCase()}\n` +
                         `${existingAccountCard ? `${cardEmoji} Cuenta: ${escapeHTML(existingAccountCard)}\n` : ''}` +
                         `${existingAccountMobile ? `📞 Confirmación: ${escapeHTML(existingAccountMobile)}\n` : ''}` +
                         `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor, espera a que sea aprobada.`,
@@ -6855,7 +6883,7 @@ bot.on(message('text'), async (ctx) => {
                                 const sent = await ctx.telegram.sendMessage(adminId,
                                     `📤 <b>Nueva solicitud de RETIRO</b>\n` +
                                     `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
-                                    `💰 Monto: ${amount} ${currency}\n` +
+                                    `💰 Monto: ${amount} ${String(currency).toUpperCase()}\n` +
                                     `🏦 Método: ${escapeHTML(method.name || '')}\n` +
                                     `${existingCard ? `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} Cuenta: ${escapeHTML(existingCard)}` : ''}${existingCard && existingMobile ? '\n' : ''}${existingMobile ? `📞 Confirmación: ${escapeHTML(existingMobile)}` : ''}\n` +
                                     `🆔 Solicitud: ${request.id}`,
@@ -6875,7 +6903,7 @@ bot.on(message('text'), async (ctx) => {
                         const cardEmoji = { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
                         await ctx.reply(
                             `✅ <b>Solicitud de retiro enviada</b>\n` +
-                            `💰 Monto: ${amount} ${currency}\n` +
+                            `💰 Monto: ${amount} ${String(currency).toUpperCase()}\n` +
                             `${existingCard ? `${cardEmoji} Cuenta: ${escapeHTML(existingCard)}\n` : ''}` +
                             `${existingMobile ? `📞 Confirmación: ${escapeHTML(existingMobile)}\n` : ''}` +
                             `⏳ Procesaremos tu solicitud a la mayor brevedad. Por favor, espera a que sea aprobada.`,
@@ -6901,7 +6929,7 @@ bot.on(message('text'), async (ctx) => {
                     delete session.awaitingWithdrawAmount;
                     const cardInstruccion = (method && !emptyInstruction(method.card)) ? String(method.card).trim() : null;
                     await ctx.reply(
-                        `✅ Monto aceptado: ${amount} ${currency} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
+                        `✅ Monto aceptado: ${amount} ${String(currency).toUpperCase()} (equivale a ${amountUSD ? amountUSD.toFixed(2) : 'N/A'} USD)\n\n` +
                         (cardInstruccion ? `${cardInstruccion}\n\n` : ''),
                         { parse_mode: 'HTML' }
                     );
@@ -7060,7 +7088,7 @@ bot.on(message('text'), async (ctx) => {
                     const sent = await bot.telegram.sendMessage(adminId,
                         `📤 <b>Nueva solicitud de RETIRO</b>\n` +
                         `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
-                        `💰 Monto: ${amount} ${currency}\n` +
+                        `💰 Monto: ${amount} ${String(currency).toUpperCase()}\n` +
                         `🏦 Método: ${escapeHTML(method.name)}\n` +
                         `${({CUP:'🇨🇺',USD:'💵',MLC:'🏦',USDT:'🪙',TRX:'🪙'}[currency]||'💳')} ${escapeHTML(accountInfo)}\n` +
                         `🆔 Solicitud: ${request.id}`,
@@ -7079,7 +7107,7 @@ bot.on(message('text'), async (ctx) => {
 
             await ctx.reply(
                 `✅ <b>Solicitud de retiro enviada</b>\n` +
-                `💰 Monto: ${amount} ${currency}\n` +
+                `💰 Monto: ${amount} ${String(currency).toUpperCase()}\n` +
                 `${escapeHTML(accountInfo)}\n` +
                 `⏳ Procesaremos tu solicitud a la mayor brevedad. Te avisaremos cuando esté lista.`,
                 { parse_mode: 'HTML' }
@@ -7155,7 +7183,7 @@ bot.on(message('text'), async (ctx) => {
             session.awaitingTransferAmount = true;
             delete session.awaitingTransferTarget;
 
-            const example = session.transferCurrency === 'USD' ? '10 usd' : '500 cup';
+            const example = session.transferCurrency === 'USD' ? '10 USD' : '500 CUP';
             await safeEdit(ctx,
                 `📥 <b>Por favor, envía el monto que deseas transferir</b> (ej: <code>${example}</code>).`,
                 null
@@ -7180,7 +7208,7 @@ bot.on(message('text'), async (ctx) => {
         const parsed = parseAmountWithCurrency(text);
 
         if (!parsed) {
-            const example = session.transferCurrency === 'USD' ? '10 usd' : '500 cup';
+            const example = session.transferCurrency === 'USD' ? '10 USD' : '500 CUP';
             // Si el usuario pone un monto inválido, NO limpiar la sesión, solo pedir de nuevo
             await ctx.reply(`❌ Formato inválido. Debe ser monto moneda (ej: ${example}).`, getMainKeyboard(ctx));
             return;
@@ -7344,7 +7372,7 @@ bot.on(message('text'), async (ctx) => {
         const receiverName = targetUser.first_name || targetUser.username || String(targetUserId);
         await ctx.reply(
             `✅ Transferencia realizada con éxito:\n` +
-            `💰 Monto: ${amount} ${currency}\n` +
+            `💰 Monto: ${amount} ${String(currency).toUpperCase()}\n` +
             `👤 De: ${senderName}\n` +
             `👤 A: ${receiverName}`,
             getMainKeyboard(ctx)
@@ -7700,6 +7728,8 @@ bot.on(message('photo'), async (ctx) => {
         // Si ya tenemos monto validado, procesamos la solicitud ahora
         if (amountText && parsed && method) {
             try {
+                // Mostrar la moneda en mayúsculas (ej: "1 mlc" -> "1 MLC") sin alterar el número.
+                const amountDisplay = String(amountText).replace(/[a-zA-Z]+/g, (m) => m.toUpperCase());
                 const request = await createDepositRequest(uid, method.id, buffer, amountText, parsed.currency);
                 await ensureBotRolesCache();
                 const depositNotifyIds = new Set([...ADMIN_IDS, ...botRolesCache.depositApprovers]);
@@ -7711,7 +7741,7 @@ bot.on(message('photo'), async (ctx) => {
                             `📥 <b>Nueva solicitud de DEPÓSITO</b>\n` +
                             `👤 Usuario: ${escapeHTML(ctx.from.first_name || 'Usuario')} (${userTagLink(ctx.from.username, uid)})\n` +
                             `🏦 Método: ${escapeHTML(method.name)} (${escapeHTML(method.currency)})\n` +
-                            `💰 Monto: ${escapeHTML(amountText)}\n` +
+                            `💰 Monto: ${escapeHTML(amountDisplay)}\n` +
                             `📎 <a href="${escapeHTML(request.screenshot_url)}">Ver captura</a>\n` +
                             `🆔 Solicitud: ${escapeHTML(String(request.id))}`,
                             {
@@ -7726,8 +7756,6 @@ bot.on(message('photo'), async (ctx) => {
                     } catch (e) {}
                 }
                 if (depEntries.length > 0 && bot.pendingNotifications) bot.pendingNotifications.set(depKey, depEntries);
-                // Mostrar la moneda en mayúsculas (ej: "1 mlc" -> "1 MLC") sin alterar el número.
-                const amountDisplay = String(amountText).replace(/[a-zA-Z]+/g, (m) => m.toUpperCase());
                 await ctx.reply(`✅ <b>Solicitud de depósito enviada</b>\n💰 Monto: ${escapeHTML(amountDisplay)}\n⏳ Tu solicitud está siendo procesada. Te notificaremos cuando se acredite.\n\n\n¡Gracias por confiar en nosotros!`, { parse_mode: 'HTML' });
             } catch (e) {
                 console.error(e);
@@ -7747,7 +7775,7 @@ bot.on(message('photo'), async (ctx) => {
         delete session.awaitingDepositPhoto;
         session.awaitingDepositAmount = true;
 
-        await ctx.reply('✅ Captura recibida correctamente. Ahora, por favor, envía el <b>monto transferido</b> con la moneda (ej: <code>500 cup</code> o <code>10 usd</code>).', { parse_mode: 'HTML' });
+        await ctx.reply('✅ Captura recibida correctamente. Ahora, por favor, envía el <b>monto transferido</b> con la moneda (ej: <code>500 CUP</code> o <code>10 USD</code>).', { parse_mode: 'HTML' });
         return;
     }
 
@@ -7856,10 +7884,10 @@ bot.action(/approve_deposit_(\d+)/, async (ctx) => {
                 await ctx.telegram.sendMessage(
                     request.user_id,
                     buildDepositApprovedMessage({
-                        depositedAmountText: `${request.amount} ${request.currency}`,
+                        depositedAmountText: `${request.amount} ${String(request.currency || '').toUpperCase()}`,
                         creditedAmount: depositCurrency === 'USD' ? depositAmount : amountCUP,
                         creditedCurrency: depositCurrency === 'USD' ? 'USD' : 'CUP',
-                        isPrincipal: depositCurrency !== 'CUP' && depositCurrency !== 'USD',
+                        isPrincipal: depositCurrency !== 'USD',
                         includeUsdFollowup: depositCurrency === 'USD',
                         bonusMovedCup,
                         showBonusMovedNotice: isFirstDeposit && (parseFloat(user.bonus_cup) || 0) > 0
@@ -7965,7 +7993,7 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
 
         await ctx.telegram.sendMessage(request.user_id,
             `✅ <b>Retiro aprobado</b>\n\n` +
-            `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
+            `💰 Monto retirado: ${request.amount} ${String(request.currency || '').toUpperCase()}\n` +
             `💵 ${(debitPlan.cupDebit === 0 && debitPlan.usdDebit === 1) ? 'Se debitó' : 'Se debitaron'} ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
             `📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }

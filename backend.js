@@ -142,12 +142,10 @@ async function requireAdminOrRole(req, res, next, allowedRoles = []) {
 // ========== SEGUIMIENTO DE NOTIFICACIONES (para reflejar decisiones web ↔ bot) ==========
 const pendingNotifications = new Map(); // key: "deposit_{id}" o "withdraw_{id}" -> [{chatId, messageId}]
 
-async function updatePendingNotifications(key, statusText, excludeChatId) {
+async function updatePendingNotifications(key, statusText) {
     const entries = pendingNotifications.get(key);
     if (!entries) return;
     for (const { chatId, messageId } of entries) {
-        // No editar la notificación del admin que ejecutó la acción (p. ej. el que rechazó).
-        if (excludeChatId != null && Number(chatId) === Number(excludeChatId)) continue;
         try {
             await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
                 chat_id: chatId,
@@ -1624,7 +1622,7 @@ function maxedNoticeText(betType, maxed, exceedData, { esEdicion = true } = {}) 
     const pregunta = esEdicion
         ? '¿Deseas continuar con la edición?'
         : '¿Deseas continuar con la apuesta?';
-    return `${sentences.map(s => `⚠️ ${s}`).join(' ')}\n${pregunta}`;
+    return `${sentences.map(s => `⚠️ ${s}`).join(' ')}\n\n${pregunta}`;
 }
 
 // Aviso que NO pregunta: se usa cuando la edición no tiene nada que aplicar
@@ -1760,7 +1758,7 @@ function serializeItemsToText(items, betType) {
             byAmount[a].push(String(it.numero));
         }
         for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
-            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} cup`);
+            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} CUP`);
         }
     }
     if (usdItems.length > 0) {
@@ -1771,7 +1769,7 @@ function serializeItemsToText(items, betType) {
             byAmount[a].push(String(it.numero));
         }
         for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
-            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} usd`);
+            lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} USD`);
         }
     }
     return lines.join('\n');
@@ -2209,7 +2207,7 @@ app.post('/api/deposit-requests', upload.single('screenshot'), async (req, res) 
         try {
             const sentMsg = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
-                text: `📥 <b>Nueva solicitud de DEPÓSITO</b> (WebApp)\n👤 Usuario: ${escapeHTML(user.first_name || 'Usuario')} (${userTagLink(user.username, userId)})\n🏦 Método: ${method.name} (${currency})\n💰 Monto: ${amount}\n📎 <a href="${publicUrl}">Ver captura</a>\n🆔 Solicitud: ${request.id}`,
+                text: `📥 <b>Nueva solicitud de DEPÓSITO</b> (WebApp)\n👤 Usuario: ${escapeHTML(user.first_name || 'Usuario')} (${userTagLink(user.username, userId)})\n🏦 Método: ${method.name} (${String(currency).toUpperCase()})\n💰 Monto: ${String(amount).replace(/[a-zA-Z]+/g, (m) => m.toUpperCase())}\n📎 <a href="${publicUrl}">Ver captura</a>\n🆔 Solicitud: ${request.id}`,
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[
@@ -2358,7 +2356,7 @@ app.post('/api/withdraw-requests', async (req, res) => {
             const accountEmoji = currency === 'USDT' || currency === 'TRX' ? '👝' : { CUP: '🇨🇺', USD: '💵', MLC: '🏦', USDT: '🪙', TRX: '🪙' }[currency] || '💳';
             const sentMsg = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 chat_id: adminId,
-                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${escapeHTML(user.first_name || 'Usuario')} (${userTagLink(user.username, userId)})\n💰 Monto: ${amount} ${currency}\n🏦 Método: ${method.name} (${currency})\n${accountEmoji} ${accountInfo}\n🆔 Solicitud: ${request.id}`,
+                text: `📤 <b>Nueva solicitud de RETIRO</b> (WebApp)\n👤 Usuario: ${escapeHTML(user.first_name || 'Usuario')} (${userTagLink(user.username, userId)})\n💰 Monto: ${amount} ${String(currency).toUpperCase()}\n🏦 Método: ${method.name} (${String(currency).toUpperCase()})\n${accountEmoji} ${accountInfo}\n🆔 Solicitud: ${request.id}`,
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[
@@ -4969,10 +4967,10 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
                 : `${request.amount} ${currencyNorm}`;
             const creditCurrency = currencyNorm === 'USD' ? 'USD' : 'CUP';
             const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
-            // Depósitos en una moneda distinta de CUP/USD (USDT, TRX, MLC): el monto
-            // se sigue acreditando en CUP, pero el texto dice "saldo principal" en
-            // vez de "saldo CUP".
-            const destinationLabel = (currencyNorm !== 'CUP' && currencyNorm !== 'USD') ? 'principal' : creditCurrency;
+            // Cualquier depósito que no sea en USD (CUP, USDT, TRX, MLC): el monto
+            // se acredita en CUP, pero el texto dice "saldo principal" en vez de
+            // "saldo CUP".
+            const destinationLabel = (currencyNorm !== 'USD') ? 'principal' : creditCurrency;
 
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
@@ -4996,7 +4994,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
                 { parse_mode: 'HTML' }
             );
 
-            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`, userId);
+            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
         } catch (e) {}
     })();
 });
@@ -5029,7 +5027,7 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
         } catch (e) {
             console.error('Error notificando rechazo de depósito:', e);
         }
-        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`, userId);
+        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
     })();
 });
 
@@ -5257,14 +5255,14 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
     try {
         await bot.telegram.sendMessage(request.user_id,
             `✅ <b>Retiro aprobado</b>\n\n` +
-            `💰 Monto retirado: ${request.amount} ${request.currency}\n` +
+            `💰 Monto retirado: ${request.amount} ${String(request.currency || '').toUpperCase()}\n` +
             `💵 ${(debitPlan.cupDebit === 0 && debitPlan.usdDebit === 1) ? 'Se debitó' : 'Se debitaron'} ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n` +
             `📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' }
         );
     } catch (e) {}
 
-    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`, userId);
+    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`);
     res.json({ success: true });
 });
 
@@ -5292,7 +5290,7 @@ app.post('/api/admin/pending-withdraws/:id/reject', requireAdmin, async (req, re
         );
     } catch (e) {}
 
-    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`, userId);
+    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`);
     res.json({ success: true });
 });
 
@@ -6612,10 +6610,10 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
                 : `${request.amount} ${currencyNorm}`;
             const creditCurrency = currencyNorm === 'USD' ? 'USD' : 'CUP';
             const currencySymbol = creditCurrency === 'USD' ? '💵' : '🇨🇺';
-            // Depósitos en una moneda distinta de CUP/USD (USDT, TRX, MLC): el monto
-            // se sigue acreditando en CUP, pero el texto dice "saldo principal" en
-            // vez de "saldo CUP".
-            const destinationLabel = (currencyNorm !== 'CUP' && currencyNorm !== 'USD') ? 'principal' : creditCurrency;
+            // Cualquier depósito que no sea en USD (CUP, USDT, TRX, MLC): el monto
+            // se acredita en CUP, pero el texto dice "saldo principal" en vez de
+            // "saldo CUP".
+            const destinationLabel = (currencyNorm !== 'USD') ? 'principal' : creditCurrency;
 
             let text =
                 `✅ <b>Depósito aprobado</b>\n\n` +
@@ -6630,7 +6628,7 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
             }
             text += `\n\n¡Gracias por confiar en nosotros!`;
             if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, text, { parse_mode: 'HTML' });
-            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`, userId);
+            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
         } catch (e) {}
     })();
 });
@@ -6652,7 +6650,7 @@ app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
         try {
             if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`, { parse_mode: 'HTML' });
         } catch (e) {}
-        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`, userId);
+        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
     })();
 });
 
@@ -6712,10 +6710,10 @@ app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
 
     try {
         if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id,
-            `✅ <b>Retiro aprobado</b>\n\n💰 Monto retirado: ${request.amount} ${request.currency}\n💵 ${(debitPlan.cupDebit === 0 && debitPlan.usdDebit === 1) ? 'Se debitó' : 'Se debitaron'} ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n📌 En breve los fondos serán enviados a tu cuenta.`,
+            `✅ <b>Retiro aprobado</b>\n\n💰 Monto retirado: ${request.amount} ${String(request.currency || '').toUpperCase()}\n💵 ${(debitPlan.cupDebit === 0 && debitPlan.usdDebit === 1) ? 'Se debitó' : 'Se debitaron'} ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
-    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`, userId);
+    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`);
     res.json({ success: true });
 });
 
@@ -6736,7 +6734,7 @@ app.post('/api/admin/pending-withdraws-role/:id/reject', async (req, res) => {
             `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
-    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`, userId);
+    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`);
     res.json({ success: true });
 });
 
