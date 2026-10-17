@@ -533,7 +533,7 @@
                         <div id="depositMethodInfo" class="method-info hidden"></div>
                         <div id="depositMethodLimits" class="text-xs text-gray-400 mb-2"></div>
                         <input type="file" id="depositScreenshot" accept="image/*" class="file-input mb-3">
-                        <input type="text" id="depositAmount" placeholder="Monto (ej: 500 cup, 10 usdt, 100 trx)" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-indigo-500 mb-3">
+                        <input type="text" id="depositAmount" placeholder="Monto (ej: 500 CUP, 10 USDT, 100 TRX)" class="w-full p-3 rounded-xl bg-gray-800 text-white border border-indigo-500 mb-3">
                         <button id="submitDepositBtn" class="w-full bg-indigo-600 py-3 rounded-xl font-semibold hover:bg-indigo-700">Enviar solicitud</button>
                     </div>
 
@@ -1178,32 +1178,32 @@ const endStr = toTimeStr(s.end);
             switch (selectedBetType) {
                 case 'fijo':
                     instructions = `🎯 <b>FIJO</b> – Número de 2 dígitos.<br>
-Ej: 17 con 1 usd<br>
-32*10 cup<br>
-Varios por línea: 17 32 45 con 5 cup<br>
+Ej: 17 con 1 USD<br>
+32*10 CUP<br>
+Varios por línea: 17 32 45 con 5 CUP<br>
 Usa "D" para decena o "T" para terminal.<br>
-Ej: D2 con 1 usd<br>
-T5*5 cup<br>`;
+Ej: D2 con 1 USD<br>
+T5*5 CUP<br>`;
                     break;
                 case 'corridos':
                     instructions = `🏃 <b>CORRIDOS</b> – Número de 2 dígitos.<br>
-Ej: 15 con 10 cup<br>
-28*1 usd<br>
-Varios por línea: 15 28 92 con 20 cup<br>
-D9 con 30 cup<br>
-T4*1 usd<br>`;
+Ej: 15 con 10 CUP<br>
+28*1 USD<br>
+Varios por línea: 15 28 92 con 20 CUP<br>
+D9 con 30 CUP<br>
+T4*1 USD<br>`;
                     break;
                 case 'centena':
                     instructions = `💯 <b>CENTENA</b> – Número de 3 dígitos.<br>
-Ej: 517 con 30 cup<br>
-239*0.5 usd<br>
-Varios por línea: 517 239 123 con 20 cup<br>`;
+Ej: 517 con 30 CUP<br>
+239*0.5 USD<br>
+Varios por línea: 517 239 123 con 20 CUP<br>`;
                     break;
                 case 'parle':
                     instructions = `🔗 <b>PARLET</b> – Dos números de 2 dígitos separados por "x".<br>
-Ej: 17x32*10 cup<br>
-17x62 con 0.5 usd<br>
-Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
+Ej: 17x32*10 CUP<br>
+17x62 con 0.5 USD<br>
+Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                     break;
             }
             instructions += `<br><br>💰 <b>Pago:</b> x${multiplier}<br>📉 <b>Mín:</b> ${minCup} CUP / ${minUsd} USD<br>📈 <b>Máx:</b> ${maxCup} CUP / ${maxUsd} USD`;
@@ -1471,7 +1471,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     byAmount[a].push(String(it.numero));
                 }
                 for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
-                    lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} cup`);
+                    lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} CUP`);
                 }
             }
             if (usdItems.length > 0) {
@@ -1482,7 +1482,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                     byAmount[a].push(String(it.numero));
                 }
                 for (const a of Object.keys(byAmount).sort((x, y) => parseFloat(x) - parseFloat(y))) {
-                    lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} usd`);
+                    lines.push(`${byAmount[a].join(' ')} con ${fmtAmount(parseFloat(a))} USD`);
                 }
             }
             return lines.join('\n');
@@ -1816,7 +1816,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                         const adjustVerb = singular ? 'se ajustó' : 'se ajustaron';
                         successMsg = `ℹ️ ${capPhrase(singular)} que ${exceedVerb} el máximo ${adjustVerb} al monto permitido.`;
                     }
-                    iziToast.success({ title: isEditing ? '✅ Jugada editada' : '✅ Jugada registrada', message: successMsg + ' 🍀' });
+                    iziToast.success({ title: isEditing ? '✅ Jugada editada 🍀' : '✅ Jugada registrada 🍀', message: successMsg });
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
@@ -2684,7 +2684,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
             const parsed = parseAmountWithCurrency(amount);
             if (!parsed) {
-                iziToast.warning({ message: 'Formato inválido. Ej: 500 cup, 10 usdt, 100 trx' });
+                iziToast.warning({ message: 'Formato inválido. Ej: 500 CUP, 10 USDT, 100 TRX' });
                 return;
             }
 
@@ -4073,8 +4073,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                                 <p><strong>Captura:</strong> <a href="${d.screenshot_url}" target="_blank" class="text-cyan-400">Ver</a></p>
                                             </div>
                                             <div class="flex gap-2">
-                                                <button onclick="handlePending('deposit', ${d.id}, 'approve', this)" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
                                                 <button onclick="handlePending('deposit', ${d.id}, 'reject', this)" class="bg-red-600 px-3 py-1 rounded-lg text-sm">❌ Rechazar</button>
+                                                <button onclick="handlePending('deposit', ${d.id}, 'approve', this)" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
                                             </div>
                                         </div>
                                     </div>
@@ -4090,13 +4090,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <div class="pending-item">
                                 <div class="flex justify-between">
                                     <div><strong>Usuario:</strong> Juan Pérez (12345)<br><strong>Monto:</strong> 500 CUP<br><strong>Método:</strong> Transferencia Bancaria</div>
-                                    <div class="flex gap-2"><button class="bg-green-600 px-3 py-1 rounded-lg">✅ Aprobar</button><button class="bg-red-600 px-3 py-1 rounded-lg">❌ Rechazar</button></div>
+                                    <div class="flex gap-2"><button class="bg-red-600 px-3 py-1 rounded-lg">❌ Rechazar</button><button class="bg-green-600 px-3 py-1 rounded-lg">✅ Aprobar</button></div>
                                 </div>
                             </div>
                             <div class="pending-item">
                                 <div class="flex justify-between">
                                     <div><strong>Usuario:</strong> María Gómez (67890)<br><strong>Monto:</strong> 20 USDT<br><strong>Método:</strong> USDT (TRC-20)</div>
-                                    <div class="flex gap-2"><button class="bg-green-600 px-3 py-1 rounded-lg">✅ Aprobar</button><button class="bg-red-600 px-3 py-1 rounded-lg">❌ Rechazar</button></div>
+                                    <div class="flex gap-2"><button class="bg-red-600 px-3 py-1 rounded-lg">❌ Rechazar</button><button class="bg-green-600 px-3 py-1 rounded-lg">✅ Aprobar</button></div>
                                 </div>
                             </div>
                         `;
@@ -4121,8 +4121,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                                 <p>${w.currency === 'USDT' || w.currency === 'TRX' ? '👝' : ({ CUP: '🇨🇺', USD: '💵', MLC: '🏦' }[w.currency] || '📞')} ${escapeHTML(w.account_info)}</p>
                                             </div>
                                             <div class="flex gap-2">
-                                                <button onclick="handlePending('withdraw', ${w.id}, 'approve', this)" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
                                                 <button onclick="handlePending('withdraw', ${w.id}, 'reject', this)" class="bg-red-600 px-3 py-1 rounded-lg text-sm">❌ Rechazar</button>
+                                                <button onclick="handlePending('withdraw', ${w.id}, 'approve', this)" class="bg-green-600 px-3 py-1 rounded-lg text-sm">✅ Aprobar</button>
                                             </div>
                                         </div>
                                     </div>
@@ -4137,7 +4137,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                             <div class="pending-item">
                                 <div class="flex justify-between">
                                     <div><strong>Usuario:</strong> Carlos Ruiz (54321)<br><strong>Monto:</strong> 50 USD<br><strong>Método:</strong> PayPal<br><strong>Cuenta:</strong> carlos@email.com</div>
-                                    <div class="flex gap-2"><button class="bg-green-600 px-3 py-1 rounded-lg">✅ Aprobar</button><button class="bg-red-600 px-3 py-1 rounded-lg">❌ Rechazar</button></div>
+                                    <div class="flex gap-2"><button class="bg-red-600 px-3 py-1 rounded-lg">❌ Rechazar</button><button class="bg-green-600 px-3 py-1 rounded-lg">✅ Aprobar</button></div>
                                 </div>
                             </div>
                         `;
@@ -4351,8 +4351,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <p class="text-xs text-gray-400">🆔 Solicitud: ${d.id}</p>
                             </div>
                             <div class="flex gap-2">
-                                <button onclick="procesarDepositoRol(${d.id},'approve',this)" class="bg-green-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700">✅</button>
                                 <button onclick="procesarDepositoRol(${d.id},'reject',this)" class="bg-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-700">❌</button>
+                                <button onclick="procesarDepositoRol(${d.id},'approve',this)" class="bg-green-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700">✅</button>
                             </div>
                         </div>
                         ${d.screenshot_url ? `<a href="${d.screenshot_url}" target="_blank" class="text-xs text-cyan-400 underline">📎 Ver captura</a>` : ''}
@@ -4388,8 +4388,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                                 <p class="text-xs text-gray-400">🆔 Solicitud: ${w.id}</p>
                             </div>
                             <div class="flex gap-2">
-                                <button onclick="procesarRetiroRol(${w.id},'approve',this)" class="bg-green-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700">✅</button>
                                 <button onclick="procesarRetiroRol(${w.id},'reject',this)" class="bg-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-700">❌</button>
+                                <button onclick="procesarRetiroRol(${w.id},'approve',this)" class="bg-green-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700">✅</button>
                             </div>
                         </div>
                     </div>`;
@@ -5165,8 +5165,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const depCounts = {};
                     for (const d of data.deposits) depCounts[d.currency] = (depCounts[d.currency] || 0) + 1;
-                    html += `<div class="flex flex-wrap gap-1 mb-3">
-                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="all" data-count="${data.deposits.length}" onclick="filterCurrency('deposits','all')">Todos (${data.deposits.length})</button>`;
+                    html += `<div class="flex flex-wrap gap-1 mb-3">`;
                     for (const cur of allCurrencies) {
                         const cnt = depCounts[cur] || 0;
                         html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="deposits" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('deposits','${cur}')">${cur} (${cnt})</button>`;
@@ -5203,8 +5202,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const wdCounts = {};
                     for (const w of data.withdrawals) wdCounts[w.currency] = (wdCounts[w.currency] || 0) + 1;
-                    html += `<div class="flex flex-wrap gap-1 mb-3">
-                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="all" data-count="${data.withdrawals.length}" onclick="filterCurrency('withdrawals','all')">Todos (${data.withdrawals.length})</button>`;
+                    html += `<div class="flex flex-wrap gap-1 mb-3">`;
                     for (const cur of allCurrencies) {
                         const cnt = wdCounts[cur] || 0;
                         html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="withdrawals" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('withdrawals','${cur}')">${cur} (${cnt})</button>`;
@@ -5248,8 +5246,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
                 } else {
                     const rejCounts = {};
                     for (const r of rej) rejCounts[r.currency] = (rejCounts[r.currency] || 0) + 1;
-                    html += `<div class="flex flex-wrap gap-1 mb-3">
-                        <button class="filter-btn active bg-emerald-600 px-3 py-1 rounded-full text-sm" data-section="rejections" data-filter="all" data-count="${rej.length}" onclick="filterCurrency('rejections','all')">Todos (${rej.length})</button>`;
+                    html += `<div class="flex flex-wrap gap-1 mb-3">`;
                     for (const cur of allCurrencies) {
                         const cnt = rejCounts[cur] || 0;
                         html += `<button class="filter-btn ${curColor(cur)} px-3 py-1 rounded-full text-sm" data-section="rejections" data-filter="${cur}" data-count="${cnt}" onclick="filterCurrency('rejections','${cur}')">${cur} (${cnt})</button>`;
@@ -5356,6 +5353,9 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
 
         window.filterCurrency = (section, currency) => {
             const curColor = c => c === 'CUP' ? 'bg-green-600' : c === 'USD' ? 'bg-yellow-600' : c === 'USDT' ? 'bg-orange-600' : c === 'TRX' ? 'bg-red-600' : c === 'MLC' ? 'bg-purple-600' : '';
+            // Sin botón "Todos": volver a pulsar la moneda activa la deselecciona y muestra todo
+            const activeBtn = document.querySelector(`[data-section="${section}"].filter-btn.active`);
+            if (activeBtn && activeBtn.dataset.filter === currency) currency = 'all';
             document.querySelectorAll(`[data-section="${section}"]`).forEach(b => {
                 b.classList.remove('active', 'bg-emerald-600');
                 const f = b.dataset.filter;
@@ -5366,8 +5366,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 cup<br>`;
             });
             document.querySelectorAll(`[data-section="${section}"]`).forEach(b => {
                 const f = b.dataset.filter;
-                if (f === 'all') b.textContent = `Todos (${b.dataset.count || 0})`;
-                else b.textContent = `${f} (${b.dataset.count || 0})`;
+                if (f && f !== 'all') b.textContent = `${f} (${b.dataset.count || 0})`;
             });
             const clicked = document.querySelector(`[data-section="${section}"][data-filter="${currency}"]`);
             if (clicked) {
