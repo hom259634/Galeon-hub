@@ -1652,14 +1652,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
             }
             if (textEl) {
                 let admissibleHtml = '';
+                let isSingleAdmissible = false;
                 if (exceedData && Array.isArray(exceedData.admissibleLines) && exceedData.admissibleLines.length > 0) {
                     admissibleHtml = exceedData.admissibleLines.join('<br>');
+                    isSingleAdmissible = exceedData.admissibleLines.length === 1;
                 } else {
                     admissibleHtml = limitOverrideAdmissible(exceedData);
                 }
-                // El pronombre se refiere a "el/los monto(s) admisible(s)": masculino
-                // y sin variación de número.
-                const question = '¿Deseas apostárselos?';
+                // El pronombre se refiere a "el/los monto(s) admisible(s)": masculino.
+                // En singular cuando un solo número excede el máximo (sea la
+                // moneda y el monto que sea), en plural si son varios.
+                const question = isSingleAdmissible ? '¿Deseas apostárselo?' : '¿Deseas apostárselos?';
                 const admissibleLine = admissibleHtml ? `<br><br>${admissibleHtml}` : '';
                 textEl.innerHTML = `${errorText}${admissibleLine}<br>${question}`;
             }
@@ -2365,7 +2368,10 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
             const container = document.getElementById('betsList');
             const label = document.getElementById('betsCountLabel');
             if (!bets || bets.length === 0) {
-                container.innerHTML = '<p class="text-gray-400 text-center py-4">No tienes jugadas aún.</p>';
+                container.innerHTML = `<div class="text-gray-400 text-center py-4">
+                    <p>📭 No tienes jugadas aún. ¡Anímate a participar! 🎲</p>
+                    <p class="mt-1">Selecciona "🎮 Jugar" en el menú para empezar.</p>
+                </div>`;
                 if (label) label.textContent = '📋 Historial de apuestas (0)';
                 return;
             }
@@ -2736,7 +2742,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                 if (res.ok) {
                     depositSendBtn.disabled = false;
                     depositSendBtn.innerHTML = depositBtnOriginalHTML;
-                    iziToast.success({ message: 'Solicitud enviada. En breve será procesada. Por favor, espera...' });
+                    iziToast.success({ message: '✅ Solicitud enviada. En breve será procesada. Por favor, espera...' });
                     document.getElementById('rechargeSection').classList.add('hidden');
                 } else {
                     depositSendBtn.disabled = false;
@@ -2842,7 +2848,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                 if (res.ok) {
                     withdrawSendBtn.disabled = false;
                     withdrawSendBtn.innerHTML = withdrawBtnOriginalHTML;
-                    iziToast.success({ message: 'Solicitud enviada. En breve será procesada. Por favor, espera...' });
+                    iziToast.success({ message: '✅ Solicitud enviada. En breve será procesada. Por favor, espera...' });
                     document.getElementById('withdrawSection').classList.add('hidden');
                 } else {
                     withdrawSendBtn.disabled = false;
@@ -4080,7 +4086,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                                     <div class="pending-item" id="deposit-${d.id}">
                                         <div class="flex justify-between items-start">
                                             <div>
-                                                <p><strong>Usuario:</strong> ${escapeHTML(d.user_name)} (${d.user_id})</p>
+                                                <p><strong>Usuario:</strong> ${escapeHTML(d.user_name)}</p>
+                                                <p class="text-xs text-gray-400">${userHandle(d.username, d.user_id)}</p>
                                                 <p><strong>Monto:</strong> ${d.amount} ${d.currency}</p>
                                                 <p><strong>Método:</strong> ${escapeHTML(d.method_name)}</p>
                                                 <p><strong>Captura:</strong> <a href="${d.screenshot_url}" target="_blank" class="text-cyan-400">Ver</a></p>
@@ -4128,7 +4135,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                                     <div class="pending-item" id="withdraw-${w.id}">
                                         <div class="flex justify-between items-start">
                                             <div>
-                                                <p><strong>Usuario:</strong> ${escapeHTML(w.user_name)} (${w.user_id})</p>
+                                                <p><strong>Usuario:</strong> ${escapeHTML(w.user_name)}</p>
+                                                <p class="text-xs text-gray-400">${userHandle(w.username, w.user_id)}</p>
                                                 <p><strong>Monto:</strong> ${w.amount} ${w.currency}</p>
                                                 <p><strong>Método:</strong> ${escapeHTML(w.method_name)}</p>
                                                 <p>${w.currency === 'USDT' || w.currency === 'TRX' ? '👝' : ({ CUP: '🇨🇺', USD: '💵', MLC: '🏦' }[w.currency] || '📞')} ${escapeHTML(w.account_info)}</p>
@@ -4358,7 +4366,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                     html += `<div class="bg-gray-700/40 p-3 rounded-lg mb-2">
                         <div class="flex justify-between items-start">
                             <div>
-                                <p class="font-medium">${escapeHTML(d.user_name)} ${d.username ? '@' + escapeHTML(d.username) : ''}</p>
+                                <p class="font-medium">${escapeHTML(d.user_name)}</p>
+                                <p class="text-xs text-gray-400">${userHandle(d.username, d.user_id)}</p>
                                 <p class="text-sm text-gray-300">💰 ${d.amount} ${d.currency}</p>
                                 <p class="text-xs text-gray-400">🏦 ${escapeHTML(d.method_name || 'N/A')}</p>
                                 <p class="text-xs text-gray-400">🆔 Solicitud: ${d.id}</p>
@@ -4394,7 +4403,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                     html += `<div class="bg-gray-700/40 p-3 rounded-lg mb-2">
                         <div class="flex justify-between items-start">
                             <div>
-                                <p class="font-medium">${escapeHTML(w.user_name)} ${w.username ? '@' + escapeHTML(w.username) : ''}</p>
+                                <p class="font-medium">${escapeHTML(w.user_name)}</p>
+                                <p class="text-xs text-gray-400">${userHandle(w.username, w.user_id)}</p>
                                 <p class="text-sm text-gray-300">💰 ${w.amount} ${w.currency}</p>
                                 <p class="text-xs text-gray-400">🏦 ${escapeHTML(w.method_name || 'N/A')}</p>
                                 <p class="text-xs text-gray-400">${w.currency === 'USDT' || w.currency === 'TRX' ? '👝' : ({ CUP: '🇨🇺', USD: '💵', MLC: '🏦' }[w.currency] || '📞')} ${escapeHTML(w.account_info || '')}</p>
@@ -5021,8 +5031,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                         </thead>
                         <tbody>`;
                 for (const s of stats) {
-                    const displayName = s.first_name || s.username || `ID ${s.telegram_id}`;
-                    const usernameStr = s.username ? `@${s.username}` : '';
+                    const usernameStr = userHandle(s.username, s.telegram_id);
+                    const displayName = s.first_name || s.username || usernameStr || `ID ${s.telegram_id}`;
                     html += `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer" onclick="renderSubadminDetailView(${s.telegram_id})">
                         <td class="py-2 pr-2 font-medium">
                             ${escapeHTML(displayName)}
@@ -5190,7 +5200,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                         const timeStr = formatTime12h(d.processed_at);
                         html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center" data-currency="${d.currency}">
                             <div>
-                                <span>${escapeHTML(d.user_name)} ${d.username ? '@'+escapeHTML(d.username) : 'ID '+d.user_id}</span>
+                                <span>${escapeHTML(d.user_name)}</span>
+                                <span class="text-gray-400 text-xs ml-2">${userHandle(d.username, d.user_id)}</span>
                                 <span class="text-gray-400 text-xs ml-2">${timeStr}</span>
                             </div>
                             <span class="${d.currency === 'USD' ? 'text-yellow-300' : 'text-cyan-300'} font-medium">${d.amount.toFixed(2)} ${d.currency}${cupLabel}</span>
@@ -5227,7 +5238,8 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                         const timeStr = formatTime12h(w.processed_at);
                         html += `<div class="bg-gray-800/40 p-2 rounded-lg text-sm flex justify-between items-center" data-currency="${w.currency}">
                             <div>
-                                <span>${escapeHTML(w.user_name)} ${w.username ? '@'+escapeHTML(w.username) : 'ID '+w.user_id}</span>
+                                <span>${escapeHTML(w.user_name)}</span>
+                                <span class="text-gray-400 text-xs ml-2">${userHandle(w.username, w.user_id)}</span>
                                 <span class="text-gray-400 text-xs ml-2">${timeStr}</span>
                             </div>
                             <span class="${w.currency === 'USD' ? 'text-yellow-300' : 'text-pink-300'} font-medium">${w.amount.toFixed(2)} ${w.currency}${cupLabel}</span>
@@ -5283,7 +5295,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                         const amtColor = r.currency === 'USD' ? 'text-yellow-300' : 'text-gray-200';
                         const cupLabel = r.currency !== 'CUP' ? `<span class="text-gray-400 ml-1">(${r.amount_cup.toFixed(2)} CUP)</span>` : '';
                         html += `<tr class="border-b border-gray-700/50" data-currency="${r.currency}">
-                            <td class="py-2 pr-2">${escapeHTML(r.user_name)} ${r.username ? '@'+escapeHTML(r.username) : 'ID '+r.user_id}</td>
+                            <td class="py-2 pr-2">${escapeHTML(r.user_name)} <span class="text-gray-400">${userHandle(r.username, r.user_id)}</span></td>
                             <td class="py-2 pr-2 ${typeColor}">${typeIcon} ${r.type}</td>
                             <td class="py-2 pr-2 ${amtColor}">${r.amount.toFixed(2)} ${r.currency}${cupLabel}</td>
                             <td class="py-2 text-gray-400 text-xs">${timeStr}</td>
@@ -5473,6 +5485,17 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                 if (m === '"') return '&quot;';
                 return m;
             });
+        }
+
+        // Debajo del nombre de un usuario en las listas del panel: su @ de Telegram
+        // y, si no tiene, su ID entre paréntesis. El ID de Telegram nunca cambia; el
+        // @ se mantiene al día en la BD (sincronización de perfil web/bot), así que
+        // estas listas lo reflejan al volver a pintarse.
+        function userHandle(username, telegramId) {
+            const u = (username == null ? '' : String(username)).trim();
+            if (u) return '@' + escapeHTML(u);
+            const id = (telegramId == null ? '' : String(telegramId)).trim();
+            return id ? `(${escapeHTML(id)})` : '';
         }
 
         // Las columnas placed_at/updated_at se guardan como UTC. Postgres devuelve el
