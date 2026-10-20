@@ -1635,16 +1635,13 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
 
         function limitOverrideAdmissible(exceedData) {
             const parts = [];
-            let isSingleOne = false;
             if (exceedData && exceedData.admissibleCup > 0) {
                 parts.push(`${exceedData.admissibleCup.toFixed(2)} CUP`);
-                isSingleOne = !(exceedData.admissibleUsd > 0) && exceedData.admissibleCup === 1;
             }
             if (exceedData && exceedData.admissibleUsd > 0) {
                 parts.push(`${exceedData.admissibleUsd.toFixed(2)} USD`);
-                isSingleOne = isSingleOne || (!(exceedData.admissibleCup > 0) && exceedData.admissibleUsd === 1);
             }
-            return { text: parts.join(' y '), isSingleOne };
+            return parts.join(' y ');
         }
 
         function showLimitOverrideModal(errorText, exceedData) {
@@ -1655,20 +1652,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
             }
             if (textEl) {
                 let admissibleHtml = '';
-                let isSingleOne = false;
                 if (exceedData && Array.isArray(exceedData.admissibleLines) && exceedData.admissibleLines.length > 0) {
                     admissibleHtml = exceedData.admissibleLines.join('<br>');
-                    isSingleOne = exceedData.admissibleLines.length === 1 && /:\s*1\.00 (CUP|USD)\.$/.test(exceedData.admissibleLines[0]);
                 } else {
-                    const { text, isSingleOne: iso } = limitOverrideAdmissible(exceedData);
-                    admissibleHtml = text;
-                    isSingleOne = iso;
+                    admissibleHtml = limitOverrideAdmissible(exceedData);
                 }
-                // El pronombre concuerda con el sustantivo: "apostárselo(s)" para
-                // número/parlet y "apostársela(s)" para centena.
-                const question = isSingleOne
-                    ? (selectedBetType === 'centena' ? '¿Deseas apostársela?' : '¿Deseas apostárselo?')
-                    : (selectedBetType === 'centena' ? '¿Deseas apostárselas?' : '¿Deseas apostárselos?');
+                // El pronombre se refiere a "el/los monto(s) admisible(s)": masculino
+                // y sin variación de número.
+                const question = '¿Deseas apostárselos?';
                 const admissibleLine = admissibleHtml ? `<br><br>${admissibleHtml}` : '';
                 textEl.innerHTML = `${errorText}${admissibleLine}<br>${question}`;
             }
@@ -1789,7 +1780,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                     // permitido"); solo se usa para el singular/plural.
                     const clampedNums = Array.isArray(data.clampedNums) ? data.clampedNums.filter(n => n !== '' && n != null) : [];
                     let successMsg = '¡Buena suerte!';
-                    if (wasOmitted) {
+                    // En edición, "No, omitirlo(s)" dejó la jugada sin nada: el
+                    // backend ya la canceló, reembolsó el saldo y la borró.
+                    const betCancelled = data.betCancelled === true;
+                    if (betCancelled) {
+                        // Se mantiene el MISMO aviso de siempre (y en rojo), que ya
+                        // es cierto porque el servidor hizo el reembolso.
+                        successMsg = data.message || successMsg;
+                    } else if (wasOmitted) {
                         // Mismo texto que el bot (placeBetAndConfirm, rama omitted):
                         // voz pasiva, concordando verbo y sustantivo en número y género.
                         const singular = omittedNums.length === 1;
@@ -1816,7 +1814,22 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                         const adjustVerb = singular ? 'se ajustó' : 'se ajustaron';
                         successMsg = `ℹ️ ${capPhrase(singular)} que ${exceedVerb} el máximo ${adjustVerb} al monto permitido.`;
                     }
-                    iziToast.success({ title: isEditing ? '✅ Jugada editada 🍀' : '✅ Jugada registrada 🍀', message: successMsg });
+                    // El 🍀 va al final del "¡Buena suerte!" en las jugadas comunes.
+                    // Si hubo un arreglo por exceso (recorte, omisión o descarte de
+                    // números ya al máximo), el aviso sustituye al "¡Buena suerte!"
+                    // y el trebol se queda en el título para no perderse.
+                    const hadOverLimitFix = wasOmitted || droppedMaxed.length > 0 || (data.clamped && clampedNums.length > 0);
+                    if (betCancelled) {
+                        // Mismo aviso rojo sin título que antes, para no cambiar el mensaje.
+                        iziToast.error({ message: successMsg });
+                    } else {
+                        iziToast.success({
+                            title: hadOverLimitFix
+                                ? (isEditing ? '✅ Jugada editada 🍀' : '✅ Jugada registrada 🍀')
+                                : (isEditing ? '✅ Jugada editada' : '✅ Jugada registrada'),
+                            message: hadOverLimitFix ? successMsg : successMsg + ' 🍀'
+                        });
+                    }
                     currentUser = data.updatedUser;
                     updateBalanceUI();
                     loadBets();
