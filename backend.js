@@ -142,10 +142,24 @@ async function requireAdminOrRole(req, res, next, allowedRoles = []) {
 // ========== SEGUIMIENTO DE NOTIFICACIONES (para reflejar decisiones web ↔ bot) ==========
 const pendingNotifications = new Map(); // key: "deposit_{id}" o "withdraw_{id}" -> [{chatId, messageId}]
 
-async function updatePendingNotifications(key, statusText) {
+// `excludeChatId`: si se indica, a ese admin NO se le cambia el texto de la
+// notificación (no debe ver el aviso de una acción que él mismo ejecutó); solo
+// se le quitan los botones. A los demás sí se les actualiza el texto.
+async function updatePendingNotifications(key, statusText, excludeChatId) {
     const entries = pendingNotifications.get(key);
     if (!entries) return;
     for (const { chatId, messageId } of entries) {
+        if (excludeChatId != null && Number(chatId) === Number(excludeChatId)) {
+            // Solo quitar los botones, sin tocar el texto de la solicitud.
+            try {
+                await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageReplyMarkup`, {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    reply_markup: { inline_keyboard: [] }
+                });
+            } catch (e) {}
+            continue;
+        }
         try {
             await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
                 chat_id: chatId,
@@ -1879,6 +1893,60 @@ async function requireAdmin(req, res, next) {
     next();
 }
 
+// ========== SINCRONIZACIÓN DEL PERFIL (@/NOMBRE) DESDE TELEGRAM ==========
+// El initData que trae la Mini App se congela al cargar la página: si el usuario
+// se cambia el @ con la web abierta, en las peticiones siguientes ya no llega nada
+// nuevo hasta que se recargue. Para que el cambio sí se refleje cuando interactúa
+// con la web, se consulta el estado REAL en Telegram (getChat) y se guarda lo que
+// diga. Throttles:
+//  - por usuario: PROFILE_SYNC_MIN_MS (la web hace polling de saldo cada 5s, así
+//    que sin esto sería un getChat por request).
+//  - global: PROFILE_SYNC_MIN_GLOBAL_MS (evita ráfagas, p. ej. al abrir la webapp
+//    todos a la vez tras un broadcast).
+// Es "fire and forget": no bloquea ni retrasa la petición que lo dispara.
+const profileSyncedAt = new Map(); // telegram_id -> timestamp del último getChat
+const PROFILE_SYNC_MIN_MS = 60 * 1000;       // 1 min por usuario
+const PROFILE_SYNC_MIN_GLOBAL_MS = 250;      // ~4 getChat/s como máximo
+let lastProfileSyncGlobal = 0;
+
+async function syncProfileFromTelegram(telegramId) {
+    const id = parseInt(telegramId);
+    if (!id) return;
+    const now = Date.now();
+    if (now - (profileSyncedAt.get(id) || 0) < PROFILE_SYNC_MIN_MS) return;
+    if (now - lastProfileSyncGlobal < PROFILE_SYNC_MIN_GLOBAL_MS) return;
+    lastProfileSyncGlobal = now;
+    profileSyncedAt.set(id, now);
+    if (profileSyncedAt.size > 5000) profileSyncedAt.clear();
+    try {
+        const { data } = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/getChat`, {
+            params: { chat_id: id }
+        });
+        const chat = data && data.result;
+        // Solo chats privados: ahí es donde aplican el @ y el nombre.
+        if (!chat || chat.type !== 'private') return;
+        const freshUsername = (typeof chat.username === 'string' && chat.username.trim() !== '')
+            ? chat.username.trim()
+            : null;
+        const freshName = (typeof chat.first_name === 'string' && chat.first_name.trim() !== '')
+            ? chat.first_name.trim()
+            : null;
+        const { data: row } = await supabase
+            .from('users')
+            .select('username, first_name')
+            .eq('telegram_id', id)
+            .maybeSingle();
+        if (!row) return;
+        const updates = {};
+        if ((row.username || null) !== freshUsername) updates.username = freshUsername;
+        if (freshName && row.first_name !== freshName) updates.first_name = freshName;
+        if (Object.keys(updates).length === 0) return;
+        await supabase.from('users').update(updates).eq('telegram_id', id);
+    } catch (e) {
+        // Bot bloqueado, chat inexistente o error de red: se deja la BD como está.
+    }
+}
+
 // ========== MIDDLEWARE DE SEGURIDAD: verifica initData en cada petición ==========
 app.use(async (req, res, next) => {
     const initData = req.headers['x-telegram-init-data'];
@@ -1896,6 +1964,9 @@ app.use(async (req, res, next) => {
         try {
             const tgUser = JSON.parse(userStr);
             req.verifiedTelegramId = tgUser.id;
+
+            // Mantener el @ y el nombre al día en la BD (no bloquea la petición).
+            syncProfileFromTelegram(tgUser.id).catch(() => {});
 
             // Usuario eliminado por un admin → bloquear toda la webapp hasta que
             // se registre de nuevo vía bot (/start). Se consulta SIEMPRE: aunque la
@@ -2863,7 +2934,24 @@ app.post('/api/bets', async (req, res) => {
                         : isCentena ? (one ? 'centena' : 'centenas')
                             : betType === 'parle' ? (one ? 'parlet' : 'parlets') : betType;
                     const adjective = isCentena ? (one ? 'apostada' : 'apostadas') : (one ? 'apostado' : 'apostados');
-                    return res.status(400).json({ error: `❌ Has omitido ${article} ${typeWord} ${adjective}. Por lo cual la jugada queda cancelada.` });
+                    const cancelMsg = `❌ Has omitido ${article} ${typeWord} ${adjective}. Por lo cual la jugada queda cancelada y el saldo reembolsado.`;
+                    // En EDICIÓN, si "No, omitirlo(s)" deja la jugada sin nada que
+                    // guardar, se cancela de verdad (reembolso + borrado) para que ese
+                    // aviso sea cierto. Ocurre antes de tocar saldo y dentro de
+                    // withUserBetLock, igual que el resto del flujo de edición.
+                    if (betId && existingBet) {
+                        await cancelBetAndRefund(existingBet, user);
+                        const updatedUser = await getOrCreateUser(parseInt(userId));
+                        return res.json({
+                            success: true,
+                            betCancelled: true,
+                            message: cancelMsg,
+                            omittedNums,
+                            updatedUser
+                        });
+                    }
+                    // Apuesta nueva: nunca se descontó saldo, se mantiene el aviso.
+                    return res.status(400).json({ error: cancelMsg });
                 }
                 parsed.items = omitted.items;
                 totalCUP = omitted.totalCUP;
@@ -3483,33 +3571,13 @@ async function revertBonusIfBelowThreshold(referrerId) {
 }
 
 // --- Cancelar jugada ---
-app.post('/api/bets/:id/cancel', async (req, res) => {
-    const { id } = req.params;
-    const userId = req.verifiedTelegramId || req.body.userId;
-    if (!userId) return res.status(400).json({ error: 'Falta userId' });
-
-    const { data: bet } = await supabase
-        .from('bets')
-        .select('*')
-        .eq('id', id)
-        .eq('user_id', userId)
-        .single();
-
-    if (!bet) return res.status(404).json({ error: 'Jugada no encontrada' });
-
-    if (bet.session_id) {
-        const { data: session } = await supabase
-            .from('lottery_sessions')
-            .select('status')
-            .eq('id', bet.session_id)
-            .single();
-        if (!session || session.status !== 'open') {
-            return res.status(400).json({ error: 'No se puede cancelar: sesión cerrada' });
-        }
-    }
-
-    const user = await getOrCreateUser(parseInt(userId));
-
+// ========== CANCELAR UNA JUGADA (reembolso + borrado) ==========
+// Revierte la comisión del referidor (si la hubo), reembolsa al apostador lo que
+// gastó —incluido el bono usado— y elimina la fila de `bets`. Es la misma lógica
+// de siempre de /api/bets/:id/cancel, extraída para poder reutilizarla cuando una
+// EDICIÓN se queda sin números al elegir "No, omitirlo(s)".
+async function cancelBetAndRefund(bet, user) {
+    const bettorId = parseInt(bet.user_id);
     //----------- Cambios hechos por Luis David -----------//
     // ========== REVERTIR COMISIÓN DEL REFERIDOR (SIMPLIFICADO) ==========
     if (bet.referrer_id && bet.commission_amount > 0) {
@@ -3575,8 +3643,8 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
 
             // Notificar al referidor (mantener lógica existente o usar la simplificada)
             try {
-                const bettorName = user.first_name || user.username || `ID ${userId}`;
-                const userName = user.first_name || user.username || `ID ${userId}`;
+                const bettorName = user.first_name || user.username || `ID ${bettorId}`;
+                const userName = user.first_name || user.username || `ID ${bettorId}`;
 
                 const referralRate = await getReferralCommissionRate();
                 const percent = referralRate * 100;
@@ -3590,7 +3658,7 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
             } catch (e) {}
         }
     }
-    
+
     //---------- Cambios hechos por Luis David ----------//
     // Eliminamos la vieja logica y calcular los nuevos parametros introducidos
 
@@ -3610,12 +3678,42 @@ app.post('/api/bets/:id/cancel', async (req, res) => {
     await supabase
         .from('users')
         .update({ usd: newUsd, cup: newCup, bonus_cup: newBonus, bonus_updated_by_admin: null, updated_at: new Date() })
-        .eq('telegram_id', userId);
+        .eq('telegram_id', bettorId);
 
     await supabase
         .from('bets')
         .delete()
-        .eq('id', id);
+        .eq('id', bet.id);
+}
+
+app.post('/api/bets/:id/cancel', async (req, res) => {
+    const { id } = req.params;
+    const userId = req.verifiedTelegramId || req.body.userId;
+    if (!userId) return res.status(400).json({ error: 'Falta userId' });
+
+    const { data: bet } = await supabase
+        .from('bets')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', userId)
+        .single();
+
+    if (!bet) return res.status(404).json({ error: 'Jugada no encontrada' });
+
+    if (bet.session_id) {
+        const { data: session } = await supabase
+            .from('lottery_sessions')
+            .select('status')
+            .eq('id', bet.session_id)
+            .single();
+        if (!session || session.status !== 'open') {
+            return res.status(400).json({ error: 'No se puede cancelar: sesión cerrada' });
+        }
+    }
+
+    const user = await getOrCreateUser(parseInt(userId));
+
+    await cancelBetAndRefund(bet, user);
 
     const updatedUser = await getOrCreateUser(parseInt(userId));
     res.json({ success: true, updatedUser });
@@ -4994,7 +5092,7 @@ app.post('/api/admin/pending-deposits/:id/approve', requireAdmin, async (req, re
                 { parse_mode: 'HTML' }
             );
 
-            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
+            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`, userId);
         } catch (e) {}
     })();
 });
@@ -5027,7 +5125,7 @@ app.post('/api/admin/pending-deposits/:id/reject', requireAdmin, async (req, res
         } catch (e) {
             console.error('Error notificando rechazo de depósito:', e);
         }
-        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
+        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`, userId);
     })();
 });
 
@@ -5262,7 +5360,7 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
         );
     } catch (e) {}
 
-    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`);
+    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`, userId);
     res.json({ success: true });
 });
 
@@ -5290,7 +5388,7 @@ app.post('/api/admin/pending-withdraws/:id/reject', requireAdmin, async (req, re
         );
     } catch (e) {}
 
-    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`);
+    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`, userId);
     res.json({ success: true });
 });
 
@@ -6628,7 +6726,7 @@ app.post('/api/admin/pending-deposits-role/:id/approve', async (req, res) => {
             }
             text += `\n\n¡Gracias por confiar en nosotros!`;
             if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, text, { parse_mode: 'HTML' });
-            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`);
+            updatePendingNotifications(`deposit_${id}`, `✅ <b>Depósito #${id} aprobado</b> por un administrador.`, userId);
         } catch (e) {}
     })();
 });
@@ -6650,7 +6748,7 @@ app.post('/api/admin/pending-deposits-role/:id/reject', async (req, res) => {
         try {
             if (bot && bot.telegram) await bot.telegram.sendMessage(request.user_id, `❌ <b>Depósito rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`, { parse_mode: 'HTML' });
         } catch (e) {}
-        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`);
+        updatePendingNotifications(`deposit_${id}`, `❌ <b>Depósito #${id} rechazado</b> por un administrador.`, userId);
     })();
 });
 
@@ -6713,7 +6811,7 @@ app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
             `✅ <b>Retiro aprobado</b>\n\n💰 Monto retirado: ${request.amount} ${String(request.currency || '').toUpperCase()}\n💵 ${(debitPlan.cupDebit === 0 && debitPlan.usdDebit === 1) ? 'Se debitó' : 'Se debitaron'} ${debitPlan.cupDebit.toFixed(2)} CUP y ${debitPlan.usdDebit.toFixed(2)} USD de tu saldo real.\n\n📌 En breve los fondos serán enviados a tu cuenta.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
-    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`);
+    updatePendingNotifications(`withdraw_${id}`, `✅ <b>Retiro #${id} aprobado</b> por un administrador.`, userId);
     res.json({ success: true });
 });
 
@@ -6734,7 +6832,7 @@ app.post('/api/admin/pending-withdraws-role/:id/reject', async (req, res) => {
             `❌ <b>Retiro rechazado</b>\n\n💰 Monto: ${parseFloat(request.amount)} ${String(request.currency || '').toUpperCase()}\n📌 Tu solicitud no pudo ser procesada. Si crees que esto es incorrecto, por favor, contáctanos para más información.`,
             { parse_mode: 'HTML' });
     } catch (e) {}
-    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`);
+    updatePendingNotifications(`withdraw_${id}`, `❌ <b>Retiro #${id} rechazado</b> por un administrador.`, userId);
     res.json({ success: true });
 });
 
