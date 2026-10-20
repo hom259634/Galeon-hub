@@ -2934,10 +2934,10 @@ app.post('/api/bets', async (req, res) => {
                         : isCentena ? (one ? 'centena' : 'centenas')
                             : betType === 'parle' ? (one ? 'parlet' : 'parlets') : betType;
                     const adjective = isCentena ? (one ? 'apostada' : 'apostadas') : (one ? 'apostado' : 'apostados');
-                    const cancelMsg = `❌ Has omitido ${article} ${typeWord} ${adjective}. Por lo cual la jugada queda cancelada y el saldo reembolsado.`;
+                    const cancelMsgBase = `❌ Has omitido ${article} ${typeWord} ${adjective}. Por lo cual la jugada queda cancelada`;
                     // En EDICIÓN, si "No, omitirlo(s)" deja la jugada sin nada que
-                    // guardar, se cancela de verdad (reembolso + borrado) para que ese
-                    // aviso sea cierto. Ocurre antes de tocar saldo y dentro de
+                    // guardar, se cancela de verdad (reembolso + borrado), así que el
+                    // aviso lo dice. Ocurre antes de tocar saldo y dentro de
                     // withUserBetLock, igual que el resto del flujo de edición.
                     if (betId && existingBet) {
                         await cancelBetAndRefund(existingBet, user);
@@ -2945,13 +2945,14 @@ app.post('/api/bets', async (req, res) => {
                         return res.json({
                             success: true,
                             betCancelled: true,
-                            message: cancelMsg,
+                            message: `${cancelMsgBase} y el saldo reembolsado.`,
                             omittedNums,
                             updatedUser
                         });
                     }
-                    // Apuesta nueva: nunca se descontó saldo, se mantiene el aviso.
-                    return res.status(400).json({ error: cancelMsg });
+                    // Apuesta nueva: nunca se descontó saldo, así que no hay nada
+                    // que reembolsar y el aviso no lo menciona.
+                    return res.status(400).json({ error: `${cancelMsgBase}.` });
                 }
                 parsed.items = omitted.items;
                 totalCUP = omitted.totalCUP;
