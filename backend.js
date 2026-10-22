@@ -5332,8 +5332,11 @@ app.post('/api/admin/pending-withdraws/:id/approve', requireAdmin, async (req, r
     }
 
     const user = await getOrCreateUser(request.user_id);
-    const originalRate = (request.amount_usd > 0) ? (parseFloat(request.amount) / parseFloat(request.amount_usd)) : null;
-    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency, originalRate);
+    // Se aprueba con la tasa vigente, igual que al crear la solicitud. Antes se
+    // pasaba un "originalRate" = amount/amount_usd, que solo coincide con la
+    // tasa CUP/USD en retiros CUP; en MLC/TRX/USDT daba ~1 y valoraba el saldo
+    // USD del usuario a ~1 CUP, provocando un falso "saldo insuficiente".
+    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency);
     if (!debitPlan.ok) {
         return res.status(400).json({ error: debitPlan.errorMessage || '❌ Saldo insuficiente (posible cambio de tasa). Rechace la solicitud.' });
     }
@@ -6794,8 +6797,10 @@ app.post('/api/admin/pending-withdraws-role/:id/approve', async (req, res) => {
     if (fetchError || !request) return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
 
     const user = await getOrCreateUser(request.user_id);
-    const originalRate = (request.amount_usd > 0) ? (parseFloat(request.amount) / parseFloat(request.amount_usd)) : null;
-    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency, originalRate);
+    // Igual que en la aprobación de admin: tasa vigente (como al crear), sin el
+    // "originalRate" = amount/amount_usd que rompía la valoración del saldo USD
+    // en retiros MLC/TRX/USDT (falso "saldo insuficiente").
+    const debitPlan = await buildRealBalanceDebitPlan(user, parseFloat(request.amount), request.currency);
     if (!debitPlan.ok) return res.status(400).json({ error: debitPlan.errorMessage || '❌ Saldo insuficiente' });
 
     let newCup = (parseFloat(user.cup) || 0) - debitPlan.cupDebit;

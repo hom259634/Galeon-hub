@@ -7595,10 +7595,16 @@ bot.on(message('text'), async (ctx) => {
                     const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
                     const admissibleLines = admissibleLinesForNumbers(parsed.items, betType, limitCheck.exceedData);
                     // El pronombre se refiere a "el/los monto(s) admisible(s)":
-                    // masculino. En singular cuando un solo número excede el
-                    // máximo (sea la moneda y el monto que sea), en plural si son
-                    // varios.
-                    const question = admissibleLines.length === 1 ? '¿Deseas apostárselo?' : '¿Deseas apostárselos?';
+                    // masculino. Singular ("apostárselo") SOLO si hay un solo número
+                    // y su monto admisible es exactamente 1 (en CUP o en USD). Con
+                    // varios números, o con un monto distinto de 1, va en plural
+                    // ("apostárselos").
+                    const oneNumber = admissibleLines.length === 1;
+                    const admCup = Number(clamped.totalCUP) || 0;
+                    const admUsd = Number(clamped.totalUSD) || 0;
+                    const question = (oneNumber && (admCup === 1 || admUsd === 1))
+                        ? '¿Deseas apostárselo?'
+                        : '¿Deseas apostárselos?';
                     const admissibleLine = admissibleLines.length > 0 ? `\n\n${admissibleLines.join('\n')}` : '';
                     const omitLabel = betType === 'centena' ? '❌ No, omitirla(s)' : '❌ No, omitirlo(s)';
                     // Telegram dibuja los botones de izquierda a derecha: el
@@ -7970,11 +7976,13 @@ bot.action(/approve_withdraw_(\d+)/, async (ctx) => {
             .single();
 
         const amount = parseFloat(request.amount) || 0;
-        const originalRate = (request.amount_usd > 0) ? (amount / parseFloat(request.amount_usd)) : null;
-        const debitPlan = await buildRealBalanceDebitPlan(user, amount, request.currency, originalRate);
+        // Tasa vigente al aprobar, igual que al crear la solicitud: el
+        // "originalRate" anterior valoraba el saldo USD a ~1 CUP en retiros
+        // MLC/TRX/USDT y daba un falso "saldo insuficiente".
+        const debitPlan = await buildRealBalanceDebitPlan(user, amount, request.currency);
 
         if (!debitPlan.ok) {
-            await ctx.reply(`❌ ${debitPlan.errorMessage || 'El usuario ya no tiene saldo suficiente para este retiro.'}`);
+            await ctx.reply(debitPlan.errorMessage || '❌ El usuario ya no tiene saldo suficiente para este retiro.');
             return;
         }
 
