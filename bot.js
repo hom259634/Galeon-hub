@@ -5770,9 +5770,11 @@ bot.on(message('text'), async (ctx) => {
         }
         // Si quien responde es un subadmin (no está en ADMIN_IDS), reenviar al superadmin
         if (!isAdmin(uid)) {
+            // Con @ se muestra el @; si no tiene, se muestra su nombre y su ID
+            // entre paréntesis (que nunca cambia), para poder identificarlo.
             const responderName = ctx.from.username
                 ? `@${escapeHTML(ctx.from.username)}`
-                : escapeHTML(ctx.from.first_name || 'Admin');
+                : `${escapeHTML(ctx.from.first_name || 'Admin')} (${ctx.from.id})`;
             const userMsgMap = supportUserMessages.get(targetUserId);
             let userMsg = userMsgMap?.get(session.supportReplyMessageId);
             // Fallback: si no hay messageId, usar el último mensaje del usuario
