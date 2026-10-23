@@ -582,11 +582,22 @@ async function getExchangeRates() {
         .select('*')
         .eq('id', 1)
         .single();
+    // Defaults realistas (CUP por unidad)
+    const DEFAULTS = { rate: 110, rate_usdt: 110, rate_trx: 16, rate_mlc: 110 };
+    // Validación: rate debe ser número > 0; si no, usa default y avisa
+    const sanitize = (val, def, name) => {
+        const n = Number(val);
+        if (!Number.isFinite(n) || n <= 0) {
+            console.warn(`[Tasas] ${name} inválido en BD (${val}), usando default ${def}`);
+            return def;
+        }
+        return n;
+    };
     return {
-        rate: data?.rate ?? 110,
-        rate_usdt: data?.rate_usdt ?? 110,
-        rate_trx: data?.rate_trx ?? 1,
-        rate_mlc: data?.rate_mlc ?? 110
+        rate: sanitize(data?.rate, DEFAULTS.rate, 'rate (USD)'),
+        rate_usdt: sanitize(data?.rate_usdt, DEFAULTS.rate_usdt, 'rate_usdt (USDT)'),
+        rate_trx: sanitize(data?.rate_trx, DEFAULTS.rate_trx, 'rate_trx (TRX)'),
+        rate_mlc: sanitize(data?.rate_mlc, DEFAULTS.rate_mlc, 'rate_mlc (MLC)')
     };
 }
 
@@ -678,10 +689,15 @@ async function setExchangeRateTRX(rate) {
 // Convertir cualquier moneda a CUP
 async function convertToCUP(amount, currency) {
     const rates = await getExchangeRates();
+    // Fallback USDT: si rate_usdt es inválido (≤1 o difiere >50% de rate), usar rate (≈USD)
+    const rateUSDT = rates.rate_usdt;
+    const safeRateUSDT = (rateUSDT > 1 && Math.abs(rateUSDT - rates.rate) / rates.rate <= 0.5)
+        ? rateUSDT
+        : rates.rate;
     switch (String(currency).toUpperCase()) {
         case 'CUP': return amount;
         case 'USD': return amount * rates.rate;
-        case 'USDT': return amount * rates.rate_usdt;
+        case 'USDT': return amount * safeRateUSDT;
         case 'TRX': return amount * rates.rate_trx;
         case 'MLC': return amount * rates.rate_mlc;
         default: return 0;
@@ -691,10 +707,14 @@ async function convertToCUP(amount, currency) {
 // Convertir de CUP a otra moneda
 async function convertFromCUP(amountCUP, targetCurrency) {
     const rates = await getExchangeRates();
+    const rateUSDT = rates.rate_usdt;
+    const safeRateUSDT = (rateUSDT > 1 && Math.abs(rateUSDT - rates.rate) / rates.rate <= 0.5)
+        ? rateUSDT
+        : rates.rate;
     switch (String(targetCurrency).toUpperCase()) {
         case 'CUP': return amountCUP;
         case 'USD': return amountCUP / rates.rate;
-        case 'USDT': return amountCUP / rates.rate_usdt;
+        case 'USDT': return amountCUP / safeRateUSDT;
         case 'TRX': return amountCUP / rates.rate_trx;
         case 'MLC': return amountCUP / rates.rate_mlc;
         default: return 0;

@@ -646,11 +646,22 @@ async function getExchangeRates() {
         .select('*')
         .eq('id', 1)
         .single();
+    // Defaults realistas (CUP por unidad)
+    const DEFAULTS = { rate: 110, rate_usdt: 110, rate_trx: 16, rate_mlc: 110 };
+    // Validación: rate debe ser número > 0; si no, usa default y avisa
+    const sanitize = (val, def, name) => {
+        const n = Number(val);
+        if (!Number.isFinite(n) || n <= 0) {
+            console.warn(`[Tasas] ${name} inválido en BD (${val}), usando default ${def}`);
+            return def;
+        }
+        return n;
+    };
     return {
-        rate: data?.rate ?? 110,
-        rate_usdt: data?.rate_usdt ?? 110,
-        rate_trx: data?.rate_trx ?? 1,
-        rate_mlc: data?.rate_mlc ?? 110
+        rate: sanitize(data?.rate, DEFAULTS.rate, 'rate (USD)'),
+        rate_usdt: sanitize(data?.rate_usdt, DEFAULTS.rate_usdt, 'rate_usdt (USDT)'),
+        rate_trx: sanitize(data?.rate_trx, DEFAULTS.rate_trx, 'rate_trx (TRX)'),
+        rate_mlc: sanitize(data?.rate_mlc, DEFAULTS.rate_mlc, 'rate_mlc (MLC)')
     };
 }
 
@@ -854,10 +865,15 @@ async function setExchangeRateMLC(rate) {
 
 async function convertToCUP(amount, currency) {
     const rates = await getExchangeRates();
+    // Fallback USDT: si rate_usdt es inválido (≤1 o difiere >50% de rate), usar rate (≈USD)
+    const rateUSDT = rates.rate_usdt;
+    const safeRateUSDT = (rateUSDT > 1 && Math.abs(rateUSDT - rates.rate) / rates.rate <= 0.5)
+        ? rateUSDT
+        : rates.rate;
     switch (String(currency).toUpperCase()) {
         case 'CUP': return amount;
         case 'USD': return amount * rates.rate;
-        case 'USDT': return amount * rates.rate_usdt;
+        case 'USDT': return amount * safeRateUSDT;
         case 'TRX': return amount * rates.rate_trx;
         case 'MLC': return amount * rates.rate_mlc;
         default: return 0;
@@ -866,10 +882,14 @@ async function convertToCUP(amount, currency) {
 
 async function convertFromCUP(amountCUP, targetCurrency) {
     const rates = await getExchangeRates();
+    const rateUSDT = rates.rate_usdt;
+    const safeRateUSDT = (rateUSDT > 1 && Math.abs(rateUSDT - rates.rate) / rates.rate <= 0.5)
+        ? rateUSDT
+        : rates.rate;
     switch (String(targetCurrency).toUpperCase()) {
         case 'CUP': return amountCUP;
         case 'USD': return amountCUP / rates.rate;
-        case 'USDT': return amountCUP / rates.rate_usdt;
+        case 'USDT': return amountCUP / safeRateUSDT;
         case 'TRX': return amountCUP / rates.rate_trx;
         case 'MLC': return amountCUP / rates.rate_mlc;
         default: return 0;
@@ -1222,17 +1242,22 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
 
     function isPlausible(currency, value) {
         if (value == null || isNaN(value)) return false;
-        // Rangos absolutos en CUP para evitar confusiones con columnas (USD vs CUP)
-        if (currency === 'TRX') {
-            return value >= 100 && value <= 500; // rango razonable para TRX en CUP
-        }
-        if (currency === 'USDT') {
-            return value >= 600 && value <= 1000; // rango razonable para USDT en CUP
-        }
+        // Rechazar siempre valores ≤ 0 (basura obvia)
+        if (value <= 0) return false;
         const base = currency === 'USDT' ? dbUsdt : dbTrx;
+        // Fallback absolutos muy amplios (red de seguridad)
+        const absMin = currency === 'USDT' ? 200 : 5;
+        const absMax = currency === 'USDT' ? 2000 : 1000;
+        if (value < absMin || value > absMax) return false;
+        // Rango dinámico alrededor de BD (±500 o ±100%, el mayor) - SOLO si base es válida
+        // ACEPTA si está en rango dinámico O en fallback absoluto (UNIÓN)
         if (base != null && base > 0) {
-            return value >= (base - 200) && value <= (base + 200);
+            const margin = Math.max(500, base * 1.0);
+            const dynMin = base - margin;
+            const dynMax = base + margin;
+            return (value >= dynMin && value <= dynMax) || (value >= absMin && value <= absMax);
         }
+        // Sin base válida: solo fallback absoluto
         return true;
     }
 
@@ -7598,13 +7623,14 @@ bot.on(message('text'), async (ctx) => {
                     const admissibleLines = admissibleLinesForNumbers(parsed.items, betType, limitCheck.exceedData);
                     // El pronombre se refiere a "el/los monto(s) admisible(s)":
                     // masculino. Singular ("apostárselo") SOLO si hay un solo número
-                    // y su monto admisible es exactamente 1 (en CUP o en USD). Con
-                    // varios números, o con un monto distinto de 1, va en plural
-                    // ("apostárselos").
+                    // y su monto admisible total redondea a 1.00 (en CUP o en USD).
+                    // Usamos tolerancia de centavo para evitar falsos negativos por
+                    // punto flotante (p.ej. 0.9999999998 o 1.0000000002).
                     const oneNumber = admissibleLines.length === 1;
                     const admCup = Number(clamped.totalCUP) || 0;
                     const admUsd = Number(clamped.totalUSD) || 0;
-                    const question = (oneNumber && (admCup === 1 || admUsd === 1))
+                    const isOne = (v) => Math.round(v * 100) === 100;
+                    const question = (oneNumber && (isOne(admCup) || isOne(admUsd)))
                         ? '¿Deseas apostárselo?'
                         : '¿Deseas apostárselos?';
                     const admissibleLine = admissibleLines.length > 0 ? `\n\n${admissibleLines.join('\n')}` : '';
