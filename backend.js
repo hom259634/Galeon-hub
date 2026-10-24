@@ -3616,6 +3616,7 @@ async function cancelBetAndRefund(bet, user) {
             let newCup = parseFloat(referrer.cup) || 0;
             let newUsd = parseFloat(referrer.usd) || 0;
             let newBonus = parseFloat(referrer.bonus_cup) || 0;
+            let deductedFromBonus = false;
 
             if (destination === 'cup') {
                 newCup = Math.max(0, newCup - commissionAmount);
@@ -3624,6 +3625,7 @@ async function cancelBetAndRefund(bet, user) {
             } else if (destination === 'bonus_cup') {
                 if (newBonus >= commissionAmount) {
                     newBonus -= commissionAmount;
+                    deductedFromBonus = true;
                 } else {
                     const remaining = commissionAmount - newBonus;
                     newCup = Math.max(0, newCup - remaining);
@@ -3671,9 +3673,10 @@ async function cancelBetAndRefund(bet, user) {
                 const percent = referralRate * 100;
                 // Formateo limpio: sin decimales si es entero, o hasta 2 decimales
                 const percentStr = (percent % 1 === 0 ? percent.toFixed(0) : percent.toFixed(2)) + '%';
+                const balanceWord = deductedFromBonus ? 'bono' : 'saldo';
                 await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     chat_id: referrerId,
-                    text: `⚠️ Tu referido <b>${escapeHTML(bettorName)}</b> ha removido una apuesta. Ha sido restado de tu saldo actual el ${percentStr} del monto retirado en la apuesta removida.`,
+                    text: `⚠️ Tu referido <b>${escapeHTML(bettorName)}</b> ha removido una apuesta. Ha sido restado de tu ${balanceWord} actual el ${percentStr} del monto retirado en la apuesta removida.`,
                     parse_mode: 'HTML'
                 });
             } catch (e) {}
@@ -6095,6 +6098,7 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
                     if (referrer) {
                         let cup = parseFloat(referrer.cup) || 0;
                         let bonus = parseFloat(referrer.bonus_cup) || 0;
+                        const deductedFromBonus = cup <= 0;
 
                         if (cup >= deduction) {
                             cup -= deduction;
@@ -6123,8 +6127,9 @@ app.post('/api/admin/users/:telegramId/reset', async (req, res) => {
 
                         const percent = Number.isInteger(referralRate * 100) ? (referralRate * 100).toString() : (referralRate * 100).toFixed(2);
                         const pluralSuffix = activeBetCount > 1 ? 's' : '';
+                        const balanceWord = deductedFromBonus ? 'bono' : 'saldo';
                         await bot.telegram.sendMessage(referrerId,
-                            `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser eliminado. Ha sido restado de tu saldo actual el ${percent}% del monto apostado en su${pluralSuffix ? 's' : ''} jugada${pluralSuffix} activa${pluralSuffix}.`,
+                            `⚠️ Tu referido ${escapeHTML(userName)} acaba de ser eliminado. Ha sido restado de tu ${balanceWord} actual el ${percent}% del monto apostado en su${pluralSuffix ? 's' : ''} jugada${pluralSuffix} activa${pluralSuffix}.`,
                             { parse_mode: 'HTML' }
                         ).catch(e => console.error('Error notificando al referidor:', e));
                     }

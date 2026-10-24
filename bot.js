@@ -97,7 +97,7 @@ const MENU_COMMANDS = [
   { command: 'mi_dinero', description: '💰 Mi dinero' },
   { command: 'mis_jugadas', description: '📋 Mis jugadas' },
   { command: 'referidos', description: '👥 Referidos' },
-    { command: 'webapp', description: '🌐 Abrir Web-App' },
+    { command: 'web_app', description: '🌐 Abrir Web-App' },
   { command: 'ayuda', description: '❓ Ayuda' },
     { command: 'cancel', description: '❌ Cancelar operación' }
 ];
@@ -3387,7 +3387,7 @@ bot.command('ayuda', async (ctx) => {
     );
 });
 
-bot.command('webapp', async (ctx) => {
+bot.command('web_app', async (ctx) => {
     const webAppButton = Markup.inlineKeyboard([
         Markup.button.webApp('🚀 Abrir Web-App', `${WEBAPP_URL}/app.html`)
     ]);
@@ -7630,7 +7630,8 @@ bot.on(message('text'), async (ctx) => {
                     const admCup = Number(clamped.totalCUP) || 0;
                     const admUsd = Number(clamped.totalUSD) || 0;
                     const isOne = (v) => Math.round(v * 100) === 100;
-                    const question = (oneNumber && (isOne(admCup) || isOne(admUsd)))
+                    const totalAdm = admCup + admUsd;
+                    const question = (oneNumber && (isOne(admCup) || isOne(admUsd) || isOne(totalAdm)))
                         ? '¿Deseas apostárselo?'
                         : '¿Deseas apostárselos?';
                     const admissibleLine = admissibleLines.length > 0 ? `\n\n${admissibleLines.join('\n')}` : '';
