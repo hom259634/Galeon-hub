@@ -93,7 +93,7 @@ function setsIntersect(a, b) {
     return false;
 }
 
-async function killBotPendingsByCanon(userId, canonSet, sessionId = null, betType = null) {
+async function killBotPendingsByCanon(userId, canonSet, sessionId = null, betType = null, lottery = null) {
     try {
         const uidNum = Number(userId);
         if (!uidNum || !canonSet || canonSet.size === 0) return;
@@ -107,13 +107,16 @@ async function killBotPendingsByCanon(userId, canonSet, sessionId = null, betTyp
                     try {
                         const entryUid = Number(entry?.fromId || entry?.uid || key);
                         if (entryUid !== uidNum) continue;
+                        // Solo invalidar si es la misma lotería y mismo tipo de jugada
+                        if (lottery && entry.lottery && entry.lottery !== lottery) continue;
+                        if (betType && entry.betType && entry.betType !== betType) continue;
                         const entryCanon = entry?.canon ? new Set(entry.canon) : null;
                         if (!entryCanon || entryCanon.size === 0) continue;
                         if (setsIntersect(canonSet, entryCanon)) {
                             // Editar mensaje
                             try {
                                 if (botRef.telegram && entry.chatId && entry.messageId) {
-                                    await botRef.telegram.editMessageText(entry.chatId, entry.messageId, undefined, String.fromCharCode(10060) + ' Esta jugada ya fue resuelta desde la web.', { reply_markup: { inline_keyboard: [] } });
+                                    await botRef.telegram.editMessageText(entry.chatId, entry.messageId, undefined, String.fromCharCode(10060) + ' Esta jugada ya fue completada desde la Web-App. Usa el menú "🎲 Jugar" para continuar apostando', { reply_markup: { inline_keyboard: [] } });
                                 }
                             } catch (e) {}
                             botRef.pendingLimitModals.delete(key);
@@ -133,6 +136,9 @@ async function killBotPendingsByCanon(userId, canonSet, sessionId = null, betTyp
                     try {
                         const sess = botRef.localSession.getSession(cKey);
                         if (sess) {
+                            // Solo invalidar si es la misma lotería y mismo tipo de jugada
+                            if (lottery && sess.lottery && sess.lottery !== lottery) continue;
+                            if (betType && sess.betType && sess.betType !== betType) continue;
                             let changed = false;
                             if (sess.pendingBetOverride) {
                                 const sc = sess.pendingBetOverride?.canon ? new Set(sess.pendingBetOverride.canon) : canonizeItemsSet(sess.pendingBetOverride.items, sess.pendingBetOverride.betType || betType);
@@ -1589,6 +1595,64 @@ function omitExceededNumbers(items, betType, exceedData) {
     return { items: newItems, totalCUP, totalUSD, omittedItems };
 }
 
+// Re-valida que los montos de los items no superen el límite máximo cuando se
+// suman a las apuestas YA REGISTRADAS en BD para ese usuario/sesión/tipo.
+// Cubre el caso inverso: bot registró directo (sin modal) y luego la web
+// confirma un modal pendiente por el mismo número, lo que provocaría
+// sobreapuesta.
+async function checkExistingBetLimits({ items, betType, sessionId, userId, maxCup, maxUsd }) {
+    if (!sessionId || !userId) return { ok: true };
+    if (maxCup === null && maxUsd === null) return { ok: true };
+
+    const numOf = (item) => betType === 'parle'
+        ? (typeof normalizeParleValue === 'function' ? normalizeParleValue(item.numero) : item.numero) || item.numero
+        : item.numero;
+    const cupOf = (item) => item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+    const usdOf = (item) => item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+
+    const itemTotals = {};
+    for (const item of items || []) {
+        const num = String(numOf(item));
+        if (!itemTotals[num]) itemTotals[num] = { cup: 0, usd: 0 };
+        itemTotals[num].cup += cupOf(item);
+        itemTotals[num].usd += usdOf(item);
+    }
+
+    let existingTotals = {};
+    try {
+        const { data: existingBets } = await supabase
+            .from('bets')
+            .select('items')
+            .eq('user_id', userId)
+            .eq('session_id', sessionId)
+            .eq('bet_type', betType);
+        for (const bet of (existingBets || [])) {
+            for (const item of (bet.items || [])) {
+                const num = String(numOf(item));
+                if (!existingTotals[num]) existingTotals[num] = { cup: 0, usd: 0 };
+                existingTotals[num].cup += cupOf(item);
+                existingTotals[num].usd += usdOf(item);
+            }
+        }
+    } catch (e) {
+        console.error('Error consultando apuestas existentes para validar límites:', e);
+        return { ok: true };
+    }
+
+    const exceeders = [];
+    for (const [num, totals] of Object.entries(itemTotals)) {
+        const ex = existingTotals[num] || { cup: 0, usd: 0 };
+        const cupOver = maxCup !== null && totals.cup > 0 && totals.cup + (ex.cup || 0) > parseFloat(maxCup);
+        const usdOver = maxUsd !== null && totals.usd > 0 && totals.usd + (ex.usd || 0) > parseFloat(maxUsd);
+        if (cupOver || usdOver) exceeders.push(num);
+    }
+
+    if (exceeders.length > 0) {
+        return { ok: false, exceeders, maxCup, maxUsd };
+    }
+    return { ok: true };
+}
+
 // Devuelve una línea de "Monto admisible" por cada número excedido que aún se
 // pueda jugar (excluye los que ya están al máximo por jugadas anteriores).
 // El monto mostrado es el admisible por repetición dentro de la jugada actual:
@@ -3013,6 +3077,18 @@ app.post('/api/bets', async (req, res) => {
         if (isMaxedFlow) {
             maxedFlow = maxedOverall;
             if (req.body.confirmLimitOverride === true) {
+                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web)
+                try {
+                    const rb = global.resolvedBotCanon?.get(Number(userId));
+                    if (rb?.canonSet && rb.lottery === lottery && rb.betType === betType) {
+                        const cwebCheck = canonizeItemsSet(parsed.items, betType);
+                        if (setsIntersect(cwebCheck, rb.canonSet)) {
+                            global.resolvedBotCanon?.delete(Number(userId));
+                            try { await closeBotLimitModal(userId); } catch (e) {}
+                            return res.status(400).json({ error: '❌ Esta jugada ya fue completada desde el Bot. Usa el menú "🎲 Jugar" para continuar apostando', code: 'RESOLVED_ELSEWHERE' });
+                        }
+                    }
+                } catch (e) {}
                 // Confirmado: el recorte ajusta a `máximo − otras jugadas` cada
                 // número excedido. Para los que ya estaban en su tope eso es
                 // justo el monto que la jugada ya tenía (se conserva su wager); el
@@ -3032,6 +3108,21 @@ app.post('/api/bets', async (req, res) => {
                 }
                 maxedFlow.dropped = [...numsBeforeClamp]
                     .filter(n => !clamped.items.some(it => String(betNumOf(it, betType)) === n));
+                // Re-validar límites contra BD actual (evita sobreapuesta si
+                // el bot registró directo mientras el modal de la web estaba abierto)
+                const limitCheckWeb = await checkExistingBetLimits({
+                    items: clamped.items,
+                    betType,
+                    sessionId,
+                    userId,
+                    maxCup: limitCheck.exceedData?.maxCup,
+                    maxUsd: limitCheck.exceedData?.maxUsd
+                });
+                if (!limitCheckWeb.ok) {
+                    try { await closeBotLimitModal(userId); } catch (e) {}
+                    try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
+                    return res.status(400).json({ error: `❌ ${limitCheckWeb.exceeders.join(', ')} ya están al monto máximo permitido. Tu jugada no se registró.` });
+                }
                 clampApplied = true;
                 clampedNums = exceededNumsInItems(parsed.items, betType, limitCheck.exceedData);
                 parsed.items = clamped.items;
@@ -3041,8 +3132,8 @@ app.post('/api/bets', async (req, res) => {
                 try {
                     const cweb = canonizeItemsSet(parsed.items, betType);
                     if (cweb.size > 0) {
-                        global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, at: Date.now() });
-                        await killBotPendingsByCanon(userId, cweb, sessionId, betType);
+                        global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, lottery, at: Date.now() });
+                        await killBotPendingsByCanon(userId, cweb, sessionId, betType, lottery);
                     }
                 } catch (e) {}
                 try { await closeBotLimitModal(userId); } catch (e) {}
@@ -3050,8 +3141,8 @@ app.post('/api/bets', async (req, res) => {
                 try {
                     const cweb = canonizeItemsSet(parsed.items, betType);
                     if (cweb.size > 0) {
-                        global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, at: Date.now() });
-                        await killBotPendingsByCanon(userId, cweb, sessionId, betType);
+                        global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, lottery, at: Date.now() });
+                        await killBotPendingsByCanon(userId, cweb, sessionId, betType, lottery);
                     }
                 } catch (e) {}
                 return res.status(400).json({
@@ -3068,12 +3159,24 @@ app.post('/api/bets', async (req, res) => {
             // Llega también en edición, cuando no hay ningún número ya apostado al
             // máximo y por eso no se pregunta con el aviso ⚠️ de arriba.
             if (req.body.confirmLimitOverride === true) {
+                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web)
+                try {
+                    const rb = global.resolvedBotCanon?.get(Number(userId));
+                    if (rb?.canonSet && rb.lottery === lottery && rb.betType === betType) {
+                        const cwebCheck = canonizeItemsSet(parsed.items, betType);
+                        if (setsIntersect(cwebCheck, rb.canonSet)) {
+                            global.resolvedBotCanon?.delete(Number(userId));
+                            try { await closeBotLimitModal(userId); } catch (e) {}
+                            return res.status(400).json({ error: '❌ Esta jugada ya fue completada desde el Bot. Usa el menú "🎲 Jugar" para continuar apostando', code: 'RESOLVED_ELSEWHERE' });
+                        }
+                    }
+                } catch (e) {}
                 // Marcar resuelto desde web por intersección y matar pendings del bot
                 try {
                     const cweb = canonizeItemsSet(parsed.items, betType);
                     if (cweb.size > 0) {
-                        global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, at: Date.now() });
-                        await killBotPendingsByCanon(userId, cweb, sessionId, betType);
+                        global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, lottery, at: Date.now() });
+                        await killBotPendingsByCanon(userId, cweb, sessionId, betType, lottery);
                     }
                 } catch (e) {}
                 const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
@@ -3081,6 +3184,21 @@ app.post('/api/bets', async (req, res) => {
                     try { await closeBotLimitModal(userId); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
                     return res.status(400).json({ error: '❌ Después del recorte no queda monto válido en la jugada. La apuesta fue cancelada.' });
+                }
+                // Re-validar límites contra BD actual (evita sobreapuesta si
+                // el bot registró directo mientras el modal de la web estaba abierto)
+                const limitCheckWeb = await checkExistingBetLimits({
+                    items: clamped.items,
+                    betType,
+                    sessionId,
+                    userId,
+                    maxCup: limitCheck.exceedData?.maxCup,
+                    maxUsd: limitCheck.exceedData?.maxUsd
+                });
+                if (!limitCheckWeb.ok) {
+                    try { await closeBotLimitModal(userId); } catch (e) {}
+                    try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
+                    return res.status(400).json({ error: `❌ ${limitCheckWeb.exceeders.join(', ')} ya están al monto máximo permitido. Tu jugada no se registró.` });
                 }
                 clampApplied = true;
                 clampedNums = exceededNumsInItems(parsed.items, betType, limitCheck.exceedData);
@@ -3090,12 +3208,24 @@ app.post('/api/bets', async (req, res) => {
                 effectiveRawText = serializeItemsToText(parsed.items, betType);
                 try { await closeBotLimitModal(userId); } catch (e) {}
             } else if (req.body.omitLimitOverride === true) {
+                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web)
+                try {
+                    const rb = global.resolvedBotCanon?.get(Number(userId));
+                    if (rb?.canonSet && rb.lottery === lottery && rb.betType === betType) {
+                        const cwebCheck = canonizeItemsSet(parsed.items, betType);
+                        if (setsIntersect(cwebCheck, rb.canonSet)) {
+                            global.resolvedBotCanon?.delete(Number(userId));
+                            try { await closeBotLimitModal(userId); } catch (e) {}
+                            return res.status(400).json({ error: '❌ Esta jugada ya fue completada desde el Bot. Usa el menú "🎲 Jugar" para continuar apostando', code: 'RESOLVED_ELSEWHERE' });
+                        }
+                    }
+                } catch (e) {}
                 // Marcar resuelto desde web por intersección
                 try {
                     const cweb = canonizeItemsSet(parsed.items, betType);
                     if (cweb.size > 0) {
-                        global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, at: Date.now() });
-                        await killBotPendingsByCanon(userId, cweb, sessionId, betType);
+                        global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, lottery, at: Date.now() });
+                        await killBotPendingsByCanon(userId, cweb, sessionId, betType, lottery);
                     }
                 } catch (e) {}
                 const omitted = omitExceededNumbers(parsed.items, betType, limitCheck.exceedData);
@@ -3134,6 +3264,21 @@ app.post('/api/bets', async (req, res) => {
                     try { await closeBotLimitModal(userId); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
                     return res.status(400).json({ error: `${cancelMsgBase}.` });
+                }
+                // Re-validar límites contra BD actual (evita sobreapuesta si
+                // el bot registró directo mientras el modal de la web estaba abierto)
+                const limitCheckWeb = await checkExistingBetLimits({
+                    items: omitted.items,
+                    betType,
+                    sessionId,
+                    userId,
+                    maxCup: limitCheck.exceedData?.maxCup,
+                    maxUsd: limitCheck.exceedData?.maxUsd
+                });
+                if (!limitCheckWeb.ok) {
+                    try { await closeBotLimitModal(userId); } catch (e) {}
+                    try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
+                    return res.status(400).json({ error: `❌ ${limitCheckWeb.exceeders.join(', ')} ya están al monto máximo permitido. Tu jugada no se registró.` });
                 }
                 parsed.items = omitted.items;
                 totalCUP = omitted.totalCUP;
