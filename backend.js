@@ -116,7 +116,7 @@ async function killBotPendingsByCanon(userId, canonSet, sessionId = null, betTyp
                             // Editar mensaje
                             try {
                                 if (botRef.telegram && entry.chatId && entry.messageId) {
-                                    await botRef.telegram.editMessageText(entry.chatId, entry.messageId, undefined, String.fromCharCode(10060) + ' Esta jugada ya fue completada desde la Web-App. Usa el menú "🎲 Jugar" para continuar apostando', { reply_markup: { inline_keyboard: [] } });
+                                    await botRef.telegram.editMessageText(entry.chatId, entry.messageId, undefined, String.fromCharCode(10060) + ' Esta apuesta ya fue completada desde la Web-App.', { reply_markup: { inline_keyboard: [] } });
                                 }
                             } catch (e) {}
                             botRef.pendingLimitModals.delete(key);
@@ -3085,7 +3085,7 @@ app.post('/api/bets', async (req, res) => {
                         if (setsIntersect(cwebCheck, rb.canonSet)) {
                             global.resolvedBotCanon?.delete(Number(userId));
                             try { await closeBotLimitModal(userId); } catch (e) {}
-                            return res.status(400).json({ error: '❌ Esta jugada ya fue completada desde el Bot. Usa el menú "🎲 Jugar" para continuar apostando', code: 'RESOLVED_ELSEWHERE' });
+                            return res.status(400).json({ error: '❌ Esta apuesta ya fue completada desde el Bot.', code: 'RESOLVED_ELSEWHERE' });
                         }
                     }
                 } catch (e) {}
@@ -3121,7 +3121,16 @@ app.post('/api/bets', async (req, res) => {
                 if (!limitCheckWeb.ok) {
                     try { await closeBotLimitModal(userId); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
-                    return res.status(400).json({ error: `❌ ${limitCheckWeb.exceeders.join(', ')} ya están al monto máximo permitido. Tu jugada no se registró.` });
+                    const nums = limitCheckWeb.exceeders || [];
+                    const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : (typeof formatBetTypeLabel === 'function' ? formatBetTypeLabel(betType).toLowerCase() : betType);
+                    const noun = typeNoun === 'centena' ? 'centena' : typeNoun === 'parle' ? 'parlet' : 'número';
+                    const nounPlural = noun === 'número' ? 'números' : noun === 'centena' ? 'centenas' : 'parlets';
+                    const isPlural = nums.length > 1;
+                    const subject = isPlural
+                        ? `${noun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${nums.join(', ')}`
+                        : `${noun === 'centena' ? 'La' : 'El'} ${noun} ${nums[0]}`;
+                    const verb = isPlural ? 'están' : 'está';
+                    return res.status(400).json({ error: `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.` });
                 }
                 clampApplied = true;
                 clampedNums = exceededNumsInItems(parsed.items, betType, limitCheck.exceedData);
@@ -3130,6 +3139,7 @@ app.post('/api/bets', async (req, res) => {
                 totalUSD = clamped.totalUSD;
                 effectiveRawText = serializeItemsToText(parsed.items, betType);
                 try {
+                    try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {}
                     const cweb = canonizeItemsSet(parsed.items, betType);
                     if (cweb.size > 0) {
                         global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, lottery, at: Date.now() });
@@ -3139,6 +3149,7 @@ app.post('/api/bets', async (req, res) => {
                 try { await closeBotLimitModal(userId); } catch (e) {}
             } else {
                 try {
+                    try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {}
                     const cweb = canonizeItemsSet(parsed.items, betType);
                     if (cweb.size > 0) {
                         global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, lottery, at: Date.now() });
@@ -3167,12 +3178,13 @@ app.post('/api/bets', async (req, res) => {
                         if (setsIntersect(cwebCheck, rb.canonSet)) {
                             global.resolvedBotCanon?.delete(Number(userId));
                             try { await closeBotLimitModal(userId); } catch (e) {}
-                            return res.status(400).json({ error: '❌ Esta jugada ya fue completada desde el Bot. Usa el menú "🎲 Jugar" para continuar apostando', code: 'RESOLVED_ELSEWHERE' });
+                            return res.status(400).json({ error: '❌ Esta apuesta ya fue completada desde el Bot.', code: 'RESOLVED_ELSEWHERE' });
                         }
                     }
                 } catch (e) {}
                 // Marcar resuelto desde web por intersección y matar pendings del bot
                 try {
+                    try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {}
                     const cweb = canonizeItemsSet(parsed.items, betType);
                     if (cweb.size > 0) {
                         global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, lottery, at: Date.now() });
@@ -3198,7 +3210,16 @@ app.post('/api/bets', async (req, res) => {
                 if (!limitCheckWeb.ok) {
                     try { await closeBotLimitModal(userId); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
-                    return res.status(400).json({ error: `❌ ${limitCheckWeb.exceeders.join(', ')} ya están al monto máximo permitido. Tu jugada no se registró.` });
+                    const nums = limitCheckWeb.exceeders || [];
+                    const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : (typeof formatBetTypeLabel === 'function' ? formatBetTypeLabel(betType).toLowerCase() : betType);
+                    const noun = typeNoun === 'centena' ? 'centena' : typeNoun === 'parle' ? 'parlet' : 'número';
+                    const nounPlural = noun === 'número' ? 'números' : noun === 'centena' ? 'centenas' : 'parlets';
+                    const isPlural = nums.length > 1;
+                    const subject = isPlural
+                        ? `${noun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${nums.join(', ')}`
+                        : `${noun === 'centena' ? 'La' : 'El'} ${noun} ${nums[0]}`;
+                    const verb = isPlural ? 'están' : 'está';
+                    return res.status(400).json({ error: `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.` });
                 }
                 clampApplied = true;
                 clampedNums = exceededNumsInItems(parsed.items, betType, limitCheck.exceedData);
@@ -3216,12 +3237,13 @@ app.post('/api/bets', async (req, res) => {
                         if (setsIntersect(cwebCheck, rb.canonSet)) {
                             global.resolvedBotCanon?.delete(Number(userId));
                             try { await closeBotLimitModal(userId); } catch (e) {}
-                            return res.status(400).json({ error: '❌ Esta jugada ya fue completada desde el Bot. Usa el menú "🎲 Jugar" para continuar apostando', code: 'RESOLVED_ELSEWHERE' });
+                            return res.status(400).json({ error: '❌ Esta apuesta ya fue completada desde el Bot.', code: 'RESOLVED_ELSEWHERE' });
                         }
                     }
                 } catch (e) {}
                 // Marcar resuelto desde web por intersección
                 try {
+                    try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {}
                     const cweb = canonizeItemsSet(parsed.items, betType);
                     if (cweb.size > 0) {
                         global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, lottery, at: Date.now() });
@@ -3278,7 +3300,16 @@ app.post('/api/bets', async (req, res) => {
                 if (!limitCheckWeb.ok) {
                     try { await closeBotLimitModal(userId); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
-                    return res.status(400).json({ error: `❌ ${limitCheckWeb.exceeders.join(', ')} ya están al monto máximo permitido. Tu jugada no se registró.` });
+                    const nums = limitCheckWeb.exceeders || [];
+                    const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : (typeof formatBetTypeLabel === 'function' ? formatBetTypeLabel(betType).toLowerCase() : betType);
+                    const noun = typeNoun === 'centena' ? 'centena' : typeNoun === 'parle' ? 'parlet' : 'número';
+                    const nounPlural = noun === 'número' ? 'números' : noun === 'centena' ? 'centenas' : 'parlets';
+                    const isPlural = nums.length > 1;
+                    const subject = isPlural
+                        ? `${noun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${nums.join(', ')}`
+                        : `${noun === 'centena' ? 'La' : 'El'} ${noun} ${nums[0]}`;
+                    const verb = isPlural ? 'están' : 'está';
+                    return res.status(400).json({ error: `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.` });
                 }
                 parsed.items = omitted.items;
                 totalCUP = omitted.totalCUP;
