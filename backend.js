@@ -108,8 +108,8 @@ async function killBotPendingsByCanon(userId, canonSet, sessionId = null, betTyp
                         const entryUid = Number(entry?.fromId || entry?.uid || key);
                         if (entryUid !== uidNum) continue;
                         // Solo invalidar si es la misma lotería y mismo tipo de jugada
-                        if (lottery && entry.lottery && entry.lottery !== lottery) continue;
-                        if (betType && entry.betType && entry.betType !== betType) continue;
+                        if (lottery && entry.lottery !== lottery) continue;
+                        if (betType && entry.betType !== betType) continue;
                         const entryCanon = entry?.canon ? new Set(entry.canon) : null;
                         if (!entryCanon || entryCanon.size === 0) continue;
                         if (setsIntersect(canonSet, entryCanon)) {
@@ -137,8 +137,8 @@ async function killBotPendingsByCanon(userId, canonSet, sessionId = null, betTyp
                         const sess = botRef.localSession.getSession(cKey);
                         if (sess) {
                             // Solo invalidar si es la misma lotería y mismo tipo de jugada
-                            if (lottery && sess.lottery && sess.lottery !== lottery) continue;
-                            if (betType && sess.betType && sess.betType !== betType) continue;
+                            if (lottery && sess.lottery !== lottery) continue;
+                            if (betType && sess.betType !== betType) continue;
                             let changed = false;
                             if (sess.pendingBetOverride) {
                                 const sc = sess.pendingBetOverride?.canon ? new Set(sess.pendingBetOverride.canon) : canonizeItemsSet(sess.pendingBetOverride.items, sess.pendingBetOverride.betType || betType);
@@ -3077,10 +3077,11 @@ app.post('/api/bets', async (req, res) => {
         if (isMaxedFlow) {
             maxedFlow = maxedOverall;
             if (req.body.confirmLimitOverride === true) {
-                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web)
+                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web), ignorando stale > 5 min
                 try {
                     const rb = global.resolvedBotCanon?.get(Number(userId));
-                    if (rb?.canonSet && rb.lottery === lottery && rb.betType === betType) {
+                    const isStale = rb && (Date.now() - (rb.at || 0)) > 5 * 60 * 1000;
+                    if (rb?.canonSet && !isStale && rb.lottery === lottery && rb.betType === betType) {
                         const cwebCheck = canonizeItemsSet(parsed.items, betType);
                         if (setsIntersect(cwebCheck, rb.canonSet)) {
                             global.resolvedBotCanon?.delete(Number(userId));
@@ -3088,6 +3089,8 @@ app.post('/api/bets', async (req, res) => {
                             return res.status(400).json({ error: '❌ Esta apuesta ya fue completada desde el Bot.', code: 'RESOLVED_ELSEWHERE' });
                         }
                     }
+                    // Limpiar entrada stale si existe
+                    if (isStale) { try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {} }
                 } catch (e) {}
                 // Confirmado: el recorte ajusta a `máximo − otras jugadas` cada
                 // número excedido. Para los que ya estaban en su tope eso es
@@ -3170,10 +3173,11 @@ app.post('/api/bets', async (req, res) => {
             // Llega también en edición, cuando no hay ningún número ya apostado al
             // máximo y por eso no se pregunta con el aviso ⚠️ de arriba.
             if (req.body.confirmLimitOverride === true) {
-                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web)
+                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web), ignorando stale > 5 min
                 try {
                     const rb = global.resolvedBotCanon?.get(Number(userId));
-                    if (rb?.canonSet && rb.lottery === lottery && rb.betType === betType) {
+                    const isStale = rb && (Date.now() - (rb.at || 0)) > 5 * 60 * 1000;
+                    if (rb?.canonSet && !isStale && rb.lottery === lottery && rb.betType === betType) {
                         const cwebCheck = canonizeItemsSet(parsed.items, betType);
                         if (setsIntersect(cwebCheck, rb.canonSet)) {
                             global.resolvedBotCanon?.delete(Number(userId));
@@ -3181,6 +3185,8 @@ app.post('/api/bets', async (req, res) => {
                             return res.status(400).json({ error: '❌ Esta apuesta ya fue completada desde el Bot.', code: 'RESOLVED_ELSEWHERE' });
                         }
                     }
+                    // Limpiar entrada stale si existe
+                    if (isStale) { try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {} }
                 } catch (e) {}
                 // Marcar resuelto desde web por intersección y matar pendings del bot
                 try {
@@ -3229,10 +3235,11 @@ app.post('/api/bets', async (req, res) => {
                 effectiveRawText = serializeItemsToText(parsed.items, betType);
                 try { await closeBotLimitModal(userId); } catch (e) {}
             } else if (req.body.omitLimitOverride === true) {
-                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web)
+                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web), ignorando stale > 5 min
                 try {
                     const rb = global.resolvedBotCanon?.get(Number(userId));
-                    if (rb?.canonSet && rb.lottery === lottery && rb.betType === betType) {
+                    const isStale = rb && (Date.now() - (rb.at || 0)) > 5 * 60 * 1000;
+                    if (rb?.canonSet && !isStale && rb.lottery === lottery && rb.betType === betType) {
                         const cwebCheck = canonizeItemsSet(parsed.items, betType);
                         if (setsIntersect(cwebCheck, rb.canonSet)) {
                             global.resolvedBotCanon?.delete(Number(userId));
@@ -3240,6 +3247,8 @@ app.post('/api/bets', async (req, res) => {
                             return res.status(400).json({ error: '❌ Esta apuesta ya fue completada desde el Bot.', code: 'RESOLVED_ELSEWHERE' });
                         }
                     }
+                    // Limpiar entrada stale si existe
+                    if (isStale) { try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {} }
                 } catch (e) {}
                 // Marcar resuelto desde web por intersección
                 try {
