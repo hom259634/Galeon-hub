@@ -3730,7 +3730,73 @@ bot.action('bet_override_accept', async (ctx) => {
             maxUsd: exceedData?.maxUsd
         });
         if (!limitCheckBot.ok) {
-            const nums = limitCheckBot.exceeders || [];
+            // Re-validar con datos frescos de BD para obtener el monto admisible actualizado
+            const freshCheck = await validateBetLimits(clamped.items, betType, {
+                max_cup: exceedData?.maxCup,
+                max_usd: exceedData?.maxUsd
+            }, { userId: uid, sessionId, excludeBetId: null });
+            if (freshCheck.ok) {
+                // Ya no excede con los datos frescos → registrar directamente
+                const user = ctx.dbUser || { cup: 0, usd: 0, bonus_cup: 0 };
+                ctx.session.pendingBetOverride = null;
+                await placeBetAndConfirm(ctx, {
+                    uid,
+                    user,
+                    betType,
+                    playSessionId: sessionId,
+                    rawText,
+                    items: clamped.items,
+                    totalCUP: clamped.totalCUP,
+                    totalUSD: clamped.totalUSD,
+                    session: ctx.session,
+                    clamped: true,
+                    exceededNums: exceededNumsInItems(items, betType, exceedData)
+                });
+                try { await ctx.deleteMessage(); } catch (e) {}
+                return;
+            } else if (freshCheck.confirmable) {
+                // Aún excede pero HAY cupo admisible → actualizar modal con monto actualizado
+                ctx.session.pendingBetOverride = {
+                    betType,
+                    rawText,
+                    items: clamped.items,
+                    sessionId,
+                    lottery: session?.lottery || null,
+                    exceedData: freshCheck.exceedData,
+                    error: freshCheck.error,
+                    canon: Array.from(canonizeItemsSetBot(clamped.items, betType))
+                };
+                const admissibleLines = admissibleLinesForNumbers(clamped.items, betType, freshCheck.exceedData);
+                const isSingleOne = admissibleLines.length === 1
+                    && /:\s*1\.00 (CUP|USD)\.$/.test(admissibleLines[0]);
+                const question = isSingleOne ? '¿Deseas apostárselo?' : '¿Deseas apostárselos?';
+                const admissibleLine = admissibleLines.length > 0 ? `\n\n${admissibleLines.join('\n')}` : '';
+                const omitLabel = betType === 'centena' ? '❌ No, omitirla(s)' : '❌ No, omitirlo(s)';
+                await safeEdit(ctx, `${freshCheck.error}${admissibleLine}\n${question}`, {
+                    reply_markup: Markup.inlineKeyboard([
+                        [Markup.button.callback(omitLabel, 'bet_override_reject'),
+                         Markup.button.callback('✅ Sí, apostar', 'bet_override_accept')]
+                    ]).reply_markup
+                });
+                try {
+                    if (bot.pendingLimitModals) {
+                        bot.pendingLimitModals.set(uid, {
+                            chatId: ctx.chat.id,
+                            messageId: ctx.callbackQuery.message.message_id,
+                            type: 'bet_override',
+                            fromId: ctx.from.id,
+                            at: Date.now(),
+                            canon: Array.from(canonizeItemsSetBot(clamped.items, betType)),
+                            betType,
+                            sessionId,
+                            lottery: session?.lottery || null
+                        });
+                    }
+                } catch (e) {}
+                return;
+            }
+            // No hay cupo admisible (todos al máximo) → error final
+            const nums = freshCheck.exceeders || [];
             const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : (typeof formatBetTypeLabel === 'function' ? formatBetTypeLabel(betType).toLowerCase() : betType);
             const noun = typeNoun === 'centena' ? 'centena' : typeNoun === 'parle' ? 'parlet' : 'número';
             const nounPlural = noun === 'número' ? 'números' : noun === 'centena' ? 'centenas' : 'parlets';
