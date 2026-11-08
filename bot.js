@@ -2941,9 +2941,9 @@ async function adminBroadcast(ctx, messageText = null) {
         try {
             let result;
             if (messageText) {
-                result = await bot.telegram.sendMessage(u.telegram_id, messageText, { parse_mode: 'HTML' });
+                result = await bot.telegram.sendMessage(u.telegram_id, messageText, { parse_mode: 'HTML', protect_content: true });
             } else {
-                result = await ctx.telegram.copyMessage(u.telegram_id, fromChatId, messageId);
+                result = await ctx.telegram.copyMessage(u.telegram_id, fromChatId, messageId, { protect_content: true });
             }
             if (result && result.message_id) {
                 sentMessageIds.push({ chat_id: u.telegram_id, message_id: result.message_id });
@@ -6104,6 +6104,7 @@ bot.on(message('text'), async (ctx) => {
         const targetUserId = session.supportReplyTo;
         try {
             const replyOpts = { parse_mode: 'HTML' };
+            if (isAdmin(uid)) replyOpts.protect_content = true;
             const targetMsgId = session.supportReplyMessageId || supportReplyMessageIds.get(targetUserId);
             if (targetMsgId) replyOpts.reply_to_message_id = targetMsgId;
             await bot.telegram.sendMessage(targetUserId,
