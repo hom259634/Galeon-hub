@@ -3756,17 +3756,35 @@ bot.action('bet_override_accept', async (ctx) => {
                 return;
             } else if (freshCheck.confirmable) {
                 // Aún excede pero HAY cupo admisible → actualizar modal con monto actualizado
+                const freshClamped = clampItemsToMax(items, betType, freshCheck.exceedData);
+                if (freshClamped.totalCUP <= 0 && freshClamped.totalUSD <= 0) {
+                    const ed = freshCheck.exceedData || {};
+                    const nums = [...new Set([...(ed.cupExceeders || []), ...(ed.usdExceeders || []), ...(freshCheck.exceeders || [])].map(String))];
+                    const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : (typeof formatBetTypeLabel === 'function' ? formatBetTypeLabel(betType).toLowerCase() : betType);
+                    const noun = typeNoun === 'centena' ? 'centena' : typeNoun === 'parle' ? 'parlet' : 'número';
+                    const nounPlural = noun === 'número' ? 'números' : noun === 'centena' ? 'centenas' : 'parlets';
+                    const isPlural = nums.length > 1;
+                    const subject = isPlural
+                        ? `${noun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${nums.join(', ')}`
+                        : `${noun === 'centena' ? 'La' : 'El'} ${noun} ${nums[0] || ''}`;
+                    const verb = isPlural ? 'están' : 'está';
+                    await safeEdit(ctx, `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.`, getMainKeyboard(ctx));
+                    if (ctx.session) delete ctx.session.pendingBetOverride;
+                    try { await ctx.deleteMessage(); } catch (e) {}
+                    return;
+                }
+                const lotteryVal = lottery || ctx.session?.lottery || null;
                 ctx.session.pendingBetOverride = {
                     betType,
                     rawText,
-                    items: clamped.items,
+                    items: freshClamped.items,
                     sessionId,
-                    lottery: session?.lottery || null,
+                    lottery: lotteryVal,
                     exceedData: freshCheck.exceedData,
                     error: freshCheck.error,
-                    canon: Array.from(canonizeItemsSetBot(clamped.items, betType))
+                    canon: Array.from(canonizeItemsSetBot(freshClamped.items, betType))
                 };
-                const admissibleLines = admissibleLinesForNumbers(clamped.items, betType, freshCheck.exceedData);
+                const admissibleLines = admissibleLinesForNumbers(freshClamped.items, betType, freshCheck.exceedData);
                 const isSingleOne = admissibleLines.length === 1
                     && /:\s*1\.00 (CUP|USD)\.$/.test(admissibleLines[0]);
                 const question = isSingleOne ? '¿Deseas apostárselo?' : '¿Deseas apostárselos?';
@@ -3786,24 +3804,25 @@ bot.action('bet_override_accept', async (ctx) => {
                             type: 'bet_override',
                             fromId: ctx.from.id,
                             at: Date.now(),
-                            canon: Array.from(canonizeItemsSetBot(clamped.items, betType)),
+                            canon: Array.from(canonizeItemsSetBot(freshClamped.items, betType)),
                             betType,
                             sessionId,
-                            lottery: session?.lottery || null
+                            lottery: lotteryVal
                         });
                     }
                 } catch (e) {}
                 return;
             }
             // No hay cupo admisible (todos al máximo) → error final
-            const nums = freshCheck.exceeders || [];
+            const ed = freshCheck.exceedData || {};
+            const nums = [...new Set([...(ed.cupExceeders || []), ...(ed.usdExceeders || []), ...(freshCheck.exceeders || [])].map(String))];
             const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : (typeof formatBetTypeLabel === 'function' ? formatBetTypeLabel(betType).toLowerCase() : betType);
             const noun = typeNoun === 'centena' ? 'centena' : typeNoun === 'parle' ? 'parlet' : 'número';
             const nounPlural = noun === 'número' ? 'números' : noun === 'centena' ? 'centenas' : 'parlets';
             const isPlural = nums.length > 1;
             const subject = isPlural
                 ? `${noun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${nums.join(', ')}`
-                : `${noun === 'centena' ? 'La' : 'El'} ${noun} ${nums[0]}`;
+                : `${noun === 'centena' ? 'La' : 'El'} ${noun} ${nums[0] || ''}`;
             const verb = isPlural ? 'están' : 'está';
             await safeEdit(ctx, `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.`, getMainKeyboard(ctx));
             if (ctx.session) delete ctx.session.pendingBetOverride;

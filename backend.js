@@ -2896,7 +2896,9 @@ app.post('/api/transfer', async (req, res) => {
 
 // --- Registro de apuestas ---
 // --- Cerrar modal del bot al resolver desde la web (sin tocar BD) ---
-const closeBotLimitModal = async (telegramUserId) => {
+// ctx opcional { lottery, betType, canonSet, force } para cerrar SOLO si el modal
+// pendiente corresponde al mismo contexto (evita cancelar modales de otra lotería/tipo).
+const closeBotLimitModal = async (telegramUserId, ctx = {}) => {
     try {
         const botInst = require('./bot.js');
         const botRef = botInst.default || botInst;
@@ -2904,6 +2906,21 @@ const closeBotLimitModal = async (telegramUserId) => {
         if (!uidNum || !botRef || !botRef.telegram || !botRef.pendingLimitModals) return;
         const pending = botRef.pendingLimitModals.get(uidNum);
         if (!pending) return;
+        // Match contextual: si hay evidencia de no-relación, no tocar el modal ajeno.
+        if (!ctx.force) {
+            const hasCtx = ctx.lottery || ctx.betType || ctx.canonSet;
+            if (hasCtx) {
+                if (ctx.betType && pending.betType && String(ctx.betType) !== String(pending.betType)) return;
+                if (ctx.lottery && pending.lottery && String(ctx.lottery) !== String(pending.lottery)) return;
+                if (ctx.canonSet && pending.canon) {
+                    try {
+                        const cReq = ctx.canonSet instanceof Set ? ctx.canonSet : new Set(Array.isArray(ctx.canonSet) ? ctx.canonSet : [...ctx.canonSet]);
+                        const cPend = new Set(Array.isArray(pending.canon) ? pending.canon : [...pending.canon]);
+                        if (cReq.size > 0 && cPend.size > 0 && !setsIntersect(cReq, cPend)) return;
+                    } catch (e) {}
+                }
+            }
+        }
         try {
             await botRef.telegram.editMessageText(pending.chatId, pending.messageId, undefined, String.fromCharCode(10060) + ' Apuesta cancelada.', { reply_markup: { inline_keyboard: [] } });
         } catch (e) {}
@@ -3054,7 +3071,7 @@ app.post('/api/bets', async (req, res) => {
             const nothingToApply = (clampedNoop.totalCUP <= 0 && clampedNoop.totalUSD <= 0)
                 || betTotalsEqual(betTotalsByNum(clampedNoop.items, betType), betTotalsByNum(existingBet.items, betType));
             if (nothingToApply) {
-                try { await closeBotLimitModal(userId); } catch (e) {}
+                try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
                 return res.status(400).json({
                     error: maxedNoticeBlock(betType, maxedOverall, limitCheck.exceedData),
                     code: 'EDIT_NOTHING_TO_APPLY'
@@ -3085,7 +3102,7 @@ app.post('/api/bets', async (req, res) => {
                         const cwebCheck = canonizeItemsSet(parsed.items, betType);
                         if (setsIntersect(cwebCheck, rb.canonSet)) {
                             global.resolvedBotCanon?.delete(Number(userId));
-                            try { await closeBotLimitModal(userId); } catch (e) {}
+                            try { await closeBotLimitModal(userId, { lottery, betType, canonSet: cwebCheck }); } catch (e) {}
                             return res.status(400).json({ error: '❌ Esta apuesta ya fue completada desde el Bot.', code: 'RESOLVED_ELSEWHERE' });
                         }
                     }
@@ -3103,7 +3120,7 @@ app.post('/api/bets', async (req, res) => {
                     // Red de seguridad: el atajo de arriba ya corta este caso
                     // antes de ofrecer el modal. Si aun así se llegara aquí, la
                     // apuesta NO se toca (aún no se reembolsó nada): solo avisar.
-                    try { await closeBotLimitModal(userId); } catch (e) {}
+                    try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
                     return res.status(400).json({
                         error: maxedNoticeBlock(betType, maxedOverall, limitCheck.exceedData),
                         code: 'EDIT_NOTHING_TO_APPLY'
@@ -3122,7 +3139,7 @@ app.post('/api/bets', async (req, res) => {
                     maxUsd: limitCheck.exceedData?.maxUsd
                 });
                 if (!limitCheckWeb.ok) {
-                    try { await closeBotLimitModal(userId); } catch (e) {}
+                    try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
                     const nums = limitCheckWeb.exceeders || [];
                     const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : (typeof formatBetTypeLabel === 'function' ? formatBetTypeLabel(betType).toLowerCase() : betType);
@@ -3149,7 +3166,7 @@ app.post('/api/bets', async (req, res) => {
                         await killBotPendingsByCanon(userId, cweb, sessionId, betType, lottery);
                     }
                 } catch (e) {}
-                try { await closeBotLimitModal(userId); } catch (e) {}
+                try { await closeBotLimitModal(userId, { lottery, betType, canonSet: cweb }); } catch (e) {}
             } else {
                 try {
                     try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {}
@@ -3181,7 +3198,7 @@ app.post('/api/bets', async (req, res) => {
                         const cwebCheck = canonizeItemsSet(parsed.items, betType);
                         if (setsIntersect(cwebCheck, rb.canonSet)) {
                             global.resolvedBotCanon?.delete(Number(userId));
-                            try { await closeBotLimitModal(userId); } catch (e) {}
+                            try { await closeBotLimitModal(userId, { lottery, betType, canonSet: cwebCheck }); } catch (e) {}
                             return res.status(400).json({ error: '❌ Esta apuesta ya fue completada desde el Bot.', code: 'RESOLVED_ELSEWHERE' });
                         }
                     }
@@ -3199,7 +3216,7 @@ app.post('/api/bets', async (req, res) => {
                 } catch (e) {}
                 const clamped = clampItemsToMax(parsed.items, betType, limitCheck.exceedData);
                 if (clamped.totalCUP <= 0 && clamped.totalUSD <= 0) {
-                    try { await closeBotLimitModal(userId); } catch (e) {}
+                    try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
                     return res.status(400).json({ error: '❌ Después del recorte no queda monto válido en la jugada. La apuesta fue cancelada.' });
                 }
@@ -3214,7 +3231,7 @@ app.post('/api/bets', async (req, res) => {
                     maxUsd: limitCheck.exceedData?.maxUsd
                 });
                 if (!limitCheckWeb.ok) {
-                    try { await closeBotLimitModal(userId); } catch (e) {}
+                    try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
                     const nums = limitCheckWeb.exceeders || [];
                     const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : (typeof formatBetTypeLabel === 'function' ? formatBetTypeLabel(betType).toLowerCase() : betType);
@@ -3233,7 +3250,7 @@ app.post('/api/bets', async (req, res) => {
                 totalCUP = clamped.totalCUP;
                 totalUSD = clamped.totalUSD;
                 effectiveRawText = serializeItemsToText(parsed.items, betType);
-                try { await closeBotLimitModal(userId); } catch (e) {}
+                try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
             } else if (req.body.omitLimitOverride === true) {
                 // Verificar si el bot ya resolvió esta jugada primero (Bot → Web), ignorando stale > 5 min
                 try {
@@ -3243,7 +3260,7 @@ app.post('/api/bets', async (req, res) => {
                         const cwebCheck = canonizeItemsSet(parsed.items, betType);
                         if (setsIntersect(cwebCheck, rb.canonSet)) {
                             global.resolvedBotCanon?.delete(Number(userId));
-                            try { await closeBotLimitModal(userId); } catch (e) {}
+                            try { await closeBotLimitModal(userId, { lottery, betType, canonSet: cwebCheck }); } catch (e) {}
                             return res.status(400).json({ error: '❌ Esta apuesta ya fue completada desde el Bot.', code: 'RESOLVED_ELSEWHERE' });
                         }
                     }
@@ -3278,7 +3295,7 @@ app.post('/api/bets', async (req, res) => {
                     // aviso lo dice. Ocurre antes de tocar saldo y dentro de
                     // withUserBetLock, igual que el resto del flujo de edición.
                     if (betId && existingBet) {
-                        try { await closeBotLimitModal(userId); } catch (e) {}
+                        try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
                         try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
                         await cancelBetAndRefund(existingBet, user);
                         const updatedUser = await getOrCreateUser(parseInt(userId));
@@ -3292,7 +3309,7 @@ app.post('/api/bets', async (req, res) => {
                     }
                     // Apuesta nueva: nunca se descontó saldo, así que no hay nada
                     // que reembolsar y el aviso no lo menciona.
-                    try { await closeBotLimitModal(userId); } catch (e) {}
+                    try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
                     return res.status(400).json({ error: `${cancelMsgBase}.` });
                 }
@@ -3307,7 +3324,7 @@ app.post('/api/bets', async (req, res) => {
                     maxUsd: limitCheck.exceedData?.maxUsd
                 });
                 if (!limitCheckWeb.ok) {
-                    try { await closeBotLimitModal(userId); } catch (e) {}
+                    try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
                     try { global.resolvedWebCanon?.delete(Number(userId)); } catch (e) {}
                     const nums = limitCheckWeb.exceeders || [];
                     const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : (typeof formatBetTypeLabel === 'function' ? formatBetTypeLabel(betType).toLowerCase() : betType);
