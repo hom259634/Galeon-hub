@@ -2336,6 +2336,17 @@ function maxedNoticeBlock(betType, maxed, exceedData) {
     return `❌ ${sentences.join(' ')}`;
 }
 
+// Aviso ❌ de "ya apostado a su máximo" a partir de un `exceedData` FRESCO
+// (recién leído de BD). Devuelve null si ningún número quedó realmente en su
+// tope —p. ej. solo excede pero aún tiene cupo—, para que el llamador use el
+// mensaje genérico. Se usa al confirmar los modales del bot cuando la BD cambió
+// mientras estaban abiertos (apuesta directa desde la web en el mismo contexto).
+function maxedBlockFromExceedData(betType, exceedData) {
+    const maxed = maxedExceeders(exceedData, null);
+    if (maxed.cup.length === 0 && maxed.usd.length === 0) return null;
+    return maxedNoticeBlock(betType, maxed, exceedData);
+}
+
 // ========== COLOCAR LA JUGADA Y CONFIRMAR ==========
 // Debita saldos, registra la apuesta, procesa la comisión de referido y confirma.
 // Se usa tanto en el flujo normal como al confirmar el recorte al máximo permitido.
@@ -3768,7 +3779,11 @@ bot.action('bet_override_accept', async (ctx) => {
                         ? `${noun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${nums.join(', ')}`
                         : `${noun === 'centena' ? 'La' : 'El'} ${noun} ${nums[0] || ''}`;
                     const verb = isPlural ? 'están' : 'está';
-                    await safeEdit(ctx, `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.`, getMainKeyboard(ctx));
+                    const genericMsg = `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.`;
+                    // Preferir el aviso con monto/moneda reales ("ya fue apostado a su
+                    // máximo permitido de 2.00 USD"); el genérico queda de fallback.
+                    const maxedMsg = maxedBlockFromExceedData(betType, freshCheck.exceedData);
+                    await safeEdit(ctx, maxedMsg || genericMsg, getMainKeyboard(ctx));
                     if (ctx.session) delete ctx.session.pendingBetOverride;
                     try { await ctx.deleteMessage(); } catch (e) {}
                     return;
@@ -3824,7 +3839,12 @@ bot.action('bet_override_accept', async (ctx) => {
                 ? `${noun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${nums.join(', ')}`
                 : `${noun === 'centena' ? 'La' : 'El'} ${noun} ${nums[0] || ''}`;
             const verb = isPlural ? 'están' : 'está';
-            await safeEdit(ctx, `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.`, getMainKeyboard(ctx));
+            const genericMsg = `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.`;
+            // El número ya fue apostado a su tope (p. ej. la web apostó el máximo
+            // exacto mientras el modal estaba abierto): avisar con el monto y la
+            // moneda reales, no con el genérico sin importe.
+            const maxedMsg = maxedBlockFromExceedData(betType, freshCheck.exceedData);
+            await safeEdit(ctx, maxedMsg || genericMsg, getMainKeyboard(ctx));
             if (ctx.session) delete ctx.session.pendingBetOverride;
             try { await ctx.deleteMessage(); } catch (e) {}
             return;
@@ -4027,7 +4047,20 @@ bot.action('bet_maxed_accept', async (ctx) => {
                 ? `${noun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${nums.join(', ')}`
                 : `${noun === 'centena' ? 'La' : 'El'} ${noun} ${nums[0]}`;
             const verb = isPlural ? 'están' : 'está';
-            await safeEdit(ctx, `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.`, getMainKeyboard(ctx));
+            const genericMsg = `❌ ${subject} ya ${verb} al monto máximo permitido. Tu jugada no se registró.`;
+            // Re-validar con datos frescos para saber si los números quedaron
+            // realmente en su tope (p. ej. la web consumió el cupo restante) y
+            // avisar con el monto/moneda reales; si aún hubiera cupo, se mantiene
+            // el genérico (no se registra para no sobrepasar el máximo).
+            let maxedMsg = null;
+            try {
+                const freshCheck = await validateBetLimits(clamped.items, betType, {
+                    max_cup: exceedData?.maxCup,
+                    max_usd: exceedData?.maxUsd
+                }, { userId: uid, sessionId, excludeBetId: null });
+                if (!freshCheck.ok) maxedMsg = maxedBlockFromExceedData(betType, freshCheck.exceedData);
+            } catch (e) {}
+            await safeEdit(ctx, maxedMsg || genericMsg, getMainKeyboard(ctx));
             if (ctx.session) delete ctx.session.pendingMaxedOverride;
             try { await ctx.deleteMessage(); } catch (e) {}
             return;
