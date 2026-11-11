@@ -2314,6 +2314,72 @@ function maxedSentences(betType, maxed, exceedData) {
     return sentences;
 }
 
+// ========== HELPER: Mensaje específico para resolución cruzada Web → Bot ==========
+// Construye "❌ El/La [tipo] XX ya fue/fueron apostado/a a su máximo permitido de X.XX [CUP/USD]."
+// usando los números que intersectan entre la apuesta pendiente del bot y el canon resuelto por la web.
+function buildCrossResolvedMessage(botItems, betType, exceedData, webCanonSet) {
+    if (!botItems || !exceedData || !webCanonSet || webCanonSet.size === 0) {
+        return '❌ Esta apuesta ya fue completada desde la Web-App.';
+    }
+
+    // El sustantivo según el tipo de apuesta
+    const typeNoun = (betType === 'fijo' || betType === 'corridos') ? 'número' : formatBetTypeLabel(betType).toLowerCase();
+    const nounPlural = typeNoun === 'número' ? 'números' : typeNoun === 'centena' ? 'centenas' : `${typeNoun}s`;
+
+    // Función para obtener el valor canónico de un item (igual que canonizeItemsSetBot)
+    const canonOf = (item) => {
+        if (betType === 'parle') {
+            return normalizeParleValue(item.numero) || item.numero;
+        }
+        return item.numero;
+    };
+
+    // Agrupar items del bot por número canónico y moneda, solo los que intersectan con lo resuelto por web
+    const cupNums = new Set();
+    const usdNums = new Set();
+    for (const item of botItems) {
+        const canon = String(canonOf(item));
+        if (!webCanonSet.has(canon)) continue; // solo los que intersectan con lo resuelto por web
+        const itemCup = item.cup !== undefined ? parseFloat(item.cup) : (item.currency === 'CUP' ? parseFloat(item.amount) : 0);
+        const itemUsd = item.usd !== undefined ? parseFloat(item.usd) : (item.currency === 'USD' ? parseFloat(item.amount) : 0);
+        if (itemCup > 0) cupNums.add(canon);
+        if (itemUsd > 0) usdNums.add(canon);
+    }
+
+    const sortNums = (nums) => [...nums].sort((a, b) => {
+        const na = parseInt(a, 10);
+        const nb = parseInt(b, 10);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return String(a).localeCompare(String(b));
+    });
+
+    const sentenceFor = (nums, max, currency) => {
+        const list = sortNums(nums);
+        if (list.length === 0) return null;
+        const isPlural = list.length > 1;
+        const subject = isPlural
+            ? `${typeNoun === 'centena' ? 'Las' : 'Los'} ${nounPlural} ${joinListWithY(list)}`
+            : `${typeNoun === 'centena' ? 'La' : 'El'} ${typeNoun} ${list[0]}`;
+        const verb = isPlural ? 'fueron' : 'fue';
+        const participle = isPlural
+            ? `${typeNoun === 'centena' ? 'apostadas' : 'apostados'}`
+            : `${typeNoun === 'centena' ? 'apostada' : 'apostado'}`;
+        return `${subject} ya ${verb} ${participle} a su máximo permitido de ${parseFloat(max).toFixed(2)} ${currency}.`;
+    };
+
+    const sentences = [];
+    if (exceedData.maxCup !== null && exceedData.maxCup !== undefined && cupNums.size > 0) {
+        const s = sentenceFor(cupNums, exceedData.maxCup, 'CUP');
+        if (s) sentences.push(s);
+    }
+    if (exceedData.maxUsd !== null && exceedData.maxUsd !== undefined && usdNums.size > 0) {
+        const s = sentenceFor(usdNums, exceedData.maxUsd, 'USD');
+        if (s) sentences.push(s);
+    }
+
+    return sentences.length > 0 ? `❌ ${sentences.join(' ')}` : '❌ Esta apuesta ya fue completada desde la Web-App.';
+}
+
 // Texto del aviso cuando hay números ya apostados a su máximo y al menos otro
 // número aprovechable. Una frase por moneda (CUP primero, luego USD) y la
 // pregunta. Espejo de backend.js; en el bot siempre es apuesta nueva, así que el
@@ -3700,7 +3766,8 @@ bot.action('bet_override_accept', async (ctx) => {
                     try { delete ctx.session.sessionId; } catch (e) {}
                     try { await ctx.deleteMessage(); } catch (e) {}
                     try { if (bot.pendingLimitModals) bot.pendingLimitModals.delete(uid); } catch (e) {}
-                    await ctx.reply('❌ Esta apuesta ya fue completada desde la Web-App.', getMainKeyboard(ctx)).catch(() => {});
+                    const msg = buildCrossResolvedMessage(overrideCheck.items, overrideCheck.betType, overrideCheck.exceedData, rw.canonSet);
+                    await ctx.reply(msg, getMainKeyboard(ctx)).catch(() => {});
                     return;
                 }
                 // Limpiar entrada stale si existe
@@ -3897,7 +3964,8 @@ bot.action('bet_override_reject', async (ctx) => {
                     try { delete ctx.session.sessionId; } catch (e) {}
                     try { await ctx.deleteMessage(); } catch (e) {}
                     try { if (bot.pendingLimitModals) bot.pendingLimitModals.delete(uid); } catch (e) {}
-                    await ctx.reply('❌ Esta apuesta ya fue completada desde la Web-App.', getMainKeyboard(ctx)).catch(() => {});
+                    const msg = buildCrossResolvedMessage(overrideCheck.items, overrideCheck.betType, overrideCheck.exceedData, rw.canonSet);
+                    await ctx.reply(msg, getMainKeyboard(ctx)).catch(() => {});
                     return;
                 }
                 // Limpiar entrada stale si existe
@@ -3998,7 +4066,8 @@ bot.action('bet_maxed_accept', async (ctx) => {
                     try { if (ctx.session) delete ctx.session.sessionId; } catch (e) {}
                     try { await ctx.deleteMessage(); } catch (e) {}
                     try { if (bot.pendingLimitModals) bot.pendingLimitModals.delete(uid); } catch (e) {}
-                    await ctx.reply('❌ Esta apuesta ya fue completada desde la Web-App.', getMainKeyboard(ctx)).catch(() => {});
+                    const msg = buildCrossResolvedMessage(pendingCheck.items, pendingCheck.betType, pendingCheck.exceedData, rw.canonSet);
+                    await ctx.reply(msg, getMainKeyboard(ctx)).catch(() => {});
                     return;
                 }
                 // Limpiar entrada stale si existe
@@ -4118,7 +4187,8 @@ bot.action('bet_maxed_abort', async (ctx) => {
                     try { if (ctx.session) delete ctx.session.sessionId; } catch (e) {}
                     try { await ctx.deleteMessage(); } catch (e) {}
                     try { if (bot.pendingLimitModals) bot.pendingLimitModals.delete(uid); } catch (e) {}
-                    await ctx.reply('❌ Esta apuesta ya fue completada desde la Web-App.', getMainKeyboard(ctx)).catch(() => {});
+                    const msg = buildCrossResolvedMessage(pendingCheck.items, pendingCheck.betType, pendingCheck.exceedData, rw.canonSet);
+                    await ctx.reply(msg, getMainKeyboard(ctx)).catch(() => {});
                     return;
                 }
                 // Limpiar entrada stale si existe (ya limpiado en check de conflicto si era stale)
