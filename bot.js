@@ -2575,6 +2575,14 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         return false;
     }
 
+    // Registrar canon resuelto por el bot para invalidación cruzada Web → Bot
+    try {
+        const cbot = canonizeItemsSetBot(items || [], betType);
+        if (cbot.size > 0) {
+            global.resolvedBotCanon.set(Number(uid), { canonSet: cbot, betType, sessionId: playSessionId, lottery: session?.lottery || null, at: Date.now() });
+        }
+    } catch (e) {}
+
     // Descontar el saldo SOLO después de que la jugada quedó guardada
     const { error: userUpdateError } = await supabase.from('users').update(updates).eq('telegram_id', uid);
     if (userUpdateError) {
