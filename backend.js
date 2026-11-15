@@ -3524,6 +3524,13 @@ app.post('/api/bets', async (req, res) => {
                     const maxedMsg = maxedBlockFromExceedData(betType, freshLimitCheck?.exceedData);
                     return res.status(400).json({ error: maxedMsg || genericMsg });
                 }
+                // El usuario confirmó omitir con un monto admisible concreto en el modal.
+                // Si mientras estaba abierto el bot consumió cupo, el recorte fresco
+                // ya no coincide: reabrir el modal con el monto real y NO registrar.
+                const freshOmit = admissibleStateFor(parsed.items, betType, freshLimitCheck.exceedData);
+                if (!clientAdmissibleMatches(req.body, freshOmit)) {
+                    return res.status(400).json(limitExceedConfirmablePayload(freshLimitCheck, freshOmit));
+                }
                 parsed.items = omitted.items;
                 totalCUP = omitted.totalCUP;
                 totalUSD = omitted.totalUSD;
