@@ -1625,10 +1625,15 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
             if (window.editingBetId) {
                 payload.betId = window.editingBetId;
             }
+            pendingLimitExceedData = null;
             sendBetRequest(payload);
         });
 
         let pendingBetPayload = null;
+        // Estado admisible (monto/líneas) que el modal clásico mostró al usuario.
+        // Se reenvía al confirmar para que el servidor detecte si cambió mientras
+        // el modal estaba abierto (p. ej. el bot apostó más al mismo número).
+        let pendingLimitExceedData = null;
         // 'edit' o 'bet': de qué flujo salió el aviso ⚠️ de números al máximo, para
         // que "No, abortar" sepa si hay algo que descartar o solo cerrar.
         let pendingMaxedFlow = null;
@@ -1673,19 +1678,55 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
         function acceptLimitOverride() {
             document.getElementById('limitOverrideModal').classList.add('hidden');
             const payload = pendingBetPayload;
+            const shown = pendingLimitExceedData;
             pendingBetPayload = null;
+            pendingLimitExceedData = null;
             if (!payload) return;
             payload.confirmLimitOverride = true;
+            delete payload.omitLimitOverride;
+            // Eco del monto admisible que el usuario vio en el modal. El backend
+            // lo compara con el fresco: si cambió (p. ej. el bot apostó más al
+            // mismo número), reabre el modal con el monto real en vez de
+            // registrar en silencio un importe distinto al confirmado.
+            if (shown) {
+                if (Array.isArray(shown.admissibleLines)) payload.expectedAdmissibleLines = shown.admissibleLines;
+                else delete payload.expectedAdmissibleLines;
+                if (typeof shown.admissibleCup === 'number') payload.expectedAdmissibleCup = shown.admissibleCup;
+                else delete payload.expectedAdmissibleCup;
+                if (typeof shown.admissibleUsd === 'number') payload.expectedAdmissibleUsd = shown.admissibleUsd;
+                else delete payload.expectedAdmissibleUsd;
+            } else {
+                delete payload.expectedAdmissibleLines;
+                delete payload.expectedAdmissibleCup;
+                delete payload.expectedAdmissibleUsd;
+            }
             sendBetRequest(payload);
         }
 
         function rejectLimitOverride() {
             document.getElementById('limitOverrideModal').classList.add('hidden');
             const payload = pendingBetPayload;
+            const shown = pendingLimitExceedData;
             pendingBetPayload = null;
+            pendingLimitExceedData = null;
             if (!payload) return;
             payload.omitLimitOverride = true;
             delete payload.confirmLimitOverride;
+            // Enviar lo que el usuario vio en el modal (igual que "Sí, apostar")
+            // para que el backend detecte si el monto admisible cambió mientras
+            // el modal estaba abierto (p. ej. el bot apostó más al mismo número).
+            if (shown) {
+                if (Array.isArray(shown.admissibleLines)) payload.expectedAdmissibleLines = shown.admissibleLines;
+                else delete payload.expectedAdmissibleLines;
+                if (typeof shown.admissibleCup === 'number') payload.expectedAdmissibleCup = shown.admissibleCup;
+                else delete payload.expectedAdmissibleCup;
+                if (typeof shown.admissibleUsd === 'number') payload.expectedAdmissibleUsd = shown.admissibleUsd;
+                else delete payload.expectedAdmissibleUsd;
+            } else {
+                delete payload.expectedAdmissibleLines;
+                delete payload.expectedAdmissibleCup;
+                delete payload.expectedAdmissibleUsd;
+            }
             sendBetRequest(payload);
         }
         window.acceptLimitOverride = acceptLimitOverride;
@@ -1706,15 +1747,21 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
             document.getElementById('maxedEditModal').classList.add('hidden');
             const payload = pendingBetPayload;
             pendingBetPayload = null;
+            pendingLimitExceedData = null;
             pendingMaxedFlow = null;
             if (!payload) return;
             payload.confirmLimitOverride = true;
+            // El modal ⚠️ no muestra montos admisibles: no se envía eco alguno.
+            delete payload.expectedAdmissibleLines;
+            delete payload.expectedAdmissibleCup;
+            delete payload.expectedAdmissibleUsd;
             sendBetRequest(payload);
         }
 
         function abortMaxedEdit() {
             document.getElementById('maxedEditModal').classList.add('hidden');
             pendingBetPayload = null;
+            pendingLimitExceedData = null;
             // Apostando no hay nada que descartar: la jugada ni siquiera se ha
             // registrado todavía, así que solo se cierra el aviso y el usuario se
             // queda en el formulario para corregir el texto a mano.
@@ -1734,6 +1781,7 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
         function dismissMaxedEdit() {
             document.getElementById('maxedEditModal').classList.add('hidden');
             pendingBetPayload = null;
+            pendingLimitExceedData = null;
             pendingMaxedFlow = null;
         }
         window.showMaxedEditModal = showMaxedEditModal;
@@ -1859,12 +1907,14 @@ Varios por línea: 17x32 17x62 32x62 con 3 CUP<br>`;
                         loadBets();
                     } else if (data.code === 'LIMIT_EXCEED_CONFIRMABLE' && data.exceedData) {
                         pendingBetPayload = payload;
+                        pendingLimitExceedData = data.exceedData;
                         showLimitOverrideModal(data.error, data.exceedData);
                     } else {
                         if (data.code === 'RESOLVED_ELSEWHERE') {
                             try { document.getElementById('limitOverrideModal')?.classList.add('hidden'); } catch (e) {}
                             try { document.getElementById('maxedEditModal')?.classList.add('hidden'); } catch (e) {}
                             pendingBetPayload = null;
+                            pendingLimitExceedData = null;
                             pendingMaxedFlow = null;
                             iziToast.error({ message: data.error || '❌ Esta jugada ya fue resuelta desde el bot.' });
                         } else {
