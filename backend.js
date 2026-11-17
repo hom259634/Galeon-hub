@@ -3293,7 +3293,7 @@ app.post('/api/bets', async (req, res) => {
                 // modal con el importe real en vez de registrar el recorte fresco
                 // en silencio. Sin `expected*` (modal ⚠️) no cambia nada.
                 if (!clientAdmissibleMatches(req.body, fresh)) {
-                    return res.status(400).json(limitExceedConfirmablePayload(limitCheck, fresh));
+                    return res.status(400).json(limitExceedConfirmablePayload(freshLimitCheck, fresh));
                 }
                 clampApplied = true;
                 clampedNums = exceededNumsInItems(parsed.items, betType, freshLimitCheck.exceedData);
@@ -3402,7 +3402,7 @@ app.post('/api/bets', async (req, res) => {
                 // cupo, el recorte fresco ya no coincide: se reabre el modal con
                 // el monto real y NO se registra ni se marca como resuelta.
                 if (!clientAdmissibleMatches(req.body, fresh)) {
-                    return res.status(400).json(limitExceedConfirmablePayload(limitCheck, fresh));
+                    return res.status(400).json(limitExceedConfirmablePayload(freshLimitCheck, fresh));
                 }
                 // Marcar resuelto desde web por intersección y matar pendings del bot
                 try {
