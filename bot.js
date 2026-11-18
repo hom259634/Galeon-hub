@@ -2580,6 +2580,12 @@ async function placeBetAndConfirm(ctx, { uid, user, betType, playSessionId, rawT
         const cbot = canonizeItemsSetBot(items || [], betType);
         if (cbot.size > 0) {
             global.resolvedBotCanon.set(Number(uid), { canonSet: cbot, betType, sessionId: playSessionId, lottery: session?.lottery || null, at: Date.now() });
+            // Notificar al web para invalide su modal y muestre el monto admisible actualizado
+            try {
+                if (bot && typeof bot.killBotPendingsByCanon === 'function') {
+                    bot.killBotPendingsByCanon(uid, cbot, playSessionId, betType, session?.lottery || null);
+                }
+            } catch (e) {}
         }
     } catch (e) {}
 

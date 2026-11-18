@@ -1752,12 +1752,12 @@ function clientAdmissibleMatches(body, fresh) {
 
 // Respuesta del modal clásico con el estado admisible fresco. Se usa tanto para
 // abrirlo la primera vez como para reabrirlo cuando el monto cambió.
-function limitExceedConfirmablePayload(limitCheck, fresh) {
+function limitExceedConfirmablePayload(freshLimitCheck, fresh) {
     return {
-        error: limitCheck.error,
+        error: freshLimitCheck.error,
         code: 'LIMIT_EXCEED_CONFIRMABLE',
         exceedData: {
-            ...limitCheck.exceedData,
+            ...freshLimitCheck.exceedData,
             admissibleCup: fresh.cup,
             admissibleUsd: fresh.usd,
             admissibleLines: fresh.lines
@@ -3295,15 +3295,31 @@ app.post('/api/bets', async (req, res) => {
                 if (!clientAdmissibleMatches(req.body, fresh)) {
                     return res.status(400).json(limitExceedConfirmablePayload(freshLimitCheck, fresh));
                 }
+                // Re-validación final antes del registro exitoso (evita race condition
+                // si el bot registró directo entre la verificación y el registro)
+                const finalLimitCheck = await checkExistingBetLimits({
+                    items: parsed.items,  // ya son los clamped.items en este punto
+                    betType,
+                    sessionId,
+                    userId,
+                    maxCup: freshLimitCheck.exceedData?.maxCup,
+                    maxUsd: freshLimitCheck.exceedData?.maxUsd
+                });
+                if (!finalLimitCheck.ok) {
+                    const maxedMsg = maxedBlockFromExceedData(betType, freshLimitCheck.exceedData);
+                    const genericMsg = `❌ Uno o más números ya están al monto máximo permitido. Tu jugada no se registró.`;
+                    return res.status(400).json({ error: maxedMsg || genericMsg });
+                }
                 clampApplied = true;
                 clampedNums = exceededNumsInItems(parsed.items, betType, freshLimitCheck.exceedData);
                 parsed.items = clamped.items;
                 totalCUP = clamped.totalCUP;
                 totalUSD = clamped.totalUSD;
                 effectiveRawText = serializeItemsToText(parsed.items, betType);
+                let cweb;
                 try {
                     try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {}
-                    const cweb = canonizeItemsSet(parsed.items, betType);
+                    cweb = canonizeItemsSet(parsed.items, betType);
                     if (cweb.size > 0) {
                         global.resolvedWebCanon.set(Number(userId), { canonSet: cweb, betType, sessionId, lottery, at: Date.now() });
                         await killBotPendingsByCanon(userId, cweb, sessionId, betType, lottery);
@@ -3403,6 +3419,21 @@ app.post('/api/bets', async (req, res) => {
                 // el monto real y NO se registra ni se marca como resuelta.
                 if (!clientAdmissibleMatches(req.body, fresh)) {
                     return res.status(400).json(limitExceedConfirmablePayload(freshLimitCheck, fresh));
+                }
+                // Re-validación final antes del registro exitoso (evita race condition
+                // si el bot registró directo entre la verificación y el registro)
+                const finalLimitCheck = await checkExistingBetLimits({
+                    items: parsed.items,  // ya son los clamped.items en este punto
+                    betType,
+                    sessionId,
+                    userId,
+                    maxCup: freshLimitCheck.exceedData?.maxCup,
+                    maxUsd: freshLimitCheck.exceedData?.maxUsd
+                });
+                if (!finalLimitCheck.ok) {
+                    const maxedMsg = maxedBlockFromExceedData(betType, freshLimitCheck.exceedData);
+                    const genericMsg = `❌ Uno o más números ya están al monto máximo permitido. Tu jugada no se registró.`;
+                    return res.status(400).json({ error: maxedMsg || genericMsg });
                 }
                 // Marcar resuelto desde web por intersección y matar pendings del bot
                 try {
@@ -7698,6 +7729,10 @@ try {
 
     // Compartir el tracker de notificaciones con bot.js
     bot.pendingNotifications = pendingNotifications;
+
+    // Exponer killBotPendingsByCanon al bot para que bot.js pueda invalidar pendings del web
+    // cuando el bot apuesta directo (consumiendo cupo) mientras el modal web está abierto.
+    bot.killBotPendingsByCanon = killBotPendingsByCanon;
 
     // Actualizar botInfo inmediatamente (sin esperar al launch)
     if (bot && bot.telegram && typeof bot.telegram.getMe === 'function') {
