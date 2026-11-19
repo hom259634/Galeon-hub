@@ -3218,28 +3218,7 @@ app.post('/api/bets', async (req, res) => {
                     sessionId: sessionId || null,
                     excludeBetId: betId || null
                 });
-                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web), ignorando stale > 5 min.
-                // Solo se devuelve RESOLVED_ELSEFOREWHERE si el número sigue excediendo con datos frescos;
-                // si el bot dejó cupo libre, la web puede seguir con el recorte.
-                try {
-                    const rb = global.resolvedBotCanon?.get(Number(userId));
-                    const isStale = rb && (Date.now() - (rb.at || 0)) > 5 * 60 * 1000;
-                    if (rb?.canonSet && !isStale && rb.lottery === lottery && rb.betType === betType) {
-                        const cwebCheck = canonizeItemsSet(parsed.items, betType);
-                        if (setsIntersect(cwebCheck, rb.canonSet)) {
-                            if (!freshLimitCheck.ok) {
-                                global.resolvedBotCanon?.delete(Number(userId));
-                                try { await closeBotLimitModal(userId, { lottery, betType, canonSet: cwebCheck }); } catch (e) {}
-                                const msg = buildCrossResolvedMessageBotWeb(parsed.items, betType, freshLimitCheck.exceedData, rb.canonSet);
-                                return res.status(400).json({ error: msg, code: 'RESOLVED_ELSEFOREWHERE' });
-                            }
-                            // El bot dejó cupo libre: permitir que la web continúe con el recorte
-                            global.resolvedBotCanon?.delete(Number(userId));
-                        }
-                    }
-                    // Limpiar entrada stale si existe
-                    if (isStale) { try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {} }
-                } catch (e) {}
+
                 // Confirmado: el recorte ajusta a `máximo − otras jugadas` cada
                 // número excedido. Para los que ya estaban en su tope eso es
                 // justo el monto que la jugada ya tenía (se conserva su wager); el
@@ -3356,28 +3335,7 @@ app.post('/api/bets', async (req, res) => {
                     sessionId: sessionId || null,
                     excludeBetId: betId || null
                 });
-                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web), ignorando stale > 5 min.
-                // Solo se devuelve RESOLVED_ELSEFOREWHERE si el número sigue excediendo con datos frescos;
-                // si el bot dejó cupo libre, la web puede seguir con el recorte.
-                try {
-                    const rb = global.resolvedBotCanon?.get(Number(userId));
-                    const isStale = rb && (Date.now() - (rb.at || 0)) > 5 * 60 * 1000;
-                    if (rb?.canonSet && !isStale && rb.lottery === lottery && rb.betType === betType) {
-                        const cwebCheck = canonizeItemsSet(parsed.items, betType);
-                        if (setsIntersect(cwebCheck, rb.canonSet)) {
-                            if (!freshLimitCheck.ok) {
-                                global.resolvedBotCanon?.delete(Number(userId));
-                                try { await closeBotLimitModal(userId, { lottery, betType, canonSet: cwebCheck }); } catch (e) {}
-                                const msg = buildCrossResolvedMessageBotWeb(parsed.items, betType, freshLimitCheck.exceedData, rb.canonSet);
-                                return res.status(400).json({ error: msg, code: 'RESOLVED_ELSEFOREWHERE' });
-                            }
-                            // El bot dejó cupo libre: permitir que la web continúe con el recorte
-                            global.resolvedBotCanon?.delete(Number(userId));
-                        }
-                    }
-                    // Limpiar entrada stale si existe
-                    if (isStale) { try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {} }
-                } catch (e) {}
+
                 const fresh = admissibleStateFor(parsed.items, betType, freshLimitCheck.exceedData);
                 const clamped = fresh.clamped;
                 if (clamped.totalCUP <= 0 && clamped.totalUSD <= 0) {
@@ -3459,28 +3417,7 @@ app.post('/api/bets', async (req, res) => {
                     sessionId: sessionId || null,
                     excludeBetId: betId || null
                 });
-                // Verificar si el bot ya resolvió esta jugada primero (Bot → Web), ignorando stale > 5 min.
-                // Solo se devuelve RESOLVED_ELSEFOREWHERE si el número sigue excediendo con datos frescos;
-                // si el bot dejó cupo libre, la web puede seguir con el recorte.
-                try {
-                    const rb = global.resolvedBotCanon?.get(Number(userId));
-                    const isStale = rb && (Date.now() - (rb.at || 0)) > 5 * 60 * 1000;
-                    if (rb?.canonSet && !isStale && rb.lottery === lottery && rb.betType === betType) {
-                        const cwebCheck = canonizeItemsSet(parsed.items, betType);
-                        if (setsIntersect(cwebCheck, rb.canonSet)) {
-                            if (!freshLimitCheck.ok) {
-                                global.resolvedBotCanon?.delete(Number(userId));
-                                try { await closeBotLimitModal(userId, { lottery, betType, canonSet: cwebCheck }); } catch (e) {}
-                                const msg = buildCrossResolvedMessageBotWeb(parsed.items, betType, freshLimitCheck.exceedData, rb.canonSet);
-                                return res.status(400).json({ error: msg, code: 'RESOLVED_ELSEFOREWHERE' });
-                            }
-                            // El bot dejó cupo libre: permitir que la web continúe con el recorte
-                            global.resolvedBotCanon?.delete(Number(userId));
-                        }
-                    }
-                    // Limpiar entrada stale si existe
-                    if (isStale) { try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {} }
-                } catch (e) {}
+
                 // Marcar resuelto desde web por intersección
                 try {
                     try { global.resolvedBotCanon?.delete(Number(userId)); } catch (e) {}
