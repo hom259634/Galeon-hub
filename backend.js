@@ -1600,7 +1600,7 @@ function omitExceededNumbers(items, betType, exceedData) {
 // Cubre el caso inverso: bot registró directo (sin modal) y luego la web
 // confirma un modal pendiente por el mismo número, lo que provocaría
 // sobreapuesta.
-async function checkExistingBetLimits({ items, betType, sessionId, userId, maxCup, maxUsd }) {
+async function checkExistingBetLimits({ items, betType, sessionId, userId, maxCup, maxUsd, excludeBetId }) {
     if (!sessionId || !userId) return { ok: true };
     if (maxCup === null && maxUsd === null) return { ok: true };
 
@@ -1620,12 +1620,14 @@ async function checkExistingBetLimits({ items, betType, sessionId, userId, maxCu
 
     let existingTotals = {};
     try {
-        const { data: existingBets } = await supabase
+        let query = supabase
             .from('bets')
             .select('items')
             .eq('user_id', userId)
             .eq('session_id', sessionId)
             .eq('bet_type', betType);
+        if (excludeBetId) query = query.neq('id', excludeBetId);
+        const { data: existingBets } = await query;
         for (const bet of (existingBets || [])) {
             for (const item of (bet.items || [])) {
                 const num = String(numOf(item));
@@ -3247,7 +3249,8 @@ app.post('/api/bets', async (req, res) => {
                     sessionId,
                     userId,
                     maxCup: freshLimitCheck.exceedData?.maxCup,
-                    maxUsd: freshLimitCheck.exceedData?.maxUsd
+                    maxUsd: freshLimitCheck.exceedData?.maxUsd,
+                    excludeBetId: betId || null
                 });
                 if (!limitCheckWeb.ok) {
                     try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
@@ -3277,12 +3280,13 @@ app.post('/api/bets', async (req, res) => {
                 // Re-validación final antes del registro exitoso (evita race condition
                 // si el bot registró directo entre la verificación y el registro)
                 const finalLimitCheck = await checkExistingBetLimits({
-                    items: parsed.items,  // ya son los clamped.items en este punto
+                    items: clamped.items,
                     betType,
                     sessionId,
                     userId,
                     maxCup: freshLimitCheck.exceedData?.maxCup,
-                    maxUsd: freshLimitCheck.exceedData?.maxUsd
+                    maxUsd: freshLimitCheck.exceedData?.maxUsd,
+                    excludeBetId: betId || null
                 });
                 if (!finalLimitCheck.ok) {
                     const maxedMsg = maxedBlockFromExceedData(betType, freshLimitCheck.exceedData);
@@ -3351,7 +3355,8 @@ app.post('/api/bets', async (req, res) => {
                     sessionId,
                     userId,
                     maxCup: freshLimitCheck.exceedData?.maxCup,
-                    maxUsd: freshLimitCheck.exceedData?.maxUsd
+                    maxUsd: freshLimitCheck.exceedData?.maxUsd,
+                    excludeBetId: betId || null
                 });
                 if (!limitCheckWeb.ok) {
                     try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
@@ -3381,12 +3386,13 @@ app.post('/api/bets', async (req, res) => {
                 // Re-validación final antes del registro exitoso (evita race condition
                 // si el bot registró directo entre la verificación y el registro)
                 const finalLimitCheck = await checkExistingBetLimits({
-                    items: parsed.items,  // ya son los clamped.items en este punto
+                    items: clamped.items,
                     betType,
                     sessionId,
                     userId,
                     maxCup: freshLimitCheck.exceedData?.maxCup,
-                    maxUsd: freshLimitCheck.exceedData?.maxUsd
+                    maxUsd: freshLimitCheck.exceedData?.maxUsd,
+                    excludeBetId: betId || null
                 });
                 if (!finalLimitCheck.ok) {
                     const maxedMsg = maxedBlockFromExceedData(betType, freshLimitCheck.exceedData);
@@ -3472,7 +3478,8 @@ app.post('/api/bets', async (req, res) => {
                     sessionId,
                     userId,
                     maxCup: freshLimitCheck.exceedData?.maxCup,
-                    maxUsd: freshLimitCheck.exceedData?.maxUsd
+                    maxUsd: freshLimitCheck.exceedData?.maxUsd,
+                    excludeBetId: betId || null
                 });
                 if (!limitCheckWeb.ok) {
                     try { await closeBotLimitModal(userId, { lottery, betType, canonSet: canonizeItemsSet(parsed.items, betType) }); } catch (e) {}
