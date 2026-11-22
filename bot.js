@@ -1081,7 +1081,7 @@ async function fetchElToqueRates(retries = 3, baseDelay = 3000) {
 }
 // ========== END FETCH EL TOQUE RATES ==========
 
-// Encuentra el índice del mensaje de tasas más reciente de @eltoquecom2.
+// Encuentra el índice del mensaje de tasas más reciente de @eltoquecom.
 // Prioriza el marcador "Actualización de tasas" (único y sin ambigüedad) y
 // valida que la fecha del mensaje ("Fecha: DD/MM/YYYY") corresponda al día de
 // hoy en la zona horaria configurada, para no guardar tasas de días anteriores.
@@ -1173,13 +1173,13 @@ function findLatestCryptoRatesMessageIndex(html) {
     return findLatestRatesMessageIndex(html);
 }
 
-// ========== FETCH TASAS DESDE TELEGRAM @eltoquecom2 ==========
+// ========== FETCH TASAS DESDE TELEGRAM @eltoquecom ==========
 async function fetchTelegramRates(retries = 2, baseDelay = 2000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            console.log(`[Telegram] Fetching rates from @eltoquecom2 (intento ${attempt}/${retries})...`);
+            console.log(`[Telegram] Fetching rates from @eltoquecom (intento ${attempt}/${retries})...`);
 
-            const resp = await axios.get('https://t.me/s/eltoquecom2', {
+            const resp = await axios.get('https://t.me/s/eltoquecom', {
                 timeout: 15000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -1257,7 +1257,7 @@ async function fetchTelegramRates(retries = 2, baseDelay = 2000) {
 }
 // ========== END FETCH TELEGRAM RATES ==========
 
-// ========== FETCH TASAS USDT/TRX POR OCR DE IMÁGENES @eltoquecom2 ==========
+// ========== FETCH TASAS USDT/TRX POR OCR DE IMÁGENES @eltoquecom ==========
 async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
     if (!OCR_API_KEY) {
         console.warn('[OCR] No hay API key (OCR_API_KEY). Omitiendo OCR.');
@@ -1410,9 +1410,9 @@ async function fetchOCRRatesFromImage(retries = 2, baseDelay = 2000) {
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            console.log(`[OCR] Intento ${attempt}/${retries}: Buscando imágenes en @eltoquecom2...`);
+            console.log(`[OCR] Intento ${attempt}/${retries}: Buscando imágenes en @eltoquecom...`);
 
-            const resp = await axios.get('https://t.me/s/eltoquecom2', {
+            const resp = await axios.get('https://t.me/s/eltoquecom', {
                 timeout: 15000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -8795,10 +8795,10 @@ cron.schedule('0 0 * * *', () => {
     notifyDailyBetsReport().catch(e => console.error('Error en cron de jugadas del día:', e?.message || e));
 }, { timezone: TIMEZONE });
 
-// Cron 7:31 AM - Colectar tasas desde Telegram @eltoquecom2 (SIN broadcast)
+// Cron 7:31 AM - Colectar tasas desde Telegram @eltoquecom (SIN broadcast)
 cron.schedule('31 7 * * *', async () => {
     try {
-        console.log('[Tasas 7:31] Colectando tasas desde Telegram @eltoquecom2...');
+        console.log('[Tasas 7:31] Colectando tasas desde Telegram @eltoquecom...');
         const rates = await fetchTelegramRates();
         const collected = { usd: false, mlc: false, usdt: false, trx: false };
         if (rates && (rates.usd != null || rates.mlc != null)) {
